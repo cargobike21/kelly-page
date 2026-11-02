@@ -1,0 +1,131 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mesh rooms tests</title>
+<style>body{font:13px Consolas,monospace;background:#0b0f14;color:#dde}.ok{color:#3d8}.bad{color:#f55}</style>
+</head><body>
+<h3>Kelly Page -- Rooms (js/meshrooms.js + meshcore.js room frames) against the simulated node</h3>
+<pre id="out">running…</pre>
+<div class="card rp-card" id="rm-card" hidden><span id="rm-tag"></span><input type="checkbox" id="rm-on"><div id="rm-body"></div></div>
+<script src="../js/meshcore.js"></script>
+<script src="../js/meshcoresim.js"></script>
+<script src="../js/meshrooms.js"></script>
+<script>
+// The real module, a stub Kelly (k), and a real meshcore.js Session wired to the sim (delays 50x shorter).
+// Runs in real time (~25 s: the wrong-password login waits out its timeout) -- open it in Chrome/Edge, or headless over
+// DevTools and read #out; --virtual-time-budget stalls on the IndexedDB calls. -> RESULT: ALL PASS
+const MC = window.KellyMeshCore, SIM = window.KellyMeshCoreSim, out = [], fails = [];
+const tick = (ms = 0) => new Promise(r => setTimeout(r, ms));
+const until = async (fn, ms = 4000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = fn(); if (v) return v; await tick(10); } return fn(); };
+function eq(name, got, want) {
+  if (String(got) === String(want)) out.push(`<span class="ok">PASS ${name}</span>`);
+  else { out.push(`<span class="bad">FAIL ${name}: got ${got} want ${want}</span>`); fails.push(name); }
+}
+const hex = b => Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+const $ = s => document.querySelector(s), esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const mem = {}, store = { get: (key, d) => key in mem ? JSON.parse(mem[key]) : d, set: (key, v) => { mem[key] = JSON.stringify(v); } };
+const toasts = [], dms = [];
+const texts = () => [...document.querySelectorAll('.rm-post')].map(p => `${p.querySelector('.rm-meta b').textContent}: ${p.querySelector('.rm-text').textContent}`);
+(async () => {
+  try {
+    await new Promise(r => { const q = indexedDB.deleteDatabase('kelly-mesh-rooms'); q.onsuccess = q.onerror = q.onblocked = r; });
+    // ---- frames (layouts from simple_room_server v1.18.0 pushPostToClient + companion queueMessage)
+    const rk = SIM.keyOf('Ipswich Chat Room'), ak = SIM.keyOf('VK4ZR Romeo');
+    const f = Uint8Array.from([16, 24, 0, 0, ...rk.subarray(0, 6), 0xff, 2, 0x10, 0x20, 0x30, 0x68, ...ak.subarray(0, 4), ...new TextEncoder().encode('Hi all')]);
+    const rp = MC.parseRoomPost(f);
+    eq('parseRoomPost: room prefix, author prefix, ts, text, snr', `${rp.room === hex(rk.subarray(0, 6))} ${rp.authorPrefix === hex(ak.subarray(0, 4))} ${rp.ts} ${rp.text} ${rp.snr}`, `true true ${0x68302010} Hi all 6`);
+    eq('parseMsg: type 2 carries .author; text after the prefix', `${MC.parseMsg(f).author === hex(ak.subarray(0, 4))} ${MC.parseMsg(f).text}`, 'true Hi all');
+    const f7 = Uint8Array.from([7, ...rk.subarray(0, 6), 1, 2, 1, 0, 0, 0x68, ...ak.subarray(0, 4), 0x41, 0]);
+    eq('parseRoomPost: a pre-V3 frame (7), trailing NUL dropped', `${MC.parseRoomPost(f7).text} ${MC.parseRoomPost(f7).hops}`, 'A 1');
+    f[11] = 0; eq('parseRoomPost: a plain DM is not a post', MC.parseRoomPost(f), null);
+
+    const sim = SIM.create({ seed: 5, sched: (fn, ms) => { const t = setTimeout(fn, Math.ceil(ms / 50)); return () => clearTimeout(t); } });
+    const nodes = new Map(), ms = {};
+    let session, rm, page = 'mesh';
+    const framer = new MC.Framer(f => session.onFrame(f));
+    sim.onFrame(f => { const b = new Uint8Array(3 + f.length); b[0] = 0x3e; b[1] = f.length & 255; b[2] = f.length >> 8; b.set(f, 3); framer.push(b); });
+    session = MC.DRIVER.Session({ send: async b => sim.write(b), node: n => nodes.set(n.num, n), self: () => {}, text: m => { if (!(m.dm && m.type === 2 && rm.post(m))) dms.push(m); },
+      ack: (msg, state) => { if (msg) msg.state = state; rm.render(); }, channels: () => {}, status: () => {}, log: () => {}, stat: () => {} });
+    await session.start();
+    const mk = () => window.KellyMeshRooms({ $, esc, store, toast: (i, t, d, c) => toasts.push(`${t} | ${d} | ${c}`), addEvent: () => {}, dirty: () => rm.render(), fmtAgo: () => 'just now', currentPage: () => page,
+      ms, save: () => {}, session: () => session, caps: () => MC.DRIVER.caps, nodes: () => nodes.values(), online: () => true, sfx: () => {}, F: () => {} });
+    rm = mk(); rm.init(); rm.render();
+    eq('off by default: the card says so', `${$('#rm-tag').textContent} ${/Off:/.test($('#rm-body').textContent)}`, 'off true');
+    sim.inject.roomPost(1, 'while off');   // not logged in: nothing pushed, and with the flag off a post would be a DM
+    eq('post(): off -> false (it stays a DM)', rm.post({ dm: true, type: 2, prefix: hex(rk.subarray(0, 6)), ts: 1, author: '00000000', text: 'x' }), false);
+    $('#rm-on').checked = true; $('#rm-on').onchange({ target: $('#rm-on') });
+    eq('on: the room server from the contacts (type 3)', `${$('#rm-tag').textContent} | ${$('.rm-room').textContent.trim()}`, '1 room | 🏠 Ipswich Chat Room');
+
+    // a wrong password: no answer, a timeout (~16 s on air)
+    $('#rm-pw').value = 'nope'; $('#rm-login').click();
+    await until(() => $('.rp-err'), 40000);
+    eq('wrong password: no answer -> a plain-English timeout', /wrong password, or the room is out of range/.test($('.rp-err') && $('.rp-err').textContent), true);
+
+    // guest login -> posts pushed one at a time, authors named from the contacts
+    $('#rm-pw').value = 'hello'; $('#rm-rem').checked = false; $('#rm-login').click();
+    await until(() => texts().length >= 7, 8000);
+    eq('guest login: the Guest chip', $('.rp-chip.ok') && $('.rp-chip.ok').textContent, '👤 Guest');
+    eq('password not remembered unless ticked', JSON.stringify(store.get('meshRoomPw', {})), '{}');
+    const t = texts();
+    eq('all 7 posts, oldest first (6 at start + one while we were away)', t.length, 7);
+    eq('the room\'s own notice', t[0].startsWith('Ipswich Chat Room (notice): Welcome!'), true);
+    eq('an author from the contacts, by name', t[1], 'VK4ZB Bravo Heltec: Anyone tried 2-byte path hashes yet? Working well here.');
+    eq('an author with no contact: a short key', t[3], `${hex(SIM.keyOf('Gold Coast Gary').subarray(0, 3))}…: First post from the Coast, hello Ipswich`);
+    eq('room posts are not DMs', dms.length, 0);
+
+    // post -> delivered (the room's ACK), never echoed back
+    $('#rm-text').value = 'Hello room from Kelly'; $('#rm-post').click();
+    await until(() => /in the room/.test($('#rm-body').textContent), 4000);
+    eq('a post: shown as yours, delivered', `${texts().slice(-1)[0]} ${/✓ in the room/.test($('#rm-body').textContent)}`, 'You: Hello room from Kelly true');
+    eq('... and the room has it', sim.state().rooms[0].last, 'Hello room from Kelly');
+    await tick(300);
+    eq('... and it is not sent back to us', texts().filter(x => /Hello room from Kelly/.test(x)).length, 1);
+
+    // unread while away from the page; read once it's shown
+    page = 'dash';
+    sim.inject.roomPost(3, 'Romeo here, copy');
+    await until(() => rm.unread(rk.length ? hex(rk) : '') > 0, 3000);
+    eq('a new post while on another page: unread 1', rm.unread(hex(rk)), 1);
+    page = 'mesh'; rm.render();
+    eq('... read once the room is shown', rm.unread(hex(rk)), 0);
+
+    // load older: past 30 shown
+    for (let i = 0; i < 30; i++) sim.inject.roomPost(1 + (i % 3), `filler ${i}`);
+    await until(() => store && rm.rooms().length && document.querySelectorAll('.rm-post').length >= 30 && /filler 29/.test($('#rm-body').textContent), 8000);
+    const older = $('[data-rm="older"]');
+    eq('more than 30 posts: "Load older" offered', !!older && /more here/.test(older.textContent), true);
+    older.click();
+    eq('Load older shows them all', document.querySelectorAll('.rm-post').length, 39);
+    const again = $('[data-rm="again"]');
+    eq('all shown: "Ask the room again" offered', !!again, true);
+    again.click();
+    await until(() => toasts.some(x => /^Asked/.test(x)), 3000);
+    await tick(1200);
+    eq('ask again: the room re-sends what it holds; Kelly keeps one copy each', document.querySelectorAll('.rm-post').length, 39);
+
+    // kept in IndexedDB: a fresh module (a page reload) has them
+    const before = document.querySelectorAll('.rm-post').length;
+    { const c = $('#rm-card'); c.replaceWith(c.cloneNode(true)); }   // the old module's listeners go with the old element
+    rm = mk(); rm.init();
+    await until(() => document.querySelectorAll('.rm-post').length > 0, 3000);
+    $('[data-rm="older"]') && $('[data-rm="older"]').click();
+    eq('posts kept in IndexedDB across a reload', document.querySelectorAll('.rm-post').length, before);
+
+    // blank password -> read only (the room already has us at read/write: a fresh node is needed for that)
+    const sim2 = SIM.create({ seed: 9, sched: (fn, ms) => { const t = setTimeout(fn, Math.ceil(ms / 50)); return () => clearTimeout(t); } });
+    sim.onFrame(() => {});
+    sim2.onFrame(f => { const b = new Uint8Array(3 + f.length); b[0] = 0x3e; b[1] = f.length & 255; b[2] = f.length >> 8; b.set(f, 3); framer.push(b); });
+    const s2 = MC.DRIVER.Session({ send: async b => sim2.write(b), node: () => {}, self: () => {}, text: m => rm.post(m), ack: () => {}, channels: () => {}, status: () => {}, log: () => {}, stat: () => {} });
+    session = s2; await s2.start();
+    rm.online();
+    $('#rm-pw').value = ''; $('#rm-rem').checked = true; $('#rm-login').click();
+    await until(() => $('.rp-chip.ok'), 4000);
+    eq('blank password: read only, the post box is off', `${$('.rp-chip.ok').textContent} ${$('#rm-text').disabled}`, '👀 Read only true');
+    eq('remember ticked: kept for that room (blank = read only)', JSON.stringify(Object.values(store.get('meshRoomPw', {}))), '[""]');
+    const r2 = await s2.roomLogin([...nodes.values()].find(n => n.role === 3), 'roomadmin');
+    eq('roomLogin(admin): admin, can post, acl 3, fw level 1', `${r2.admin} ${r2.canPost} ${r2.perms} ${r2.fwLevel}`, 'true true 3 1');
+    sim.stop(); sim2.stop();
+  } catch (e) { out.push(`<span class="bad">FAIL exception: ${e.message}\n${e.stack}</span>`); fails.push('exception'); }
+  out.push(fails.length ? `RESULT: FAIL ${fails.join(', ')}` : 'RESULT: ALL PASS');
+  document.getElementById('out').innerHTML = out.join('\n');
+})();
+</script>
+</body></html>

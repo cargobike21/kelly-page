@@ -1,0 +1,210 @@
+/* Kelly Page -- Station SCADA tab (LoRa Mesh). Kelly's theme tokens; the TX/RX/USB/error colours come from the
+   page's config as --ss-* (stationscada-core.js DEFAULTS.colors). House rules: animations are per event and finite
+   (no `infinite`), and move transform/opacity only. */
+.ss { --ss-tx: #ffb020; --ss-rx: #39ff88; --ss-rxalt: #00e5ff; --ss-usb: #3d8bff; --ss-err: #ff2bd6; --ss-idle: #2c3e68;
+  --ss-ok: var(--lime); --ss-warn: var(--amber); --ss-alarm: var(--red); display: flex; flex-direction: column; gap: 16px; position: relative; }
+.ss [data-lv="ok"] { --lv: var(--ss-ok); } .ss [data-lv="warn"] { --lv: var(--ss-warn); } .ss [data-lv="alarm"] { --lv: var(--ss-alarm); }
+
+/* top bar */
+.ss-bar-top { display: flex; flex-direction: column; gap: 10px; }
+.ss-title { display: flex; align-items: center; gap: 12px; }
+.ss-title h2 { margin: 0; font: 900 20px var(--display); letter-spacing: .06em; }
+.ss-title small { color: var(--dim); }
+.ss-logo { font-size: 28px; }
+.ss-status { display: flex; flex-wrap: wrap; gap: 6px 14px; font: 600 12.5px var(--mono); color: var(--dim); }
+.ss-status b.ok { color: var(--ss-ok); } .ss-status b.alarm { color: var(--ss-alarm); }
+.ss-ctl { align-items: flex-end; }
+.ss-snd { display: flex; align-items: center; gap: 8px; }
+.ss-snd input { width: 110px; }
+.ss-inject .btn { padding: 4px 9px; }
+
+/* the mimic */
+.ss-mimic-card { padding: 0; overflow: hidden; position: relative; }
+.ss-mimic { display: block; width: 100%; height: auto; font-family: var(--mono); }
+.ss-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 8px 14px; font: 600 12px var(--mono); color: var(--dim); border-top: 1px solid var(--line); }
+.ss-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+.ss-mimic #ss-sky-day, .ss-mimic #ss-sky-dusk, .ss-stars, .ss-clouds { transition: opacity 2s linear; }
+.ss-stars circle { fill: #dfe8ff; }
+.ss-sun { transition: transform 1.9s linear, opacity 2s; }
+.ss-cloud { transition: transform 1.9s linear; }
+.ss-clouds path { fill: rgba(220, 230, 245, .75); }
+.ss-hills { fill: #0c1a2e; stroke: #1c3354; }
+.ss-ground { fill: #070d18; }
+.ss-roof { fill: #1a2442; stroke: #3a4c7a; stroke-width: 2; }
+.ss-wall { fill: #121a33; stroke: #2c3e68; stroke-width: 2; }
+.ss-room { fill: #0a1022; stroke: #1f2d4f; }
+.ss-window { fill: rgba(0, 229, 255, .08); stroke: #2c3e68; } .ss-wframe { stroke: #2c3e68; stroke-width: 2; }
+.ss-roomlbl { fill: var(--mute); font-size: 11px; letter-spacing: .2em; }
+.ss-desk { fill: #3a2f25; stroke: #3a2f25; stroke-width: 3; }
+.ss-box { stroke-width: 1.6; } .ss-box.rak { fill: #102a4a; stroke: #3d8bff; } .ss-box.pi { fill: #0f3a22; stroke: #39ff88; } .ss-box.p1 { fill: #1d2433; stroke: #9fb3d9; }
+.ss-boxlbl { fill: #cfe0ff; font-size: 10.5px; font-weight: 600; }
+.ss-mon { fill: #050a14; stroke: #3a4c7a; stroke-width: 2; } .ss-montxt { fill: var(--cyan); font-size: 8px; } .ss-monbars rect { fill: rgba(0, 229, 255, .45); }
+.ss-ant { stroke: #c9d6ef; stroke-width: 2.4; stroke-linecap: round; }
+.ss-anttip { fill: #5b6b8c; transition: fill .15s; } .ss-anttip.glow { filter: none; }
+.ss-led { fill: #1a2236; stroke: rgba(0, 0, 0, .5); transition: fill .08s; }
+.ss-led.pwr.on { fill: #39ff88; } .ss-led.tx.on { fill: var(--ss-tx); } .ss-led.rx.on { fill: var(--ss-rx); } .ss-led.usb.on { fill: var(--ss-usb); }
+.ss-ledlbl { fill: var(--mute); font-size: 6.5px; letter-spacing: .08em; }
+.ss-usb { fill: none; stroke: var(--ss-usb); stroke-width: 3; stroke-linecap: round; opacity: .7; }
+.ss-usb.down { stroke: var(--ss-alarm); stroke-dasharray: 4 5; opacity: 1; }
+.ss-guy { stroke: #2c3e68; stroke-width: 1; }
+.ss-pole { fill: #8a97b3; }
+.ss-panel { fill: #14306b; stroke: #9fb3d9; stroke-width: 1.4; } .ss-panelgrid { stroke: rgba(160, 190, 255, .35); }
+.ss-battshell { fill: #0a1020; stroke: #9fb3d9; } .ss-battnub { fill: #9fb3d9; }
+.ss-battfill { fill: var(--ss-ok); transition: width 1s; } .ss-battfill.warn { fill: var(--ss-warn); } .ss-battfill.alarm { fill: var(--ss-alarm); }
+.ss-flow { stroke: #ffd25a; stroke-linecap: round; transition: stroke-width 1s, opacity 1s; }
+.ss-solarlbl { fill: #ffd25a; font-size: 11px; }
+.ss-arr rect { fill: #262b3b; stroke: #8a97b3; } .ss-arr text { fill: var(--mute); font-size: 10px; }
+.ss-arr.hit rect { fill: #fff3b0; stroke: #ffd25a; }
+.ss-earth { stroke: #6b7894; stroke-width: 2; }
+.ss-tag rect { fill: rgba(5, 9, 18, .88); stroke: var(--ss-ok); stroke-width: 1.3; }
+.ss-tag text { fill: #e8f1ff; font-size: 11px; font-weight: 600; letter-spacing: .04em; }
+.ss-tag.warn rect { stroke: var(--ss-warn); fill: rgba(60, 40, 0, .9); } .ss-tag.warn text { fill: var(--ss-warn); }
+.ss-tag.alarm rect { stroke: var(--ss-alarm); fill: rgba(70, 0, 16, .92); stroke-width: 2; } .ss-tag.alarm text { fill: #ffd0d8; }
+.ss-link { fill: none; stroke: var(--ss-idle); stroke-width: 1.2; stroke-dasharray: 3 6; transition: stroke .3s; }
+.ss-link.hot { stroke: var(--ss-tx); stroke-width: 2.4; stroke-dasharray: none; }
+.ss-tower { fill: none; stroke: #6b7894; stroke-width: 1.6; } rect.ss-tower { fill: #1d2433; }
+.ss-nb { cursor: pointer; } .ss-nb.sel .ss-nname { fill: var(--cyan); } .ss-nb:focus { outline: none; } .ss-nb:focus .ss-nname { text-decoration: underline; }
+.ss-nname { fill: #b8c6e6; font-size: 10px; } .ss-nsnr { fill: var(--mute); font-size: 9px; }
+.ss-meshpt circle { fill: none; stroke: var(--mute); stroke-dasharray: 2 3; } .ss-meshpt text { fill: var(--mute); font-size: 9.5px; }
+.ss-caption { fill: var(--ss-rxalt); font-size: 11.5px; font-weight: 600; }
+.ss-clock { fill: #e8f1ff; font-size: 13px; font-weight: 600; opacity: .85; }
+.ss-pulse text { font-size: 10px; font-weight: 700; paint-order: stroke; stroke: rgba(3, 6, 15, .85); stroke-width: 3px; }
+.ss-ring { fill: none; stroke-width: 2; transform-box: fill-box; transform-origin: center; animation: ssring .9s ease-out 1 forwards; }
+@keyframes ssring { from { transform: scale(.4); opacity: 1; } to { transform: scale(4.2); opacity: 0; } }
+.ss-bolt path { fill: none; stroke: #fff6c8; stroke-width: 3; stroke-linejoin: bevel; }
+.ss-bolt.go { animation: ssbolt .6s ease-out 1; } .ss-flashov { fill: #fff; } .ss-flashov.go { animation: ssflash .5s ease-out 1; }
+@keyframes ssbolt { 0%, 30% { opacity: 1; } 15% { opacity: .2; } 100% { opacity: 0; } }
+@keyframes ssflash { 0% { opacity: .35; } 100% { opacity: 0; } }
+
+/* device cards: gauges, bars, readouts */
+.ss-devs { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 16px; }
+.ss-dev-card { border-top: 3px solid var(--ss-ok); }
+.ss-dev-card[data-lv="warn"] { border-top-color: var(--ss-warn); } .ss-dev-card[data-lv="alarm"] { border-top-color: var(--ss-alarm); }
+.ss-dev-card h2 { font-size: 15px; }
+.ss-gauges { display: flex; gap: 14px; align-items: center; margin-bottom: 8px; }
+.ss-gauge { width: 130px; flex: none; text-align: center; position: relative; --lv: var(--cyan); }
+.ss-gauge svg { width: 100%; display: block; }
+.ss-gtrack { fill: none; stroke: #1b2740; stroke-width: 9; stroke-linecap: round; }
+.ss-gval { fill: none; stroke: var(--lv); stroke-width: 9; stroke-linecap: round; stroke-dasharray: 0 100; transition: stroke-dasharray .6s; }
+.ss-gneedle { transform-box: view-box; transform-origin: 60px 66px; transition: transform .6s; }
+.ss-gneedle path { stroke: #e8f1ff; stroke-width: 2.4; stroke-linecap: round; } .ss-gneedle circle { fill: #e8f1ff; }
+.ss-gnum { display: block; margin-top: -6px; font: 700 20px var(--mono); }
+.ss-gauge small, .ss-gauge i { color: var(--dim); font-style: normal; font-size: 12px; }
+.ss-gauge[data-lv="warn"] .ss-gnum, .ss-gauge[data-lv="alarm"] .ss-gnum { color: var(--lv); }
+.ss-bars { flex: 1; display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.ss-bar { display: grid; grid-template-columns: 78px 1fr 52px 28px; align-items: center; gap: 6px; font-size: 12.5px; --lv: var(--cyan); }
+.ss-bar span { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ss-bar i { height: 9px; background: #101a33; border-radius: 5px; overflow: hidden; }
+.ss-bar i b { display: block; height: 100%; background: var(--lv); transform-origin: left; transform: scaleX(0); transition: transform .6s; border-radius: 5px; }
+.ss-bar em { font: 600 12.5px var(--mono); font-style: normal; text-align: right; } .ss-bar small { color: var(--mute); }
+.ss-bar[data-lv="warn"] em, .ss-bar[data-lv="alarm"] em { color: var(--lv); }
+.ss-ros { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 2px 12px; margin: 0; }
+.ss-ro { display: flex; justify-content: space-between; gap: 6px; padding: 3px 0; border-bottom: 1px dashed #17223f; font-size: 12.5px; }
+.ss-ro dt { color: var(--dim); } .ss-ro dd { margin: 0; font: 600 12.5px var(--mono); text-align: right; }
+.ss-ro dd i { color: var(--mute); font-style: normal; }
+.ss-ro[data-lv="warn"] dd, .ss-ro[data-lv="alarm"] dd { color: var(--lv); }
+
+/* the component grid */
+.ss-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; align-items: start; }
+.ss-wide { grid-column: 1 / -1; }
+.ss-comp.ss-pop { box-shadow: 0 0 0 2px var(--cyan); transition: box-shadow .2s; }
+.ss-logwrap { max-height: 260px; overflow: auto; }
+.ss-log, .ss-hist, .ss-nt { width: 100%; border-collapse: collapse; font: 500 12px var(--mono); }
+.ss-log th, .ss-hist th, .ss-nt th { position: sticky; top: 0; background: var(--panel-solid); color: var(--dim); text-align: left; font-weight: 600; padding: 4px 6px; }
+.ss-log td, .ss-hist td, .ss-nt td { padding: 3px 6px; border-bottom: 1px solid #121c36; white-space: nowrap; }
+.ss-log tr, .ss-nt tr[data-id] { cursor: pointer; } .ss-log tr:hover td, .ss-nt tr:hover td { background: rgba(0, 229, 255, .06); }
+.ss-log tr.sel td, .ss-nt tr.sel td { background: rgba(0, 229, 255, .12); }
+.ss-hist tr.warn td { color: var(--ss-warn); } .ss-hist tr.alarm td { color: var(--ss-alarm); }
+.ss-histwrap { max-height: 180px; overflow: auto; margin-top: 10px; }
+.ss-kv { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ss-kv th { text-align: left; color: var(--dim); font-weight: 600; padding: 3px 10px 3px 0; vertical-align: top; white-space: nowrap; }
+.ss-kv td { padding: 3px 0; font-family: var(--mono); font-size: 12px; word-break: break-word; }
+.ss-kv tr.warn td { color: var(--ss-warn); } .ss-kv tr.alarm td { color: var(--ss-alarm); } .ss-kv tr.ok td { color: var(--ss-ok); }
+.ss-hex { margin: 10px 0 0; padding: 10px; background: #030712; border: 1px solid var(--line); border-radius: 10px; font: 11.5px/1.5 var(--mono); color: #9fd8ff; overflow: auto; max-height: 220px; }
+.ss-wf { width: 100%; height: 150px; display: block; border-radius: 10px; border: 1px solid var(--line); image-rendering: pixelated; background: #03060f; }
+.ss-wfaxis { display: flex; justify-content: space-between; margin-top: 4px; font-family: var(--mono); }
+.ss-nsel { max-width: 260px; }
+.ss-fade { position: relative; height: 26px; margin: 8px 0 4px; background: linear-gradient(90deg, rgba(255, 59, 92, .25) 0 15%, rgba(255, 176, 32, .2) 15% 30%, rgba(57, 255, 136, .14) 30%); border-radius: 6px; overflow: hidden;
+  display: flex; justify-content: space-between; align-items: flex-end; font: 10px var(--mono); color: var(--dim); padding: 0 4px; }
+.ss-fade i { position: absolute; left: 0; top: 0; height: 12px; width: 100%; background: var(--lv); transform-origin: left; transition: transform .6s; }
+.ss-fz { width: 100%; height: auto; display: block; }
+.ss-fz-zone { fill: rgba(0, 229, 255, .12); stroke: rgba(0, 229, 255, .6); stroke-dasharray: 4 3; }
+.ss-fz-gnd { fill: #1a2a1c; stroke: #3d6b44; } .ss-fz-obs { fill: #3d6b44; }
+.ss-fz-los { stroke: var(--ss-tx); stroke-width: 1.6; } .ss-fz-t { fill: var(--dim); font: 10px var(--mono); }
+.ss-fz-w { fill: var(--ss-ok); } .ss-fz-w.warn { fill: var(--ss-warn); } .ss-fz-w.alarm { fill: var(--ss-alarm); }
+.ss-fz-v { margin: 6px 0; } .ss-fz-v b { font: 700 18px var(--mono); color: var(--lv); }
+.ss-air { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.ss-dial { width: 170px; flex: none; }
+.ss-dialwarn { fill: none; stroke: rgba(255, 59, 92, .55); stroke-width: 9; }
+.ss-dialneedle { transform-box: view-box; transform-origin: 80px 86px; transition: transform .8s; }
+.ss-dialneedle path { stroke: #e8f1ff; stroke-width: 2.6; stroke-linecap: round; } .ss-dialneedle circle { fill: #e8f1ff; }
+.ss-dt { fill: var(--mute); font: 9px var(--mono); }
+.ss-big { display: block; font: 700 24px var(--mono); }
+.ss-air > div { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 6px; }
+.ss-air small { color: var(--dim); }
+#ss-air-warn[data-lv="warn"], #ss-air-warn[data-lv="alarm"] { color: var(--lv); }
+.ss-airtypes { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.ss-sflow { display: flex; align-items: center; justify-content: space-around; gap: 8px; text-align: center; margin-bottom: 8px; }
+.ss-sflow b { display: block; font: 700 18px var(--mono); } .ss-sflow small { color: var(--dim); } .ss-arrow { color: #ffd25a; font-size: 20px; }
+.ss-fc { width: 100%; height: auto; display: block; }
+.ss-fcgrid line { stroke: var(--chart-grid); } .ss-fcgrid text { fill: var(--dim); font: 10px var(--mono); }
+.ss-fcsun { fill: rgba(255, 210, 90, .18); stroke: rgba(255, 210, 90, .5); }
+.ss-fcsoc { fill: none; stroke: var(--chart-line); stroke-width: 2; stroke-linejoin: round; }
+.ss-fclbl { fill: var(--text); font: 600 11px var(--mono); }
+.ss-swrs { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.ss-swr svg { width: 100%; display: block; }
+.ss-swrface { fill: #f3ead2; stroke: #8a7a55; stroke-width: 2; }
+.ss-swrscale { fill: none; stroke: #2a2416; stroke-width: 1.4; } .ss-swrred { fill: none; stroke: #c0392b; stroke-width: 3; }
+.ss-tick { stroke: #2a2416; stroke-width: 1.4; }
+.ss-nf, .ss-nr { transform-box: view-box; transform-origin: 100px 110px; transform: rotate(-72deg); }
+.ss-nf path { stroke: #1a1a1a; stroke-width: 2; } .ss-nr path { stroke: #c0392b; stroke-width: 2; } .ss-hub { fill: #1a1a1a; }
+.ss-swrt { fill: #2a2416; font: 700 10px var(--mono); }
+.ss-swrro { display: flex; flex-wrap: wrap; gap: 4px 10px; font: 12px var(--mono); color: var(--dim); margin-top: 4px; }
+.ss-swrro b { width: 100%; color: var(--text); font-family: var(--ui); }
+.ss-swrro em { font-style: normal; color: var(--text); }
+.ss-swr[data-lv="warn"] .s { color: var(--ss-warn); } .ss-swr[data-lv="alarm"] .s { color: var(--ss-alarm); }
+.ss-trend { width: 100%; height: auto; display: block; cursor: crosshair; }
+
+/* annunciator: unacknowledged = flashes 3 times then stays lit until ACK (Kelly: nothing flashes forever) */
+.ss-ann { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.ss-tile { border: 2px solid #1f2d4f; border-radius: 8px; padding: 10px; text-align: center; background: #070c1a; color: var(--mute); }
+.ss-tile b { display: block; font: 800 14px var(--display); letter-spacing: .06em; }
+.ss-tile small { display: block; font: 600 11px var(--mono); margin-top: 3px; }
+.ss-tile.unack, .ss-tile.ack { color: #fff; }
+.ss-tile.unack.warn, .ss-tile.ack.warn { background: #4a3300; border-color: var(--ss-warn); }
+.ss-tile.unack.alarm, .ss-tile.ack.alarm { background: #5a0016; border-color: var(--ss-alarm); }
+.ss-tile.unack { box-shadow: inset 0 0 0 2px #fff; }
+.ss-tile.ack { box-shadow: none; }
+.ss-tile.rtn { border-color: var(--dim); border-style: dashed; color: var(--dim); }
+.ss-tile.flash { animation: sstile 1s steps(2, jump-none) 3; }
+@keyframes sstile { 0% { opacity: 1; } 50% { opacity: .25; } }
+.ss-feats { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 10px 0; }
+.ss-cfg textarea { width: 100%; font: 12px/1.4 var(--mono); background: #050a16; border: 1px solid var(--line); border-radius: 10px; color: var(--text); padding: 10px; }
+.ss-insp { min-height: 80px; }
+
+/* green phosphor CRT: own palette + static scanlines (no rolling bar, no flicker) */
+.ss.ss-crt { --text: #b6ffb6; --dim: #4fbf62; --mute: #2f7d3d; --cyan: #7dff8e; --line: #154a22; --chart-line: #7dff8e; --chart-grid: #0d2c14; --ss-ok: #7dff8e; --ss-warn: #e8ff7a; --ss-alarm: #ffffff; font-family: var(--mono); }
+.ss.ss-crt .card { background: #020a04; border-color: #154a22; }
+.ss.ss-crt .ss-mimic-card, .ss.ss-crt .ss-comp, .ss.ss-crt .ss-dev-card { position: relative; }
+.ss.ss-crt .ss-mimic-card::after, .ss.ss-crt .ss-comp::after, .ss.ss-crt .ss-dev-card::after { content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+  background: repeating-linear-gradient(0deg, rgba(0, 0, 0, .28) 0 1px, transparent 1px 3px); }
+.ss.ss-crt .ss-mimic { filter: none; }
+.ss.ss-crt .ss-sky, .ss.ss-crt #ss-sky-day, .ss.ss-crt #ss-sky-dusk { fill: #010802; }
+.ss.ss-crt .ss-hills, .ss.ss-crt .ss-roof, .ss.ss-crt .ss-wall, .ss.ss-crt .ss-room, .ss.ss-crt .ss-box, .ss.ss-crt .ss-mon, .ss.ss-crt .ss-panel, .ss.ss-crt .ss-battshell, .ss.ss-crt .ss-arr rect { fill: #020a04; stroke: #2fd35a; }
+.ss.ss-crt .ss-ground { fill: #010501; } .ss.ss-crt .ss-desk, .ss.ss-crt .ss-pole, .ss.ss-crt .ss-ant, .ss.ss-crt .ss-tower, .ss.ss-crt .ss-guy { stroke: #2fd35a; fill: #2fd35a; }
+.ss.ss-crt text { fill: #7dff8e; } .ss.ss-crt .ss-clouds path { fill: rgba(125, 255, 142, .18); } .ss.ss-crt .ss-stars circle { fill: #7dff8e; }
+.ss.ss-crt .ss-swrface { fill: #031006; stroke: #2fd35a; } .ss.ss-crt .ss-nf path, .ss.ss-crt .ss-hub { stroke: #b6ffb6; fill: #b6ffb6; } .ss.ss-crt .ss-tick, .ss.ss-crt .ss-swrscale { stroke: #2fd35a; } .ss.ss-crt .ss-swrt { fill: #7dff8e; }
+.ss.ss-crt .ss-tile.unack.alarm, .ss.ss-crt .ss-tile.ack.alarm { background: #0f3a18; } .ss.ss-crt .ss-tile.unack.warn, .ss.ss-crt .ss-tile.ack.warn { background: #233a0a; }
+
+/* mesh page tabs */
+#page-mesh > .tabs { margin-top: -4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ss *, .ss *::before, .ss *::after { transition: none !important; animation: none !important; }
+}
+@media (max-width: 700px) {
+  .ss-gauges { flex-direction: column; align-items: stretch; } .ss-gauge { margin: 0 auto; }
+  .ss-grid { grid-template-columns: 1fr; } .ss-log, .ss-hist, .ss-nt { font-size: 11px; }
+  .ss-snd input { width: 80px; }
+}
+.ss .tag:empty { display: none; }

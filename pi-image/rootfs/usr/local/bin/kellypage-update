@@ -1,0 +1,59 @@
+#!/bin/bash
+# Update Kelly Page on this Pi to a newer release.
+#   sudo kellypage-update KellyPage-0.4.36-....zip         a release zip you copied over (scp)
+#   sudo kellypage-update https://example.org/KellyPage-0.4.36-....zip
+#   sudo kellypage-update --rollback                       put the previous version (/opt/kelly-page.old) back
+# Your settings (/etc/kelly-bridge.env, the token) and Kelly's stores in /var/lib/kellypage are kept.
+# If the new version doesn't start, the old one is put back.
+set -e
+if [ "$(id -u)" -ne 0 ]; then exec sudo "$0" "$@"; fi
+SRC="${1:-}"
+if [ "$SRC" = "--rollback" ]; then
+  [ -d /opt/kelly-page.old ] || { echo "Nothing to roll back to (no /opt/kelly-page.old)."; exit 1; }
+  rm -rf /opt/kelly-page.bad
+  mv /opt/kelly-page /opt/kelly-page.bad
+  mv /opt/kelly-page.old /opt/kelly-page
+  systemctl restart kelly-bridge.service; systemctl try-restart kelly-keeper.service 2>/dev/null || true   # keeper (if installed) runs from /opt/kelly-page too
+  sleep 6
+  if systemctl is-active --quiet kelly-bridge.service; then
+    rm -rf /opt/kelly-page.bad
+    echo "== Rolled back: Kelly Page $(sed -n "s/.*KELLY_VERSION = '\([^']*\)'.*/\1/p" /opt/kelly-page/js/version.js) is running."
+    exit 0
+  fi
+  echo "!! the previous version didn't start either:"; journalctl -u kelly-bridge.service -n 12 --no-pager -o cat
+  exit 1
+fi
+if [ -z "$SRC" ]; then
+  echo "Usage: sudo kellypage-update <KellyPage-...zip | https://...zip>"
+  echo "Now running: Kelly Page $(sed -n "s/.*KELLY_VERSION = '\([^']*\)'.*/\1/p" /opt/kelly-page/js/version.js)"
+  exit 1
+fi
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+case "$SRC" in
+  http://*|https://*) echo "-- Downloading $SRC"; curl -fL --progress-bar -o "$TMP/kelly.zip" "$SRC"; SRC="$TMP/kelly.zip" ;;
+esac
+[ -f "$SRC" ] || { echo "Can't find $SRC"; exit 1; }
+python3 -m zipfile -e "$SRC" "$TMP/x"
+NEW="$TMP/x/Kelly Page"
+if [ ! -f "$NEW/index.html" ] || [ ! -f "$NEW/bridge/kelly_bridge.py" ]; then
+  echo "That isn't a Kelly Page release zip (no 'Kelly Page/index.html' inside)."; exit 1
+fi
+OLDV="$(sed -n "s/.*KELLY_VERSION = '\([^']*\)'.*/\1/p" /opt/kelly-page/js/version.js)"
+NEWV="$(sed -n "s/.*KELLY_VERSION = '\([^']*\)'.*/\1/p" "$NEW/js/version.js")"
+echo "-- Kelly Page $OLDV -> $NEWV"
+chown -R root:root "$NEW"
+rm -rf /opt/kelly-page.old
+mv /opt/kelly-page /opt/kelly-page.old
+cp -a "$NEW" /opt/kelly-page
+systemctl restart kelly-bridge.service; systemctl try-restart kelly-keeper.service 2>/dev/null || true   # keeper (if installed) runs from /opt/kelly-page too
+sleep 6
+if systemctl is-active --quiet kelly-bridge.service && [ "$(systemctl show -p NRestarts --value kelly-bridge.service)" = 0 ]; then
+  echo "== Done: Kelly Page $NEWV is running. (The old version is in /opt/kelly-page.old until the next update.)"
+else
+  echo "!! $NEWV didn't start -- putting $OLDV back. What it said:"
+  journalctl -u kelly-bridge.service -n 12 --no-pager -o cat
+  rm -rf /opt/kelly-page; mv /opt/kelly-page.old /opt/kelly-page
+  systemctl restart kelly-bridge.service; systemctl try-restart kelly-keeper.service 2>/dev/null || true   # keeper (if installed) runs from /opt/kelly-page too
+  exit 1
+fi

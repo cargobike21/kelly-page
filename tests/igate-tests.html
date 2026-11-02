@@ -1,0 +1,166 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Kelly igate.js tests</title>
+<!-- js/igate.js (APRS iGate core): the shared vectors in bridge/igate_vectors.json (bridge/test_kelly_igate.py runs the
+     same ones), the token bucket, counters and the Gate's decisions on a fake clock. Then js/igate-wl.js when loaded.
+     Headless: chrome --headless=new --allow-file-access-from-files --dump-dom tests/igate-tests.html -> RESULT -->
+<pre id="out"></pre>
+<script src="../vendor/tweetnacl-1.0.3/nacl-fast.min.js"></script>
+<script src="../js/igate.js"></script>
+<script src="../js/igate-wl.js"></script>
+<script>
+(async () => {
+  const out = [], fails = [];
+  const check = (name, ok, got) => { out.push((ok ? 'PASS ' : 'FAIL ') + name + (ok ? '' : `  (got ${JSON.stringify(got)})`)); if (!ok) fails.push(name); };
+  const I = window.KellyIgate;
+  const x = new XMLHttpRequest(); x.open('GET', '../bridge/igate_vectors.json', false); x.send();
+  const V = JSON.parse(x.responseText);
+
+  // ---- the shared vectors
+  for (const [c, want] of V.passcode) check(`passcode ${c}`, I.passcode(c) === want, I.passcode(c));
+  for (const [c, want] of V.base) check(`callsign ${JSON.stringify(c)} ${want ? 'ok' : 'refused'}`, I.validBase(c) === want);
+  for (const [c, s, want] of V.full) check(`CALL-SSID ${c} ${s}`, I.fullCall(c, s) === want, I.fullCall(c, s));
+  for (const [s, want] of V.symbol) check(`symbol ${JSON.stringify(s)}`, I.validSymbol(s) === want);
+  for (const [v, amb, want] of V.lat) check(`lat ${v} amb ${amb}`, I.fmtLat(v, amb) === want, I.fmtLat(v, amb));
+  for (const [v, amb, want] of V.lon) check(`lon ${v} amb ${amb}`, I.fmtLon(v, amb) === want, I.fmtLon(v, amb));
+  for (const [p, want] of V.packet) check(`packet ${p.src}`, I.packet(p) === want, I.packet(p));
+  for (const [c, t, want] of V.status) check('status line', I.statusPacket(c, t) === want, I.statusPacket(c, t));
+  // telemetry: the bodies the bridge checks (test_kelly_igate.py runs every one through telemetry_ok)
+  for (const c of V.telemetry) {
+    const v = I.tlmValues(c.map, I.readings(c.lpp, c.st));
+    check(`telemetry T#: ${c.name}`, I.tlmBody(c.seq, v.a, v.b) === c.body, I.tlmBody(c.seq, v.a, v.b));
+    check(`telemetry PARM/UNIT/EQNS/BITS: ${c.name}`, JSON.stringify(I.tlmDefs(c.src, c.map)) === JSON.stringify(c.defs), I.tlmDefs(c.src, c.map));
+  }
+  check('telemetry: the clock gives the sequence (minutes, 0-999)', I.seqNow(Date.UTC(2026, 9, 24, 1, 2)) === Math.floor(Date.UTC(2026, 9, 24, 1, 2) / 60000) % 1000);
+  check('telemetry: lpp:*:116 = the first voltage on any channel', I.tlmValues({ a: [{ src: 'lpp:*:116', name: 'B', unit: 'V', min: 0, max: 25.5 }] },
+    I.readings([{ ch: 3, type: 103, name: 'temperature', value: 20, unit: '°C' }, { ch: 5, type: 116, name: 'voltage', value: 12.6, unit: 'V' }])).a[0] === 126);
+  check('telemetry: a value past max is clamped to 255, below min to 0', JSON.stringify(I.tlmValues({ a: [{ src: 'st:battV', name: 'B', unit: 'V', min: 3, max: 4.5 }, { src: 'st:noise', name: 'N', unit: 'dBm', min: -130, max: -53.5 }] },
+    I.readings(null, { battV: 9, noise: -140, uptimeS: 10 })).a.slice(0, 2)) === '[255,0]');
+  check('telemetry: every device type maps only known sources', I.PRESETS.every(p => I.slots(p).a.concat(I.slots(p).b).every(x => !x || /^(st:\w+|lpp:(\*|\d+):\d+)$/.test(x.src) && (!x.src.startsWith('st:') || x.src.slice(3) in I.ST))));
+  check('telemetry: every device type has max above min', I.PRESETS.every(p => I.slots(p).a.every(x => !x || +x.max > +x.min)));
+  // HAM ONLY: a VK / ZL callsign as the first or second word of a node name (shared vectors, = kelly_igate.py call_from_name / ham_node)
+  for (const [name, want] of V.from_name) {
+    const r = I.callFromName(name), got = r ? r.base + (r.ssid ? '-' + r.ssid : '') : null;
+    check(`callsign at the start of ${JSON.stringify(name)} -> ${want}`, got === want, got);
+  }
+  for (const [src, name, want] of V.ham_node) check(`ham node ${src} named ${JSON.stringify(name)} -> ${want}`, I.hamNode(src, name) === want);
+  check('tocall is APZKPG', I.TOCALL === 'APZKPG');
+  check('aprs.fi link', I.aprsFiUrl('VK4XXX-9') === 'https://aprs.fi/#!call=a%2FVK4XXX-9', I.aprsFiUrl('VK4XXX-9'));
+  check('distance Ipswich-Brisbane ~ 30 km', Math.abs(I.distanceM({ lat: -27.6249, lon: 152.7671 }, { lat: -27.4698, lon: 153.0251 }) - 30500) < 3000,
+    I.distanceM({ lat: -27.6249, lon: 152.7671 }, { lat: -27.4698, lon: 153.0251 }));
+  check('roundPos 2 places', JSON.stringify(I.roundPos(-27.45678, 152.98765, 2)) === '{"lat":-27.46,"lon":152.99}', I.roundPos(-27.45678, 152.98765, 2));
+
+  // ---- position checks
+  const T0 = 1_800_000_000_000;
+  const P = (o = {}) => Object.assign({ lat: -27.45, lon: 152.98, at: T0 }, o);
+  check('position ok', I.checkPosition(P(), T0, 600000) === null);
+  check('0,0 refused', I.checkPosition(P({ lat: 0, lon: 0 }), T0, 600000) === '0,0');
+  check('out of range refused', I.checkPosition(P({ lat: 91 }), T0, 600000) === 'out of range');
+  check('lon out of range refused', I.checkPosition(P({ lon: -181 }), T0, 600000) === 'out of range');
+  check('no fix refused', I.checkPosition(P({ fix: false }), T0, 600000) === 'no fix');
+  check('missing lat refused', I.checkPosition(P({ lat: null }), T0, 600000) === 'no fix');
+  check('stale (received 11 min ago) refused', I.checkPosition(P({ at: T0 - 11 * 60000 }), T0, 600000) === 'stale');
+  check('a wrong sender clock alone is fine', I.checkPosition(P({ ts: 1000 }), T0, 600000) === null);
+  check('replay (older advert ts) refused', I.checkPosition(P({ ts: 500 }), T0, 600000, { ts: 600 }) === 'replayed (older advert)');
+
+  // ---- token bucket
+  let t = T0; const now = () => t;
+  const b = I.TokenBucket(5000, 3, now);
+  check('bucket: burst of 3', b.take() && b.take() && b.take() && !b.take());
+  t += 4999; check('bucket: not before 5 s', !b.take());
+  t += 1; check('bucket: one after 5 s', b.take() && !b.take());
+  t += 60000; check('bucket: never more than the burst', b.take() && b.take() && b.take() && !b.take());
+
+  // ---- the Gate on a fake clock
+  const KA = 'a'.repeat(64), KB = 'b'.repeat(64), KC = 'c'.repeat(64);
+  const list = { [KA]: { c: 'VK4XXX', s: 9, y: '/>' }, [KB]: { c: 'VK4ZQ', s: 7, y: '/[' } };
+  t = T0;
+  const g = I.Gate({ now, rand: () => 0.5, lookup: k => list[k] || null });
+  const off = o => g.offer(Object.assign({ key: KA, lat: -27.45, lon: 152.98, at: t, ts: 100, src: 'advert' }, o));
+  check('gate: not whitelisted -> drop', off({ key: KC }).reason === 'notListed');
+  check('gate: bad key ignored, not counted', off({ key: 'xyz' }).verdict === 'ignored');
+  check('gate: invalid -> drop', off({ lat: 0, lon: 0 }).reason === 'invalid');
+  check('gate: good one queued', off().verdict === 'queued');
+  check('gate: the same advert again (raw + push) heard once', off().verdict === 'same');
+  check('gate: nothing due before the random delay', g.due().length === 0);
+  t += 4000; let d = g.due();
+  check('gate: due after the delay (rand 0.5 x 8 s)', d.length === 1 && d[0].key === KA && d[0].entry.c === 'VK4XXX', d);
+  g.sent(d[0], 'VK4XXX-9', 'VK4XXX-9>APZKPG,qAO,VK4XXX-10:!...');
+  t += 5000;
+  check('gate: same station + position within 30 s -> duplicate', off({ ts: 101 }).reason === 'duplicate');
+  t += 30000;
+  check('gate: same station within 2 min, not moved -> rate', off({ ts: 102 }).reason === 'rate');
+  check('gate: moved 1 km after 39 s -> queued (SmartBeaconing-lite)', off({ ts: 103, lat: -27.459 }).verdict === 'queued');
+  t += 10000; g.due();
+  t += 15000;
+  check('gate: moved again but under the 30 s floor -> rate', off({ ts: 104, lat: -27.47 }).reason === 'rate');
+  check('gate: older advert than the last -> invalid (replay)', off({ ts: 50, lat: -27.5 }).reason === 'invalid');
+  t += 150000;
+  check('gate: after 2 min -> queued', off({ ts: 105 }).verdict === 'queued');
+  // the global bucket: 5 stations at once, burst 3 then one per 5 s; waiting more than 30 s = dropped
+  const g2 = I.Gate({ now, rand: () => 0, lookup: () => ({ c: 'VK4XXX', s: 1, y: '/>' }) });
+  for (let i = 0; i < 5; i++) g2.offer({ key: String(i).repeat(64), lat: -27.4 - i / 10, lon: 152.9, at: t });
+  check('bucket in the gate: 3 go at once', g2.due().length === 3);
+  t += 5000; check('bucket in the gate: one more after 5 s', g2.due().length === 1);
+  t += 40000; check('bucket in the gate: the last waited > 30 s ... still goes if a token is there', g2.due().length === 1);
+  const g3 = I.Gate({ now, rand: () => 0, lookup: () => ({ c: 'VK4XXX', s: 1, y: '/>' }), cfg: { burst: 1, bucketS: 60 } });
+  for (let i = 0; i < 3; i++) g3.offer({ key: String(i).repeat(64), lat: -27.4 - i / 10, lon: 152.9, at: t });
+  g3.due(); t += 31000; g3.due();
+  check('bucket in the gate: no token for 30 s -> dropped as rate', g3.stats.view().drops.rate === 2, g3.stats.view().drops);
+  const g4 = I.Gate({ now, rand: () => 1, lookup: () => ({ c: 'VK4XXX', s: 1, y: '/>' }), cfg: { queueMax: 2 } });
+  for (let i = 0; i < 4; i++) g4.offer({ key: String(i).repeat(64), lat: -27.4 - i / 10, lon: 152.9, at: t });
+  check('queue never grows past queueMax', g4.pending() === 2 && g4.stats.view().drops.rate === 2, [g4.pending(), g4.stats.view().drops]);
+
+  // ---- counters
+  const v = g.stats.view();
+  check('stats: heard counts every distinct packet', v.heard === 9, v.heard);
+  check('stats: gated total / hour / today', v.gated === 1 && v.lastHour === 1 && v.today === 1, [v.gated, v.lastHour, v.today]);
+  check('stats: drops by reason', v.drops.notListed === 1 && v.drops.invalid === 2 && v.drops.duplicate === 1 && v.drops.rate === 2, v.drops);
+  check('stats: last packet per station', v.stations[KA].call === 'VK4XXX-9' && /qAO/.test(v.stations[KA].raw));
+  const again = I.Gate({ now, stats: JSON.parse(JSON.stringify(g.stats.json())) });
+  check('stats: survive a restart (JSON)', again.stats.view().gated === 1 && again.stats.view().drops.rate === 2);
+  t += 3600001; check('stats: last hour rolls off', again.stats.view().lastHour === 0 && again.stats.view().gated === 1);
+  again.stats.reset(); check('stats: reset', again.stats.view().gated === 0 && again.stats.view().heard === 0);
+
+  // ---- the whitelist (js/igate-wl.js)
+  const W = window.IgateWL;
+  if (!W) check('igate-wl.js loaded', false);
+  else {
+    const ed = W.naclEd(window.nacl);
+    const admin = ed.signer(new Uint8Array(32).fill(7)), other = ed.signer(new Uint8Array(32).fill(9));
+    const keys = [W.hex(admin.publicKey)];
+    const e1 = { k: KA, c: 'VK4XXX', s: 9, y: '/>', m: 'car', e: 1, by: 'VK4XXX', at: 1761000000 };
+    const doc1 = W.sign({ v: 1, at: 1761000000, by: 'VK4XXX', e: [e1] }, admin);
+    check('wl: a signed list verifies', W.verify(doc1, ed, keys).ok, W.verify(doc1, ed, keys));
+    const tampered = JSON.parse(JSON.stringify(doc1)); tampered.b.e[0].c = 'VK4XX';
+    check('wl: a changed entry fails', !W.verify(tampered, ed, keys).ok);
+    const bumped = JSON.parse(JSON.stringify(doc1)); bumped.b.v = 9;
+    check('wl: a changed version fails', !W.verify(bumped, ed, keys).ok);
+    check('wl: signed by a key not pinned fails', !W.verify(W.sign(doc1.b, other), ed, keys).ok && /not an admin key/.test(W.verify(W.sign(doc1.b, other), ed, keys).error));
+    check('wl: no pinned keys = nothing accepted', !W.verify(doc1, ed, []).ok);
+    const raw = b => ({ b, s: W.b64u(admin.sign(W.utf8(W.canonical(b)))), k: keys[0] });   // signed without sign()'s own checks
+    check('wl: a bad entry refuses the whole list', !W.verify(raw({ v: 2, at: 1, by: 'VK4XXX', e: [Object.assign({}, e1, { s: 16 })] }), ed, keys).ok);
+    check('wl: duplicate keys refused', !W.verify(raw({ v: 2, at: 1, by: 'VK4XXX', e: [e1, e1] }), ed, keys).ok);
+    let threw = false; try { W.sign({ v: 2, at: 1, by: 'VK4XXX', e: [e1, e1] }, admin); } catch { threw = true; }
+    check('wl: sign() refuses a bad list', threw);
+    let r = W.accept(null, doc1, ed, keys);
+    check('wl: first list accepted', r.ok && r.doc.b.v === 1, r);
+    const doc2 = W.sign({ v: 2, at: 1761000100, by: 'VK4XXX', e: [e1, { k: KB, c: 'VK4ZQ', s: 7, y: '/[', m: '', e: 0, by: 'VK4XXX', at: 1761000100 }] }, admin);
+    r = W.accept(doc1, doc2, ed, keys); check('wl: newer version accepted', r.ok && r.doc.b.v === 2, r);
+    r = W.accept(doc2, doc1, ed, keys); check('wl: older version refused, last good kept', !r.ok && r.older && r.doc === doc2, r);
+    r = W.accept(doc2, doc2, ed, keys); check('wl: same version = current', !r.ok && r.same, r);
+    const fork = W.sign({ v: 2, at: 1761000200, by: 'VK4XXX', e: [] }, admin);
+    r = W.accept(doc2, fork, ed, keys); check('wl: a different list at the same version refused', !r.ok && !r.same && /same version/.test(r.error), r);
+    r = W.accept(doc2, tampered, ed, keys); check('wl: bad signature refused, last good kept', !r.ok && r.doc === doc2, r);
+    check('wl: lookup an enabled entry', W.lookup(doc2, KA) && W.lookup(doc2, KA).c === 'VK4XXX');
+    check('wl: a disabled entry does not gate', W.lookup(doc2, KB) === null);
+    check('wl: lookup by 16-hex prefix (the P25 path)', W.lookup(doc2, KA.slice(0, 16)).c === 'VK4XXX');
+    check('wl: unknown key -> null', W.lookup(doc2, KC) === null && W.lookup(null, KA) === null);
+    check('wl: canonical form ignores key order', W.canonical({ e: [], by: 'X', at: 1, v: 3 }) === W.canonical({ v: 3, at: 1, by: 'X', e: [] }));
+    check('wl: entry normalised (upper call, lower key)', W.normEntry({ k: KA.toUpperCase(), c: 'vk4xxx', s: '9', y: '/>' }).c === 'VK4XXX' && W.normEntry({ k: KA.toUpperCase(), c: 'vk4xxx', s: 9, y: '/>' }).k === KA);
+  }
+
+  out.push(`RESULT: ${fails.length ? 'FAIL (' + fails.length + ')' : 'ALL PASS'}`);
+  document.getElementById('out').textContent = out.join('\n');
+})().catch(e => { document.getElementById('out').textContent = 'RESULT: FAIL (exception) ' + e.stack; });
+</script>

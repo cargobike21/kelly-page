@@ -1,0 +1,5 @@
+/* Kelly Page -- LoRa Mesh > Trace Route: tr-viz, the constellation canvas (js/tr-viz.js). The sky gradient is on
+ * .tr-viz (css/tr.css); everything that moves is drawn on the canvas by JS and stops (kelly-page/CLAUDE.md). */
+.tr-viz-host { position: relative; overflow: hidden; }
+.tr-viz-cv { position: absolute; inset: 0; display: block; width: 100%; height: 100%; outline: none; touch-action: manipulation; }
+.tr-viz-cv:focus-visible { box-shadow: inset 0 0 0 2px var(--tr-out, #7df9ff); }

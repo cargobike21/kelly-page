@@ -1,0 +1,54 @@
+/* Kelly Page -- Trace Route: tr-telem (#tr-telem), Telemetry polling: grants, per-peer poll panels, sparklines. Static
+ * styles only (nothing loops); the constellation tokens come from .tr (css/tr.css). */
+.tr-telem:empty { display: none; }
+.tr-tl-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tr-tl-h h2 { margin: 0; }
+.tr-tl h3 { margin: 0 0 6px; font-size: 14px; }
+.tr-tl-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 10px; }
+.tr-tl-cols section { min-width: 0; background: var(--raised); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.tr-tl-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.tr-tl-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-solid, #0d152a); }
+.tr-tl-row > div { flex-basis: 100%; }
+.tr-tl-row .grow, .tr-tl-ph .grow { flex: 1; }
+.tr-tl-pend { border-color: var(--amber); }
+.tr-tl-none { padding: 4px 2px; }
+.tr-tl-warn { color: var(--amber); margin: 6px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.tr-tl-ask { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+.tr-tl-ask select { min-width: 0; max-width: 100%; flex: 1 1 180px; }
+.tr-tl-chk { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--dim); }
+.tr-tl-peers { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+.tr-tl-peer { border: 1px solid var(--line2); border-radius: 12px; padding: 12px; background: linear-gradient(180deg, var(--tr-sky2), var(--tr-sky)); display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.tr-tl-ph { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tr-tl-ph h3 { margin: 0; color: var(--tr-star); font-size: 16px; }
+.tr-tl-live { color: var(--tr-out); font-weight: 700; }
+.tr-tl-bad { color: var(--tr-fail); }
+.tr-tl-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.tr-tl-tile { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: rgba(3, 6, 15, .55); min-width: 0; }
+.tr-tl-tile span { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--dim); }
+.tr-tl-tile b { font: 700 20px var(--mono); color: var(--text); }
+.tr-tl-tile i { font-style: normal; font-size: 12px; color: var(--dim); }
+.tr-tl-route { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tr-tl-pathrow { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.tr-tl-pathrow > .dim { width: 38px; }
+.tr-tl-hop { font: 600 12px var(--mono); padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.tr-tl-hop b { font-weight: 700; }
+.tr-tl-unk { border-style: dashed; }
+.tr-tl-arrow { color: var(--dim); }
+.tr-tl-snr-great { color: var(--tr-great); } .tr-tl-snr-good { color: var(--tr-good); } .tr-tl-snr-fair { color: var(--tr-fair); }
+.tr-tl-snr-poor { color: var(--tr-poor); } .tr-tl-snr-none { color: var(--dim); }
+.tr-tl-tile b.tr-tl-snr-great { color: var(--tr-great); } .tr-tl-tile b.tr-tl-snr-good { color: var(--tr-good); } .tr-tl-tile b.tr-tl-snr-fair { color: var(--tr-fair); } .tr-tl-tile b.tr-tl-snr-poor { color: var(--tr-poor); }
+.tr-tl-sparks { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.tr-tl-spkw { min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; background: rgba(3, 6, 15, .55); }
+.tr-tl-spkt { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--dim); }
+.tr-tl-spk { display: block; width: 100%; height: 38px; margin-top: 4px; overflow: visible; }
+.tr-tl-hit { fill: transparent; cursor: crosshair; }
+.tr-tl-spk-empty { height: 38px; display: flex; align-items: center; }
+.tr-tl-health { display: flex; flex-direction: column; gap: 4px; }
+.tr-tl-strip { display: flex; gap: 2px; flex-wrap: wrap; }
+.tr-tl-cell { width: 10px; height: 14px; border-radius: 3px; background: var(--tr-great); }
+.tr-tl-cell.bad { background: var(--tr-fail); }
+.tr-tl-cell.chg { box-shadow: 0 0 0 2px var(--amber) inset; }
+@media (max-width: 900px) {
+  .tr-tl-cols { grid-template-columns: 1fr; }
+  .tr-tl-tiles, .tr-tl-sparks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

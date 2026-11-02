@@ -1,0 +1,12 @@
+/* Kelly Page -- QR contacts dialog (js/meshqr.js, LoRa Mesh > Contacts). The code itself is always black on white. */
+.mqr { position: fixed; inset: 0; z-index: 85; background: rgba(2, 5, 12, .75); display: grid; place-items: center; padding: 16px; }
+.mqr[hidden] { display: none; }
+.mqr-box { background: var(--panel-solid); border: 1px solid var(--line2); border-radius: 16px; padding: 16px; width: min(380px, 100%); max-height: 100%; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 10px; box-shadow: 0 20px 60px rgba(0, 0, 0, .6); }
+.mqr-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mqr-h b { font: 700 15px var(--display); letter-spacing: .06em; color: var(--cyan); overflow-wrap: anywhere; }
+.mqr-tabs { display: flex; gap: 6px; }
+.mqr-tabs .btn.on { border-color: var(--cyan); color: var(--cyan); }
+.mqr-code { display: block; width: min(300px, 100%); height: auto; margin: 0 auto; background: #fff; border-radius: 6px; image-rendering: pixelated; }
+.mqr-video { display: block; width: 100%; max-height: 60vh; border-radius: 8px; background: #000; }
+.mqr-note { margin: 0; color: var(--dim); }

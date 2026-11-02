@@ -1,0 +1,26 @@
+/* Kelly Page -- LoRa Mesh > 🐕 Mesh Buddy tab (js/meshbuddy.js, 2026-10-31). Nothing animates forever (CLAUDE.md):
+ * the progress bar only moves while a flash is running. */
+.mb { display: grid; gap: 14px; }
+.mb-head { display: flex; align-items: flex-start; gap: 12px; justify-content: space-between; flex-wrap: wrap; }
+.mb-head h2 { margin: 0 0 4px; }
+.mb-id { padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(57, 255, 136, .45); background: var(--raised); }
+.mb-id b.mono { color: var(--lime); font-size: 16px; }
+.mb-warn { padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255, 176, 32, .6); color: var(--amber); background: var(--raised); font-size: 14px; }
+.mb-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.mb-form .grow { flex: 1; min-width: 220px; }
+.mb-checks { display: grid; gap: 6px; color: var(--dim); }
+.mb-checks input { margin-right: 6px; }
+.mb-go { align-items: center; }
+.mb-pick { padding: 10px 14px; border-radius: 10px; border: 2px solid var(--cyan, #00e5ff); background: var(--raised); }
+.mb-pick p { margin: 0 0 8px; }
+.mb-prog:empty { display: none; }
+.mb-prog { display: grid; gap: 8px; }
+.mb-step { font-weight: 700; }
+.mb-bar { height: 10px; border-radius: 6px; background: var(--raised); border: 1px solid var(--line); overflow: hidden; }
+.mb-bar i { display: block; height: 100%; background: var(--lime); transition: width .3s; }
+.mb-log { max-height: 220px; overflow: auto; color: var(--dim); }
+.mb-done { padding: 12px 14px; border-radius: 10px; border: 1px solid rgba(57, 255, 136, .55); background: var(--raised); }
+.mb-done h3 { margin: 0 0 6px; }
+.mb-secret { color: var(--amber); user-select: all; }
+.mb-units summary { cursor: pointer; color: var(--dim); }
+.mb-units div { padding: 3px 0; }

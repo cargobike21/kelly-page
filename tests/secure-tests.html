@@ -1,0 +1,58 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Kelly secure.js tests</title>
+<!-- js/secure.js (Phase 8 HTTPS): KellySecure.can / why / wsUrl / httpUrl against fake windows, then -- when this page
+     is served over https by the bridge (bridge/test_kelly_tls.py, or `kelly_bridge.py --tls self` and open
+     https://localhost:8025/tests/secure-tests.html) -- the real page: a secure context and a wss:// link to /ws.
+     Headless: chrome --headless=new --ignore-certificate-errors --virtual-time-budget=8000 --dump-dom URL -> RESULT -->
+<pre id="out"></pre>
+<script src="../js/secure.js"></script>
+<script>
+(async () => {
+  const out = [], fails = [];
+  const check = (name, ok, got) => { out.push((ok ? 'PASS ' : 'FAIL ') + name + (ok ? '' : `  (got ${JSON.stringify(got)})`)); if (!ok) fails.push(name); };
+  const win = (protocol, host, secure, nav = {}) => ({ location: { protocol, host, hostname: host.replace(/:\d+$/, '') }, isSecureContext: secure, navigator: nav });
+
+  // plain http from a Pi on the LAN: nothing secure, every feature explains itself
+  let S = KellySecure.make(win('http:', '192.168.1.20:8025', false, { geolocation: {}, bluetooth: {} }));
+  check('http LAN: not secure', S.secure === false);
+  check('http LAN: GPS can\'t run', S.can('gps') === false);
+  check('http LAN: why names GPS + the fix', /^GPS needs a secure page/.test(S.why('gps')) && /https/.test(S.why('gps')) && /HTTPS\.md/.test(S.why('gps')), S.why('gps'));
+  check('http LAN: unknown feature -> generic name', /^This feature needs/.test(S.why('frobnicate')), S.why('frobnicate'));
+  check('http LAN: ws:// left alone', S.wsUrl('ws://192.168.1.20:8025/ws?token=a') === 'ws://192.168.1.20:8025/ws?token=a');
+  check('http LAN: http:// left alone', S.httpUrl('http://100.64.0.10:3000/x') === 'http://100.64.0.10:3000/x');
+
+  // https from the tailnet (tailscale cert / serve): secure, ws -> wss
+  S = KellySecure.make(win('https:', 'kelly.tail1234.ts.net', true, { geolocation: {} }));
+  check('https: secure', S.secure === true);
+  check('https: GPS can run', S.can('gps') === true && S.why('gps') === '');
+  check('https: no Bluetooth API -> browser sentence', S.can('bluetooth') === false && /Chrome or Edge/.test(S.why('bluetooth')), S.why('bluetooth'));
+  check('https: ws:// -> wss://', S.wsUrl('ws://kelly.tail1234.ts.net/mesh?token=x') === 'wss://kelly.tail1234.ts.net/mesh?token=x', S.wsUrl('ws://kelly.tail1234.ts.net/mesh?token=x'));
+  check('https: other host ws:// -> wss://', S.wsUrl('ws://100.64.0.10:8026/mesh') === 'wss://100.64.0.10:8026/mesh');
+  check('https: wss:// unchanged', S.wsUrl('wss://a:1/ws') === 'wss://a:1/ws');
+  check('https: ws://localhost:8025 (another port\'s plain bridge) kept', S.wsUrl('ws://localhost:8025/ws') === 'ws://localhost:8025/ws');
+  check('https: http:// API -> https://', S.httpUrl('http://100.64.0.10:3000/api/x') === 'https://100.64.0.10:3000/api/x', S.httpUrl('http://100.64.0.10:3000/api/x'));
+  check('https: empty stays empty', S.wsUrl('') === '' && S.wsUrl(null) === '');
+
+  // https://localhost:8025 from the bridge's own --tls: its own ws://localhost:8025 must go wss
+  S = KellySecure.make(win('https:', 'localhost:8025', true));
+  check('https localhost: own host ws:// -> wss://', S.wsUrl('ws://localhost:8025/ws') === 'wss://localhost:8025/ws');
+  check('https localhost: 127.0.0.1 on another port kept', S.wsUrl('ws://127.0.0.1:9000/x') === 'ws://127.0.0.1:9000/x');
+
+  // file:// (opened from disk): treated as not secure for these features unless the browser says so
+  S = KellySecure.make({});
+  check('no window bits: not secure, no throw', S.secure === false && S.can('camera') === false && /camera/i.test(S.why('camera')));
+
+  // the real page, when the bridge serves it over https
+  if (location.protocol === 'https:') {
+    check('served over https: isSecureContext', KellySecure.secure === true);
+    const url = KellySecure.wsUrl(`ws://${location.host}/ws`);
+    check('served over https: bridge URL is wss', url.startsWith('wss://'), url);
+    const ok = await new Promise(res => { try { const ws = new WebSocket(url); ws.onopen = () => { ws.close(); res(true); }; ws.onerror = () => res(false); ws.onclose = () => res(false); } catch (e) { res(false); } });
+    check('served over https: wss /ws opens', ok);
+  } else out.push('(not served over https -- live wss check skipped)');
+
+  out.push('RESULT: ' + (fails.length ? `FAIL (${fails.length}): ${fails.join(', ')}` : 'ALL PASS'));
+  document.getElementById('out').textContent = out.join('\n');
+})();
+</script>

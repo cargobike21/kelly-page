@@ -1,0 +1,202 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mesh paths tests</title>
+<style>body{font:13px Consolas,monospace;background:#0b0f14;color:#dde}.ok{color:#3d8}.bad{color:#f55}</style>
+</head><body>
+<h3>Kelly Page -- mesh paths + golden packet tests</h3>
+<pre id="out">running…</pre>
+<script src="../js/meshcore.js"></script>
+<script>try { localStorage.removeItem('kelly.hcCalls'); localStorage.removeItem('kelly.hcSticky'); } catch (e) { /* */ }</script>
+<script src="../js/meshqr.js"></script>
+<script src="../js/hc-core.js"></script>
+<script src="../js/hc-calls.js"></script>
+<script src="../js/award-engine.js"></script>
+<script src="../js/meshpaths.js"></script>
+<script>
+// js/meshcore.js route decoding (frames built byte for byte to MeshCore companion v1.18.0: Packet::writeTo,
+// writeContactRespFrame, onContactPathRecv's PUSH 0x8d, logRxRaw) and js/meshpaths.js (hash resolution, two-way,
+// the go-for-gold state machine) against a stub node. Headless: chrome --headless=new --dump-dom tests/meshpaths-tests.html
+const MC = window.KellyMeshCore, out = [], fails = [];
+const hex = u => Array.from(u, b => b.toString(16).padStart(2, '0')).join('');
+const unhex = h => Uint8Array.from(h.match(/../g).map(x => parseInt(x, 16)));
+const le32 = v => [v & 255, v >>> 8 & 255, v >>> 16 & 255, v >>> 24 & 255];
+const tick = (ms = 0) => new Promise(r => setTimeout(r, ms));
+function eq(name, got, want) {
+  if (String(got) === String(want)) out.push(`<span class="ok">PASS ${name}</span>`);
+  else { out.push(`<span class="bad">FAIL ${name}: got ${got} want ${want}</span>`); fails.push(name); }
+}
+const KEY_X = 'c0ffee11' + '22'.repeat(28), KEY_R1 = 'a3010203' + '00'.repeat(28), KEY_R1B = 'a3990000' + '00'.repeat(28), KEY_R2 = '5f010203' + '00'.repeat(28), KEY_ME = 'aa55aa55' + '11'.repeat(28), KEY_Y = 'd00d0001' + '33'.repeat(28);
+const name32 = s => { const b = new Uint8Array(32); b.set(new TextEncoder().encode(s)); return [...b]; };
+function advertPkt(key, lat, lon, name, path, route = 1, type = 2) {
+  const flags = 0x80 | 0x10 | type;
+  const pay = [...unhex(key), ...le32(1760000000), ...new Array(64).fill(0), flags, ...le32(Math.round(lat * 1e6)), ...le32(Math.round(lon * 1e6)), ...new TextEncoder().encode(name)];
+  return Uint8Array.from([route | (4 << 2), path.length, ...path, ...pay]);
+}
+function contactFrame(key, type, outPath, name, lat, lon) {
+  const op = new Array(64).fill(0); outPath.forEach((b, i) => { op[i] = b; });
+  return Uint8Array.from([3, ...unhex(key), type, 0, outPath.length, ...op, ...name32(name), ...le32(1760000000), ...le32(Math.round(lat * 1e6)), ...le32(Math.round(lon * 1e6)), ...le32(1760000100)]);
+}
+
+(async () => {
+  try {
+    // ---- decodeRaw
+    let p = MC.decodeRaw(advertPkt(KEY_X, -26.95, 151.62, 'VK4XYZ Farm', [0xa3, 0x5f]));
+    eq('advert: flood, type 4, path a3 5f', `${p.route} ${p.type} ${p.path.h.join(' ')}`, 'flood 4 a3 5f');
+    eq('advert: origin num = first 4 key bytes LE', p.advert.num.toString(16), '11eeffc0');
+    eq('advert: name + position', `${p.advert.name} ${p.advert.lat} ${p.advert.lon}`, 'VK4XYZ Farm -26.95 151.62');
+    eq('2-byte hashes: path_len 0x43', JSON.stringify(MC.readPath(Uint8Array.from([0xab, 0xcd, 0x12, 0x34, 0x56, 0x78]), 0, 0x43)), JSON.stringify({ sz: 2, h: ['abcd', '1234', '5678'], bytes: 6 }));
+    eq('0xff = no path', MC.readPath(new Uint8Array(4), 0, 0xff), null);
+    p = MC.decodeRaw(Uint8Array.from([0x00 | (3 << 2), 1, 2, 3, 4, 1, 0x22, 0xde, 0xad, 0xbe, 0xef]));
+    eq('ACK over a transport flood: skips the 4 transport bytes', `${p.route} ${p.path.h} ${p.ack}`, 'flood 22 deadbeef');
+    p = MC.decodeRaw(Uint8Array.from([0x02 | (2 << 2), 0, 0x41, 0x9c, 1, 2, 3, 4]));
+    eq('direct TXT: dest + src hashes', `${p.route} ${p.dest} ${p.src} ${p.path.h.length}`, 'direct 41 9c 0');
+    eq('bad path length -> null', MC.decodeRaw(Uint8Array.from([0x05, 0xc1, 1, 2])), null);
+
+    // ---- Session: contacts carry their route; setPath rewrites only the route; discovery; ACK round trip; RX log
+    const sent = [], routes = [], nodes = [], acks = [];
+    const io = { send: b => { sent.push(b); return Promise.resolve(); }, node: n => nodes.push(n), self() {}, text() {}, channels() {}, status() {}, log() {}, stat() {},
+      ack: (r, s) => acks.push(s), route: e => routes.push(e) };
+    const s = MC.DRIVER.Session(io);
+    s.onFrame(contactFrame(KEY_X, 1, [0x5f, 0xa3], 'VK4XYZ Farm', -26.95, 151.62));
+    eq('contact: outPath = the learned route', JSON.stringify(nodes[0].outPath), JSON.stringify({ sz: 1, h: ['5f', 'a3'] }));
+    const X = nodes[0];
+    const sp = s.setPath(X, { sz: 1, h: ['7c', '5f', '01'] }); await tick();
+    let f = sent[sent.length - 1];
+    eq('setPath: CMD_ADD_UPDATE_CONTACT, path_len 3, route bytes, rest zeroed', `${f[0]} ${f[35]} ${hex(f.subarray(36, 40))} ${f.subarray(39, 100).every(x => !x)}`, '9 3 7c5f0100 true');
+    eq('setPath: key, type, name kept', `${hex(f.subarray(1, 33)) === KEY_X} ${f[33]} ${new TextDecoder().decode(f.subarray(100, 111))}`, 'true 1 VK4XYZ Farm');
+    s.onFrame(Uint8Array.of(0)); await sp; await tick();
+    eq('setPath: re-reads the contact after', sent[sent.length - 1][0], 30);
+    s.onFrame(contactFrame(KEY_X, 1, [0x7c, 0x5f, 0x01], 'VK4XYZ Farm', -26.95, 151.62));
+    const dp = s.discover(X); await tick();
+    eq('discover: CMD 52, 0, full key', `${sent[sent.length - 1][0]} ${sent[sent.length - 1][1]} ${hex(sent[sent.length - 1].subarray(2)) === KEY_X}`, '52 0 true');
+    s.onFrame(Uint8Array.from([6, 1, 9, 9, 9, 9, ...le32(12000)])); const dr = await dp;
+    eq('discover: flood + timeout from RESP_SENT', `${dr.flood} ${dr.timeout}`, 'true 12000');
+    s.onFrame(Uint8Array.from([0x8d, 0, ...unhex(KEY_X).subarray(0, 6), 2, 0x5f, 0xa3, 3, 0x01, 0x02, 0x03]));
+    let d = routes.find(r => r.kind === 'discovery');
+    eq('discovery push: out + back routes, num from the prefix', `${d.out.h} | ${d.back.h} | ${d.num === X.num} ${d.rtt >= 0}`, '5f,a3 | 01,02,03 | true true');
+    const ref = { to: X.num }, tp = s.sendText({ dm: X }, 'golden', ref); await tick();
+    s.onFrame(Uint8Array.from([6, 0, 0x11, 0x22, 0x33, 0x44, ...le32(9000)])); await tp;
+    eq('DM sent: route "sent" with the expected ACK', `${routes.find(r => r.kind === 'sent').ack} ${routes.find(r => r.kind === 'sent').flood}`, '11223344 false');
+    s.onFrame(Uint8Array.from([0x82, 0x11, 0x22, 0x33, 0x44, ...le32(4321)]));
+    eq('SEND_CONFIRMED: delivered + round trip ms', `${acks.join()} ${routes.find(r => r.kind === 'ack').rtt}`, 'delivered 4321');
+    s.onFrame(Uint8Array.from([0x81, ...unhex(KEY_X)]));
+    eq('PATH_UPDATED: two-way evidence event', routes.some(r => r.kind === 'path-updated' && r.num === X.num), true);
+    s.onFrame(Uint8Array.from([0x88, (-30) & 255, (-110) & 255, ...advertPkt(KEY_R1, -27.56, 151.95, 'Toowoomba RPT', [0x5f])]));
+    const rx = routes.filter(r => r.kind === 'rx').pop();
+    eq('LOG_RX_DATA: snr, rssi, decoded advert + path', `${rx.snr} ${rx.rssi} ${rx.pkt.advert.name} ${rx.pkt.path.h}`, '-7.5 -110 Toowoomba RPT 5f');
+
+    // ---- meshpaths against a stub Kelly
+    const N = new Map(), mk = (key, name, lat, lon, role) => { const n = { num: parseInt(key.slice(6, 8) + key.slice(4, 6) + key.slice(2, 4) + key.slice(0, 2), 16) >>> 0, key, longName: name, lat, lon, role }; N.set(n.num, n); return n; };
+    const me = mk(KEY_ME, 'Ipswich (me)', -27.61, 152.76, 1), nx = mk(KEY_X, 'VK4XYZ Farm', -26.95, 151.62, 1), ny = mk(KEY_Y, 'VK4YYY Hill', -27.18, 151.27, 1);
+    mk(KEY_R1, 'Toowoomba RPT', -27.56, 151.95, 2); mk(KEY_R1B, 'Cairns RPT', -16.92, 145.77, 2); mk(KEY_R2, 'Mt Coot-tha RPT', -27.47, 152.95, 2);
+    const calls = [], golds = [], store = {}, mutuals = [], twoWays = [], credits = [], toasts = [], selfSet = new Set([KEY_ME]);
+    let demo = false;
+    KellyHamCalls.hooks({ me: () => ({ call: 'VK4XXX', keys: [...selfSet] }) });
+    const prof = {}, engine = KellyAwards.create({ P: () => prof, hamOf: n => KellyHamCalls.hamOf(n) });
+    let traceFail = false;
+    const sess = { trace: async n => { calls.push(['trace', n.num, n.outPath ? n.outPath.h.join('') : null]); if (traceFail) throw new Error('no trace answer'); return { out: n.outPath.h, back: [...n.outPath.h].reverse(), snrTowards: [-8, -3], snrBack: [-5, 6.5], ms: 2300 }; },
+      setPath: async (n, path) => { calls.push(['setPath', n.num, path ? path.h.join('') : null]); }, discover: async n => { calls.push(['discover', n.num]); return { flood: true, timeout: 1000 }; }, advertPath: async () => null };
+    const R6 = (a, b) => { const r = Math.PI / 180, h = Math.sin((b.lat - a.lat) * r / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin((b.lon - a.lon) * r / 2) ** 2; return 12742 * Math.asin(Math.sqrt(h)); };
+    const k = { $: () => null, esc: x => x, store: { get: (key, d) => store[key] ?? d, set: (key, v) => { store[key] = JSON.parse(JSON.stringify(v)); } }, toast: (...a) => toasts.push(a), addEvent: () => {}, dirty: () => {},
+      ms: {}, save: () => {}, fmtAgo: () => 'now', currentPage: () => 'mesh', devKey: () => 'meshcore', devLabel: () => 'MeshCore', node: num => N.get(num >>> 0), nodes: () => N.values(), nodesVer: () => 1,
+      nodeName: num => (N.get(num) || {}).longName || '?', myNum: () => me.num, myPos: () => ({ lat: me.lat, lon: me.lon }), myCall: () => 'VK4XXX', distKm: R6, caps: () => ({ paths: true }), session: () => sess,
+      isDriver: () => true, online: () => true, isDemo: () => false, map: () => null, sendDm: async (num, text) => { calls.push(['dm', num, text]); return {}; }, traceroute: () => {}, focusNode: () => {}, sfx: () => {},
+      F: (fn, g) => { if (fn === 'golden') golds.push(g); if (fn === 'twoWay') twoWays.push(g); }, noteAdvert: () => {}, scrollToMap: () => {},
+      awardsDemo: () => demo, hamOf: n => KellyHamCalls.hamOf(n), isSelf: key => selfSet.has(String(key || '').toLowerCase()), mutual: x => mutuals.push(x),
+      creditKm: (key, km, hops, chainKm) => { credits.push([key, km, hops, chainKm]); return engine.creditKm(key, km, hops, chainKm); } };
+    document.body.insertAdjacentHTML('beforeend', '<div id="mp-card"><div id="mp-tag"></div><div id="mp-best"></div><input type="checkbox" id="mp-show"><input type="checkbox" id="mp-bb"><input id="mp-min"><b id="mp-minv"></b><select id="mp-win"><option value="168">7</option></select><div id="mp-tabs"></div><div id="mp-body"></div><button id="gx" data-gold-try="' + nx.num + '"></button><button id="gy" data-gold-try="' + ny.num + '"></button></div>');
+    k.$ = sel => document.querySelector(sel);   // before the module is made: it keeps k.$
+    const P = window.KellyMeshPaths(k);
+    // hash resolution: 'a3' matches Toowoomba (on the way) and Cairns (1,700 km off) -- the chain picks Toowoomba
+    P.route({ kind: 'rx', snr: -9, pkt: { route: 'flood', type: 4, path: { sz: 1, h: ['a3', '5f'] }, advert: { num: nx.num, key: KEY_X } } });
+    eq('resolve: the shortest believable chain (Toowoomba, not Cairns)', P.chainIn(nx.num, { sz: 1, h: ['a3', '5f'] }).map(h => h.name).join(' > '), 'VK4XYZ Farm > Toowoomba RPT > Mt Coot-tha RPT > you');
+    const gh = P.chainIn(ny.num, { sz: 1, h: ['a3', 'ee', '5f'] });
+    eq('resolve: an unknown hash is a ghost, placed between its neighbours', `${gh[2].name} ${gh[2].ghost} ${gh[2].placed} ${gh[2].p.lat < -27.47 && gh[2].p.lat > -27.57}`, '?ee true true true');
+    eq('resolve: Meshtastic node numbers map straight to nodes', P.chainIn(nx.num, { nums: [N.get(parseInt('030201a3', 16)).num] }).map(h => h.name).join(' > '), 'VK4XYZ Farm > Toowoomba RPT > you');
+    // go for gold: reverse path first
+    P.route({ kind: 'rx', snr: -9, pkt: { route: 'flood', type: 4, path: { sz: 1, h: ['a3', 'ee', '5f'] }, advert: { num: ny.num, key: KEY_Y } } });
+    nx.outPath = { sz: 1, h: ['5f', 'a3'] };
+    // drive goForGold the way the card does: a click on a [data-gold-try] button
+    P.init();
+    document.getElementById('gx').click(); await tick(10);
+    eq('reverse path: route set to the REVERSE of how its advert came in', JSON.stringify(calls[0]), JSON.stringify(['setPath', nx.num, '5fa3']));
+    eq('reverse path: then the golden packet (a DM with the distance)', calls[1][0] === 'dm' && /Golden packet test de VK4XXX via Kelly, \d+(\.\d)? km/.test(calls[1][2]), true);
+    P.route({ kind: 'sent', num: nx.num, ack: '99887766', flood: false });
+    P.route({ kind: 'rx', snr: -11, pkt: { route: 'flood', type: 3, path: { sz: 1, h: ['a3', '5f'] }, ack: '99887766' } });
+    P.route({ kind: 'ack', ref: { to: nx.num }, rtt: 4200 });
+    let g = golds[0];
+    eq('ACK from a ham companion -> Golden Handshake: how, credited km (2 hops x 40 + 40), raw km, route out + back, round trip', g && `${g.how} ${Math.round(g.km)} ${Math.round(g.rawKm)} ${g.out.h.join('')} ${g.back.h.join('')} ${g.rtt}`, `reverse 120 ${Math.round(R6(me, nx))} 5fa3 a35f 4200`);
+    eq('the reverse route that worked is kept (no restore)', calls.filter(c => c[0] === 'setPath').length, 1);
+    // the second station: reverse fails (no ACK), the old route goes back, then path discovery answers
+    calls.length = 0; ny.outPath = { sz: 1, h: ['77'] };
+    document.getElementById('gy').click(); await tick(10);
+    eq('2nd: reverse of a 3-hop path (ghost hash included)', JSON.stringify(calls[0]), JSON.stringify(['setPath', ny.num, '5feea3']));
+    P.route({ kind: 'noack', ref: { to: ny.num } }); await tick(10);
+    eq('no ACK: the old route is put back', JSON.stringify(calls.find((c, i) => i > 0 && c[0] === 'setPath')), JSON.stringify(['setPath', ny.num, '77']));
+    eq('then path discovery', calls.some(c => c[0] === 'discover' && c[1] === ny.num), true);
+    P.route({ kind: 'discovery', prefix: KEY_Y.slice(0, 12), num: ny.num, out: { sz: 1, h: ['5f'] }, back: { sz: 1, h: ['5f'] }, rtt: 3100 });
+    g = golds.find(x => x.num === ny.num);
+    eq('discovery -> two-way with both routes', g && `${g.how} ${g.out.h} ${g.back.h}`, 'discover 5f 5f');
+    eq('records sorted farthest first', P.golds().map(x => x.num === nx.num ? 'X' : 'Y').join(''), R6(me, nx) > R6(me, ny) ? 'XY' : 'YX');
+    // rate limit: the same station again straight away is refused
+    calls.length = 0; document.getElementById('gx').click(); await tick(10);
+    eq('one try per station per 10 min', calls.length, 0);
+    // a path-return with no attempt running = two-way all the same
+    golds.length = 0; P.route({ kind: 'path-updated', num: ny.num });
+    eq('PATH_UPDATED alone counts as two-way', golds.length ? golds[0].how : 'none', 'path-return');
+    // ---- awards (AWARDS_REVIEW.md section 5): Golden Handshake = a ham's companion, credited km, never a repeater
+    eq('Handshake proofs reported to meshfun (k.mutual): ack / discover / path-return with keys', mutuals.map(m => `${m.how}:${m.key === KEY_X ? 'X' : m.key === KEY_Y ? 'Y' : '?'}:${m.type}`).join(' '), 'reverse:X:1 discover:Y:1 path-return:Y:1');
+    eq('golden(g) carries key, HamStatus and the credited km (no chain: 40 km a hop)', golds.length ? `${golds[0].key === KEY_Y} ${golds[0].ham.ham} ${golds[0].ham.call} ${golds[0].km}` : 'none', 'true true VK4YYY 80');
+    // a far REPEATER / room server: never gone for gold (no trace stage), never golden
+    const rz = mk('e1e1e1e1' + '44'.repeat(28), 'Bunya RPT', -26.87, 151.6, 2), rw = mk('e2e2e2e2' + '55'.repeat(28), 'Kingaroy Room', -26.54, 151.84, 3);
+    P.route({ kind: 'rx', snr: -10, pkt: { route: 'flood', type: 4, path: { sz: 1, h: ['a3', '5f'] }, advert: { num: rz.num, key: rz.key } } });
+    P.route({ kind: 'rx', snr: -12, pkt: { route: 'flood', type: 4, path: { sz: 1, h: ['a3', '5f'] }, advert: { num: rw.num, key: rw.key } } });
+    document.getElementById('mp-card').insertAdjacentHTML('beforeend', `<button id="gz" data-gold-try="${rz.num}"></button><button id="gw" data-gold-try="${rw.num}"></button><button id="tab-try" data-tab="try"></button>`);
+    calls.length = 0; golds.length = 0; toasts.length = 0;
+    document.getElementById('gz').click(); await tick(10);
+    document.getElementById('gw').click(); await tick(10);
+    eq('go for gold: a repeater and a room server are refused -- nothing sent, says why', `${calls.length} ${toasts.length} ${/never makes a golden packet/.test(toasts[0] && toasts[0][2])}`, '0 2 true');
+    // a Meshtastic-style traceroute two-way: on the list, no Handshake, no gold
+    const nm0 = mutuals.length;
+    P.trace({ to: rz.num, towards: [me.num, rz.num], back: [rz.num, me.num], at: 0, done: 900 });
+    eq('a traceroute two-way: recorded, no Handshake, no gold', `${P.golds().some(x => x.num === rz.num && x.how === 'traceroute')} ${mutuals.length - nm0} ${golds.length}`, 'true 0 0');
+    // a companion with no callsign, and one of our own nodes: two-way + Handshake proof, never gold
+    const nn = mk('b1b1b1b1' + '66'.repeat(28), 'Farm Node', -26.9, 151.5, 1), mine2 = mk('b2b2b2b2' + '77'.repeat(28), 'VK4XXX Car', -26.8, 151.5, 1);
+    selfSet.add(mine2.key);
+    P.route({ kind: 'path-updated', num: nn.num }); P.route({ kind: 'path-updated', num: mine2.num });
+    eq('no callsign / one of yours: two-way recorded, Handshake proof passed on, no gold', `${P.golds().filter(x => x.num === nn.num || x.num === mine2.num).length} ${mutuals.slice(-2).map(m => m.how).join(',')} ${golds.length}`, '2 path-return,path-return 0');
+    eq('twoWay(g) carries the HamStatus (meshfun decides)', twoWays.filter(x => x.num === nn.num).map(x => `${x.ham.ham} ${x.key === nn.key}`)[0], 'false true');
+    // B3: a ham 5 km away is a two-way, not a golden packet (no "new personal best" rule)
+    const near = mk('b3b3b3b3' + '88'.repeat(28), 'VK4NNN Near', -27.57, 152.73, 1);
+    P.route({ kind: 'path-updated', num: near.num });
+    eq('B3: a ham companion 5 km away -- no gold', `${P.golds().some(x => x.num === near.num && !x.gold)} ${golds.length}`, 'true 0');
+    // credited km: 2-byte hashes that each match ONE positioned repeater -> chainKm (repeater to repeater) + 40 km each end
+    const far = mk('b4b4b4b4' + '99'.repeat(28), 'VK4FFF West', -27.2, 150.6, 1);
+    P.route({ kind: 'rx', snr: -9, pkt: { route: 'flood', type: 4, path: { sz: 2, h: ['a301', '5f01'] }, advert: { num: far.num, key: far.key } } });
+    credits.length = 0; P.route({ kind: 'path-updated', num: far.num });
+    const chain = R6({ lat: -27.56, lon: 151.95 }, { lat: -27.47, lon: 152.95 }), raw = R6(me, far);
+    eq('chainKm from a resolved 2-byte route; credited = min(raw, chain + 80)', credits[0] ? `${credits[0][2]} ${Math.round(credits[0][3])} ${Math.round(golds[0] && golds[0].km)} ${Math.round(golds[0] && golds[0].rawKm)}` : 'none',
+      `2 ${Math.round(chain)} ${Math.round(Math.min(raw, chain + 80))} ${Math.round(raw)}`);
+    eq('1-byte hashes never resolve a chain (40 km a hop)', [...credits].filter(c => c[3] !== undefined).length, 1);
+    // the go-for-gold list: ham companions only
+    const ridge = mk('b5b5b5b5' + 'aa'.repeat(28), 'VK4GGG Ridge', -26.6, 152.0, 1);
+    P.route({ kind: 'rx', snr: -9, pkt: { route: 'flood', type: 4, path: { sz: 1, h: ['5f'] }, advert: { num: ridge.num, key: ridge.key } } });
+    document.getElementById('tab-try').click(); P.render();
+    const offered = [...document.querySelectorAll('#mp-body [data-gold-try]')].map(b => k.nodeName(+b.dataset.goldTry));
+    eq('go-for-gold list: the ham companion, no repeater / room / no-call node', `${offered.includes('VK4GGG Ridge')} ${offered.some(x => /RPT|Room|Farm Node|VK4XXX Car/.test(x))}`, 'true false');
+    // B7: demo -> a session-only book, never saved into meshPaths.<dev>; demoSeed only there
+    await tick(2100); const saved = JSON.stringify(store['meshPaths.meshcore']);
+    demo = true;
+    P.route({ kind: 'path-updated', num: far.num }); P.demoSeed();
+    eq('demo: the two-way shows in the demo book', P.golds().length, 1);
+    await tick(2100);
+    eq('demo: nothing saved into meshPaths.meshcore', JSON.stringify(store['meshPaths.meshcore']) === saved, true);
+    demo = false; P.render();
+    eq('demo over: the real book is back, without the demo record', `${P.golds().length > 1} ${P.golds().filter(x => x.num === far.num).length}`, 'true 1');
+    P.demoSeed(); await tick(2100);
+    eq('demoSeed outside demo: nothing written', JSON.stringify(store['meshPaths.meshcore']) === saved, true);
+  } catch (e) { out.push(`<span class="bad">ERROR ${e.stack}</span>`); fails.push('exception'); }
+  out.push(`RESULT: ${fails.length ? 'FAIL ' + fails.join(', ') : 'ALL PASS'}`);
+  document.getElementById('out').innerHTML = out.join('\n');
+})();
+</script>
+</body></html>

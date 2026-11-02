@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Station SCADA core tests</title></head>
+<body style="font:13px Consolas,monospace;background:#050912;color:#e8f1ff">
+<pre id="out"></pre>
+<script src="../js/meshcore.js"></script>
+<script src="../js/stationscada-core.js"></script>
+<script src="../js/stationscada-sim.js"></script>
+<script>
+/* Station SCADA pure modules: LoRa maths (Semtech calculator values), link budget, Fresnel, limits/alarms, packet
+ * build/decode (against meshcore.js decodeRaw), the simulation (seeded) and the event schema.
+ * chrome --headless=new --allow-file-access-from-files --dump-dom tests/stationscada-tests.html -> RESULT: ALL PASS */
+const out = document.getElementById('out'), fails = [];
+const ok = (name, cond, info = '') => { out.textContent += `${cond ? 'PASS' : 'FAIL'} ${name}${cond ? '' : ` ${info}`}\n`; if (!cond) fails.push(name); };
+const near = (a, b, tol) => Math.abs(a - b) <= tol;
+const C = StationScadaCore;
+
+// LoRa time on air
+ok('airtime SF7 / 125 kHz / 4/5 / preamble 8 / 10 B = 41.216 ms (Semtech)', near(C.airtimeMs(10, { sf: 7, bwKHz: 125, cr: 5, preamble: 8 }), 41.216, 0.001));
+ok('airtime SEQ preset (SF8 / 62.5 / 4/5 / preamble 16), 40 B = 340.99 ms', near(C.airtimeMs(40, C.DEFAULTS.radio), 340.99, 0.01), C.airtimeMs(40, C.DEFAULTS.radio));
+ok('SF12 / 125 kHz turns on low data rate optimise (symbol > 16 ms): 20 B = 1318.9 ms', near(C.airtimeMs(20, { sf: 12, bwKHz: 125, cr: 5, preamble: 8 }), 1318.9, 0.1), C.airtimeMs(20, { sf: 12, bwKHz: 125, cr: 5, preamble: 8 }));
+ok('symbol time SF8 / 62.5 kHz = 4.096 ms', near(C.symbolMs({ sf: 8, bwKHz: 62.5 }), 4.096, 1e-9));
+ok('sensitivity SF8 / 62.5 kHz = -130.0 dBm', near(C.sensitivity({ sf: 8, bwKHz: 62.5 }), -130.04, 0.01));
+ok('free-space loss 1 km at 923.125 MHz = 91.75 dB', near(C.fsplDb(1, 923.125), 91.75, 0.01));
+const lb = C.linkBudget({ txDbm: 22, txGain: 3, txCable: 0.5, rxGain: 3, rxCable: 0.3, km: 10, mhz: 923.125, rssi: -110, snr: 2, radio: C.DEFAULTS.radio });
+ok('link budget: margin is measured RSSI over sensitivity', near(lb.margin, 20.04, 0.01), lb.margin);
+ok('... SNR margin over the SF8 floor (-10 dB)', lb.snrMargin === 12);
+ok('... predicted = EIRP - FSPL + gains - losses', near(lb.predicted, 22 - 0.5 + 3 - C.fsplDb(10, 923.125) + 3 - 0.3, 1e-9));
+
+// Fresnel
+const clear = C.fresnel({ km: 10, mhz: 923.125, h1: 60, elev1: 0, h2: 60, elev2: 0 });
+ok('Fresnel: 60 m masts over 10 km of flat ground are clear (>= 60 %)', clear.clearPct >= 60, clear.clearPct);
+ok('... first zone radius at midpath ~28.5 m', near(clear.r1mid, 28.5, 0.3), clear.r1mid);
+const blocked = C.fresnel({ km: 10, mhz: 923.125, h1: 10, elev1: 0, h2: 10, elev2: 0, obstacles: [{ atKm: 5, heightM: 40, label: 'ridge' }] });
+ok('... a 40 m ridge between 10 m masts blocks it (< 0 %), named', blocked.clearPct < 0 && blocked.worstAt.label === 'ridge', JSON.stringify(blocked.worstAt));
+
+// limits, battery, alarms
+ok('level: below warnLo = warn, below alarmLo = alarm, inside = ok, none = ""', [C.level(3.5, C.DEFAULTS.limits.battV), C.level(3.3, C.DEFAULTS.limits.battV), C.level(4.0, C.DEFAULTS.limits.battV), C.level(null, C.DEFAULTS.limits.battV)].join() === 'warn,alarm,ok,');
+ok('battPct 3.3 V = 0, 3.7 V = 38, 4.2 V = 100', C.battPct(3.3) === 0 && near(C.battPct(3.7), 38, 1e-9) && C.battPct(4.2) === 100);
+const base = { rpt: { battV: 4.0, tempC: 30 }, host: { cpuTempC: 50 }, serial: 'up', lastRxT: 1000, now: 1000 + 60000, dutyPct: 1, crc10: 0 };
+ok('alarms: a healthy station -> all six off', C.evalAlarms(base, C.DEFAULTS.limits).every(a => !a.on) && C.evalAlarms(base, C.DEFAULTS.limits).length === 6);
+const bad = Object.assign({}, base, { serial: 'down', rpt: { battV: 3.35, tempC: 70 }, now: 1000 + 11 * 60000, dutyPct: 12, crc10: 9 });
+ok('alarms: everything wrong -> all six on', C.evalAlarms(bad, C.DEFAULTS.limits).every(a => a.on), JSON.stringify(C.evalAlarms(bad, C.DEFAULTS.limits).filter(a => !a.on)));
+ok('merge: an override wins, defaults fill the rest', (() => { const m = C.merge(C.DEFAULTS, { radio: { sf: 10 } }); return m.radio.sf === 10 && m.radio.bwKHz === 62.5 && m.limits.noRxMin === 10; })());
+
+// packets
+const adv = C.buildPacket({ type: 'ADVERT', route: 'flood', path: ['f1a7', '5b20'], name: 'VK4XXX Rpt', role: 2, lat: -27.62, lon: 152.76 });
+const d = C.decodePacket(adv);
+ok('advert round trip: type, route, 2 hops of 2-byte hashes, name, role, position', d.type === 'ADVERT' && d.route === 'flood' && d.hops === 2 && d.hashSize === 2 && d.path.join() === 'f1a7,5b20'
+  && d.advert.name === 'VK4XXX Rpt' && d.advert.role === 'repeater' && near(d.advert.lat, -27.62, 1e-6), JSON.stringify(d));
+const mc = KellyMeshCore.decodeRaw(adv);
+ok('... meshcore.js decodeRaw reads the same packet the same way', mc && mc.route === 'flood' && mc.type === 4 && mc.path.h.join() === 'f1a7,5b20' && mc.advert.name === 'VK4XXX Rpt', JSON.stringify(mc && mc.path));
+const dm = C.decodePacket(C.buildPacket({ type: 'TXT', route: 'direct', path: [], len: 40 }));
+ok('direct TXT: header route 2, no path, the length asked for', dm.route === 'direct' && dm.type === 'TXT' && dm.hops === 0 && dm.payloadLen === 38, JSON.stringify(dm));
+
+// the simulation
+const run = seed => { const ev = []; const s = StationScadaSim(C.DEFAULTS, e => ev.push(e), { seed, now: 0 }); for (let t = 0; t <= 300000; t += 100) s.step(t); return { ev, s }; };
+const a = run(42), b = run(42);
+ok('simulation: the same seed -> the same events', JSON.stringify(a.ev.map(e => [e.type, e.t, e.dev, e.dir])) === JSON.stringify(b.ev.map(e => [e.type, e.t, e.dev, e.dir])));
+const types = new Set(a.ev.map(e => e.type));
+ok('... emits rf, usb, telemetry, neighbour, env', ['rf', 'usb', 'telemetry', 'neighbour', 'env'].every(t => types.has(t)), [...types].join());
+ok('... every event is schema v1 with a type and a time', a.ev.every(e => e.v === 1 && typeof e.type === 'string' && Number.isFinite(e.t)));
+ok('... rf events name a known device and direction', a.ev.filter(e => e.type === 'rf').every(e => ['rpt', 'cmp', 'nbr'].includes(e.dev) && ['tx', 'rx'].includes(e.dir) && e.pkt && e.pkt.len > 0));
+ok('... rf packets carry real bytes that decode to their stated type', a.ev.filter(e => e.type === 'rf' && e.pkt.hex).every(e => C.decodePacket(Uint8Array.from(e.pkt.hex.match(/../g).map(h => parseInt(h, 16)))).type === e.pkt.type));
+ok('... telemetry for all three devices', ['rpt', 'cmp', 'host'].every(dv => a.ev.some(e => e.type === 'telemetry' && e.dev === dv)));
+const tel = a.ev.filter(e => e.type === 'telemetry' && e.dev === 'rpt').pop().data;
+ok('... repeater battery in range and charging state set', tel.battV > 3.3 && tel.battV < 4.3 && typeof tel.charge === 'string', JSON.stringify(tel));
+// pull the USB cable: link down, then no USB frames until it's back
+const ev2 = [], s2 = StationScadaSim(C.DEFAULTS, e => ev2.push(e), { seed: 3, now: 0 });
+for (let t = 0; t <= 60000; t += 100) s2.step(t);
+s2.inject('usb', 60000); const cut = ev2.length;
+for (let t = 60100; t <= 180000; t += 100) s2.step(t);
+const after = ev2.slice(cut);
+ok('inject usb: a link-down event, then no USB frames', after.some(e => e.type === 'link' && e.serial === 'down') && !after.some(e => e.type === 'usb' && e.t > 60500));
+ok('... host telemetry says the serial link is down', after.filter(e => e.type === 'telemetry' && e.dev === 'host').pop().data.serial === 'down');
+// a long pause (tab hidden) doesn't release a backlog
+const ev3 = [], s3 = StationScadaSim(C.DEFAULTS, e => ev3.push(e), { seed: 5, now: 0 });
+for (let t = 0; t <= 20000; t += 100) s3.step(t);
+const n0 = ev3.filter(e => e.type === 'rf').length; s3.step(20000 + 3600000);
+ok('a 1 h pause -> no burst of packets on resume', ev3.filter(e => e.type === 'rf').length - n0 <= 6, ev3.filter(e => e.type === 'rf').length - n0);
+
+out.textContent += fails.length ? `RESULT: FAIL (${fails.length})\n` : 'RESULT: ALL PASS\n';
+</script>
+</body></html>

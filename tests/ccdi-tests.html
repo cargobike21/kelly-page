@@ -1,0 +1,245 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>CCDI codec tests</title>
+<style>body{font:13px Consolas,monospace;background:#0b0f14;color:#dde}.ok{color:#3d8}.bad{color:#f55}.warn{color:#fb3}</style>
+</head><body>
+<h3>Kelly Page -- CCDI codec tests</h3>
+<pre id="out"></pre>
+<script src="../js/ccdi.js"></script>
+<script>
+// Builders, checksums and decoders against known-good CCDI / CCR frames (the protocol manual's worked examples).
+// Run headless: chrome --headless --dump-dom tests/ccdi-tests.html  -> look for "RESULT:".
+const C = window.CCDI, out = [], fails = [];
+const log = (cls, s) => out.push(`<span class="${cls}">${s.replace(/</g, '&lt;')}</span>`);
+function eq(name, got, want) {
+  got = String(got).replace(/\r$/, ''); want = String(want);
+  if (got === want) log('ok', `PASS ${name}: ${JSON.stringify(got)}`);
+  else { log('bad', `FAIL ${name}: got ${JSON.stringify(got)} want ${JSON.stringify(want)}`); fails.push(name); }
+}
+// Manual examples with checksums known to be wrong in the PDF itself (verified by hand) -- reported, not failed.
+const MANUAL_TYPOS = new Set([]);
+function example(line) {
+  const f = C.splitFrame(line);
+  const ok = f && f.lengthOk && f.checksumOk;
+  if (ok) log('ok', `PASS frame ${JSON.stringify(line)}`);
+  else if (MANUAL_TYPOS.has(line)) log('warn', `TYPO frame ${JSON.stringify(line)} (manual) want cks ${C.checksum(line.slice(0, 3 + (f ? f.size : 0)))}`);
+  else { log('bad', `FAIL frame ${JSON.stringify(line)} size/len ${f && f.lengthOk} cks want ${f && C.checksum(line.slice(0, 3 + f.size))}`); fails.push(line); }
+}
+
+// --- checksum examples
+eq('checksum s0D050800TESTHi!', C.checksum('s0D050800TESTHi!'), 'DA');
+eq('checksum d0D21-12345-6869', C.checksum('d0D21-12345-6869'), '8F');
+
+// --- builders vs manual
+const c = C.cmd, r = C.ccr;
+eq('cancel', c.cancel(0), 'c0100C');
+eq('cancel sdm', c.cancel(1), 'c0110B');
+eq('selcall', c.selcall('12345'), 'd0601234507');
+eq('dtmf', c.dtmf('12345'), 'd0611234506');
+eq('ext save hi', c.extSave('6869'), 'd0720-6869C9');
+eq('ext send trunked', c.extSend('172.16.79.102-64421', '20776F726C64'), 'd2321-172.16.79.102-64421-20776F726C6426');
+eq('ext send conv', c.extSend(12345, '6869'), 'd0D21-12345-68698F');
+eq('externalMessage hi', C.externalMessage(12345, 'hi')[0], 'd0D21-12345-68698F');
+eq('individual call', c.individualCall(31258), 'd06431258FF');
+eq('call alert', c.callAlert(31258), 'd0861,312589E');
+eq('preset msg 3', c.presetMessage(31258, 3), 'd0A66,31258,331');
+eq('status 15', c.statusUpdate(31258, 15), 'd0B68,31258,15FB');
+eq('disable input', c.userControls(1), 'f0241D3');
+eq('rx mute (table: 1 = mute -- confirmed on TP9400)', c.rxMute(true), 'f0251D2');
+eq('subaudible', c.subaudibleValidate(true), 'f0271D0');
+eq('monitor on', c.monitor(true), 'f0281CF');
+eq('tx on', c.tx(true), 'f0291CE');
+eq('tx off', c.tx(false), 'f0290CF');
+eq('enter ccr', c.enterCCR(), 'f0200D8');
+eq('vol ctl on', c.volumeControl(true), 'f03011A5');
+eq('vol ctl off', c.volumeControl(false), 'f03010A6');
+eq('vol 0', c.volume(0), 'f03020A5');
+eq('vol 25', c.volume(25), 'f0402256D');
+eq('vol 5', c.volume(5), 'f03025A0');
+eq('power vlow', c.txPower(1), 'f030719F');
+eq('selcall ring on', c.selcallRing(true), 'f03031A3');
+eq('selcall ring off', c.selcallRing(false), 'f03030A4');
+eq('progress on', c.progressMsgs(true), 'f03041A2');
+eq('progress off', c.progressMsgs(false), 'f03040A3');
+eq('chan progress', c.channelProgress(true), 'f03051A1');
+eq('diag on', c.diagMode(true), 'f03061A0');
+eq('diag off', c.diagMode(false), 'f03060A1');
+eq('key F1 -> index 05', c.key('05', 1), 'f0430516D');
+eq('key F6 0A -> index 10', c.key('0A', 1), 'f04310171');   // TM9100 2026-10-08
+eq('key Soft L 1E -> index 11', c.key('1E', 1), 'f04311170');
+eq('key digit 2 0D -> index 15', c.key('0D', 1), 'f0431516C');
+
+// --- TSBKs for CCR UZG (golden values from scripts/p25x_sdm.py; status update = the one the relay acked 2026-10-08)
+const K = window.CCDI, hexOf = str => Array.from(str, ch => ch.charCodeAt(0).toString(16).padStart(2, '0')).join('');
+eq('tsbk status update', K.tsbk.statusUpdate(5059999, 3050002, 3), '980003004D359F2E8A124F1F');
+eq('tsbk message update', K.tsbk.messageUpdate(5059999, 3050002, 2), '9C0000024D359F2E8A124ABC');
+eq('tsbk call alert', K.tsbk.callAlert(5059999, 3050002), '9F0000004D359F2E8A129B90');
+eq('tsbk radio check', K.tsbk.radioCheck(5059999, 3050002), 'A40000002E8A124D359F7F23');
+eq('tsbk status query', K.tsbk.statusQuery(5059999, 3050002), '9A0000004D359F2E8A1259E0');
+// --- Kelly frames (golden values from scripts/p25x_kelly.py, + the CR the radio needs)
+eq('kelly text frame', hexOf(K.KellyFrame.text(5059999, 'hello from Kelly')), 'a54b01134d359f68656c6c6f2066726f6d204b656c6c79846d0d');
+eq('kelly pos frame', hexOf(K.KellyFrame.pos(-27.6265, 152.7668, '/-', 'Kelly fixed')), 'a54b0215fe5a73fc091b09502f2d4b656c6c79206669786564f22c' + '0d');
+const kc = K.KellyFrame.scan(Array.from(K.KellyFrame.pos(-27.4543, 152.9568, '/-', 'shack', 'vk4xxx-15'), ch => ch.charCodeAt(0)));
+eq('kelly posc frame scan', kc[0].call + '|' + kc[0].comment, 'VK4XXX-15|shack');
+const kf = K.KellyFrame.scan(Array.from(K.KellyFrame.pos(-27.6265, 152.7668, '/-', 'Kelly fixed'), ch => ch.charCodeAt(0)));
+eq('kelly frame scan', JSON.stringify(kf), JSON.stringify([{ type: 'pos', lat: -27.6265, lon: 152.7668, symbol: '/-', call: '', comment: 'Kelly fixed' }]));
+// Transparent-home frames (golden values from scripts/p25x_kelly.py)
+eq('kelly welcome frame', hexOf(K.KellyFrame.welcome(3050002, 0xBEEF)), 'a54b09052e8a12beefeebe' + '0d');
+eq('kelly msg frame', hexOf(K.KellyFrame.msg(3050002, 1050002, 7, 'hi')), 'a54b04092e8a12100592076869 4534'.replace(/ /g, '') + '0d');
+const ks = s => K.KellyFrame.scan(Array.from(s, ch => ch.charCodeAt(0)));
+eq('kelly msg scan (after junk)', JSON.stringify(ks('\x00zz\r' + K.KellyFrame.msg(3050002, 1050002, 7, 'hi'))), JSON.stringify([{ type: 'msg', dst: 3050002, src: 1050002, seq: 7, text: 'hi' }]));
+eq('kelly ack scan', JSON.stringify(ks(K.KellyFrame.ack(5059999, 0, 9))), JSON.stringify([{ type: 'ack', dst: 5059999, src: 0, seq: 9 }]));
+eq('kelly status/preset scan', ks(K.KellyFrame.status(5059999, 0, 3, 4)).concat(ks(K.KellyFrame.status(5059999, 0, 3, 5, true))).map(f => `${f.type}${f.code}`).join(','), 'status4,preset5');
+eq('kelly status+label frame', hexOf(K.KellyFrame.status(5059999, 3050002, 3, 4, false, 'On Site')), 'a54b060f4d359f2e8a1203044f6e2053697465' + '0bb4' + '0d');
+eq('kelly status label scan', ks(K.KellyFrame.status(5059999, 0, 3, 4, false, 'On Site'))[0].label, 'On Site');
+eq('kelly hello scan', JSON.stringify(ks(K.KellyFrame.hello(1, 0xBEEF))), JSON.stringify([{ type: 'hello', mode: 1, nonce: 0xBEEF }]));
+// --- CCR UZC1 PDU blocks captured on the TM9100 2026-10-08 (radio ID re-encoded, CRCs recomputed with scripts/p25x_sdm.py): dashboard text 5059999 -> 3050002
+const asm = new K.PduAssembler();
+asm.feed('Rx', '76dfd82e8a1282032800f8f5dead0100dc2b');
+asm.feed('Rx', '01814d359ff2010011004b454c4c59204343');
+const pdu = K.decodePdu(asm.feed('Rx', '0293522052582054455354000000e6f0309b'));
+eq('pdu text', `${pdu.kind} ${pdu.src} -> ${pdu.dst}: ${pdu.text}`, 'text 5059999 -> 3050002: KELLY CCR RX TEST');
+eq('pdu ack header', K.decodePdu(asm.feed('Tx', '230a004d359f002e8a12db5a')).kind, 'ack');
+// unconfirmed TP9400 GPS beacon (CCR capture 2026-10-08; radio ID re-encoded, CRC-16 / CRC-32 recomputed with scripts/p25x_sdm.py): the secondary-header block must not restart the call
+const ub = new K.PduAssembler();
+['35dfd8ffffff83040000a2afdead0100b4b0', '15ded81005920000000057b7dead0100b4b0', '730010001930303030303030dead0100b4b0'].forEach(h => ub.feed('Rx', h));
+const ug = K.decodePdu(ub.feed('Rx', '30820000000000002dac18e2dead0100b4b0'));
+eq('unconfirmed pdu (gps beacon)', `${ug.kind} ${ug.src}`, 'gps-beacon 1050002');
+eq('ldu1 group LC', JSON.stringify(K.decodeLc('0000040000012e8a12dead')), JSON.stringify({ kind: 'group', tg: 1, src: 3050002, emergency: false, encrypted: false }));
+eq('tsbk decode status', K.decodeTsbk('980003004d359f2e8a124f1f').fields.status, 3);
+eq('talkgroup 48', c.talkgroup(48), 'f04C04857');
+eq('goto 23', c.goToChannel(23), 'g0223D2');
+eq('goto 1499', c.goToChannel(1499), 'g0414995E');
+eq('goto z1 c12', c.goToChannel(12, 1), 'g060100120F');
+eq('goto z1 c1 forced', c.goToChannel(1, 1, true), 'g07010001fAA');
+eq('loc send 1234', c.sendPosition(1234), 'l0600123404');
+eq('loc send grp', c.location(0, 1, 4321), 'l0601432103');
+eq('loc db', c.location(0, 3, 0), 'l030309E');
+eq('loc ack', c.ackEmergency(1234), 'l0610123403');
+eq('loc poll', c.pollLocation(1234), 'l0620123402');
+eq('query model', c.model(), 'q010FE');
+eq('query sdm', c.getSdm(), 'q011FD');
+eq('query versions', c.versions(), 'q013FB');
+eq('cctm 047', c.cctm('047'), 'q0450475B');
+eq('cctm 063', c.cctm(63), 'q0450635D');
+eq('cctm 064', c.cctm(64), 'q0450645C');
+eq('cctm 318', c.cctm(318), 'q0453185A');
+eq('cctm 319', c.cctm(319), 'q04531959');
+eq('send sdm', c.sendSdm(10, '00008001'), 's0B0A00008001\x0021');
+eq('send sdm ret', c.sendSdm(10, '00008001', '12345678'), 's130A00008001\x081234567883');
+eq('transparent z', C.frame('t', 'z'), 't01zB1');
+eq('transparent ffsk', c.transparent('z', '0'), 't02z080');
+eq('transparent p25', c.transparent('y', 'H'), 't02yH69');
+eq('autoFrame q0', C.autoFrame('q0'), 'q010FE');
+eq('autoFrame keeps valid', C.autoFrame('q013FB'), 'q013FB');
+
+// CCR
+eq('ccr rx 453.2', r.rxFreq(453200000), 'R0945320000087');
+eq('ccr tx 453.2', r.txFreq(453200000), 'T0945320000085');
+eq('ccr pulse', r.pulse(), 'Q01PFE');
+eq('ccr pwr vlow', r.power(1), 'P0111E');
+eq('ccr pwr high', r.power(4), 'P0141B');
+eq('ccr bw wide', r.bandwidth(3), 'H01324');
+eq('ccr bw narrow', r.bandwidth(1), 'H01126');
+eq('ccr rx ctcss 67', r.rxCtcss(67), 'A0406708E');
+eq('ccr rx ctcss 0', r.rxCtcss(0), 'A0400009B');
+eq('ccr tx ctcss 67', r.txCtcss(67), 'B0406708D');
+eq('ccr tx ctcss 0', r.txCtcss(0), 'B0400009A');
+eq('ccr rx dcs', r.rxDcs('023'), 'C03023C5');
+eq('ccr rx dcs off', r.rxDcs('000'), 'C03000CA');
+eq('ccr tx dcs', r.txDcs('023'), 'D03023C4');
+eq('ccr tx dcs off', r.txDcs('000'), 'D03000C9');
+eq('ccr selcall', r.selcall('12345'), 'S051234549');
+eq('ccr selcall params', r.selcallParams(0, 1, 5), 'I03015BE');
+eq('ccr ani', r.ani(1, '123'), 'N04112387');
+eq('ccr monitor on', r.monitor(true), 'M01D0E');
+eq('ccr monitor off', r.monitor(false), 'M01E0D');
+eq('ccr vol 0', r.volume(0), 'J03000C3');
+eq('ccr vol 104', r.volume(104), 'J03104BE');
+eq('ccr unit id 53', r.unitId(53), 'U08A0000053AA');
+eq('ccr tg 5170', r.talkgroup(5170), 'U06B0517006');
+eq('ccr modulation 3', r.modulation(3), 'U02C3D3');
+eq('ccr rx nac AD5', r.rxNac('AD5'), 'U04DAD549');
+eq('ccr tx nac 293', r.txNac('293'), 'U04E29364');
+eq('ccr report off', r.signalReport(false), 'U02Y0C0');
+eq('ccr report 750ms', r.signalReport(true, 750), 'U06Y102EECF');
+eq('ccr test mode', r.p25('A', '1'), 'U03ZA17C');
+eq('ccr p25 mode', r.p25('B', '1'), 'U03ZB17B');
+eq('ccr info', r.p25('E'), 'U02ZEAA');
+eq('ccr stop cc', r.p25('I'), 'U02ZIA6');
+eq('ccr fpga', r.p25('N', '3'), 'U03ZN36D');
+eq('ccr exit', r.exit(), 'E005B');
+
+// --- radio -> PC frames from the manual
+['j050472331', 'j06047481F8', 'j07063-488C5', 'j07064-456C9', 'j06318389F0', 'j06319161FB',
+ 'k01004', 'k0A100001Key1A8', 'k02F0BD', 'e03003A5', 's002D', 'm0811100.01A9',
+ 'p0202CC', 'p052300036', 'p052300135', 'p05230622E', 'p052303033', 'n08190011898D',
+ 'r0D40000FF007A1A50', 'r0D40010FF007A1A4F', 'r0D4700602007A1A6D', 'r0D4700802007A1A6B', 'r0714000FFA6',
+ 'r2647040FF-192.168.254.129-64421-64420-3087',
+ '+01U1F', 'M01P02', 'M01R00'].forEach(example);
+
+// --- decoders
+const d = C.decodeLine;
+let e = d('m0811100.01A9'); eq('model decode', e.model + '|' + e.version, 'Tait Orca Elan|00.01');
+e = d('m08541' + '03.06' + C.checksum('m0854103.06')); eq('TP9400 model', e.model, 'TP9400');
+e = d('n08190011898D'); eq('serial', e.serial, '19001189');
+e = d('j07063-488C5'); eq('rssi', e.value, -48.8);
+e = d('e03003A5'); eq('error', e.text, 'Parameter error');
+e = d('p052303033'); eq('key', e.summary, 'Key Up down');
+e = d('r0D40010FF007A1A4F'); eq('ring group from 007A1A', e.caller + '|' + e.target + '|' + e.callKind, '31258|Group|Voice call');
+e = d('r0D4700802007A1A6B'); eq('ring status 2', e.service + '|' + e.statusValue, 'Status update|2');
+e = d('r2647040FF-192.168.254.129-64421-64420-3087'); eq('ring ext trunked', e.srcIp + '|' + e.data + '|' + e.text, '192.168.254.129|30|0');
+const ext = 'r' + C.hex2(('47040FF3310002-3310001-6869').length) + '47040FF3310002-3310001-6869';
+e = d(ext + C.checksum(ext)); eq('ring ext conv', `${e.dest}|${e.caller}|${e.text}|${e.valid}`, '3310002|3310001|hi|true');
+const loc = 'l' + C.hex2(('0000012340$GPRMC,214744,A,3507.1250,S,04418.8890,E,005.0,318.0,270710,000.0,E*60').length) + '0000012340$GPRMC,214744,A,3507.1250,S,04418.8890,E,005.0,318.0,270710,000.0,E*60';
+e = d(loc + C.checksum(loc)); eq('location', `${e.id}|${e.fix.lat.toFixed(5)}|${e.fix.lon.toFixed(5)}`, '1234|-35.11875|44.31482');
+e = d('D:072:1.5:03'); eq('diag signal', `${e.rssi}|${e.ber}|${e.fec}`, '-72|1.5|3');
+e = d('-0302RU1'.slice(0, 6) + C.checksum('-0302R')); eq('ccr nak', e.text + '|' + e.nakFor, 'Checksum error|R');
+e = d('M01R00'); eq('ccr entered', e.type, 'ccr-entered');
+
+// --- parser: prompts vs '.' inside params
+const evs = []; const P = new C.Parser(x => evs.push(x));
+P.push('.m0811100.01A9\r.p0202CC\r.');
+eq('parser events', evs.map(x => x.kind + (x.type ? ':' + x.type : '')).join(','), 'prompt,message:model,prompt,message:progress,prompt');
+
+// --- long message chunking
+const long = 'x'.repeat(160);
+const parts = C.externalMessage(5059999, long);
+eq('chunk count', parts.length, 2);
+eq('chunks valid', parts.every(w => { const f = C.splitFrame(w.replace('\r', '')); return f.checksumOk && f.size <= 175; }), true);
+eq('chunk data intact', parts.map(w => w.replace('\r', '').slice(3, -2).replace(/^2[01]-(\d+-)?/, '')).join(''), C.textToHex(long));
+
+// --- TSBK
+const t = C.decodeTsbk('00000000010065000ABC0000'.padEnd(24, '0'));
+eq('tsbk grant', `${t.name}|${t.fields.group}|${t.fields.channel}`, 'GRP_V_CH_GRANT|101|1');
+
+// --- Tait SDM location beacon (golden: scripts/p25x_sdm.py find_tait_location on the same bytes)
+const hx = h => Array.from(C.hexToBytes(h));
+const tl = C.findTaitLocation(hx('15ded81005920000000057b773001e00193030303030303030800000818283927b7566b52c5960890250'));
+eq('tait fix lat/lon', `${tl.lat.toFixed(4)},${tl.lon.toFixed(4)}|${tl.status}|${tl.utc}`, '-27.6261,152.7660|0|01:02:03');
+eq('tait fix speed', tl.speedKmh.toFixed(1), (25 * 1.852).toFixed(1));
+eq('tait fix rejects junk', C.decodeTaitFix(hx('000000000000000000000000')), null);
+
+// --- Kelly LOCPOLL / LOC frames (golden: scripts/p25x_kelly.py)
+eq('locpoll', C.KellyFrame.scan(Array.from(C.KellyFrame.locpoll(1050002, 1, 7), ch => ch.charCodeAt(0)))[0].target, 1050002);
+const lf = C.KellyFrame.scan(hx('a54b0b162e8a121005920700 01fe5a758c091b0630ffff000302223d'.replace(/ /g, '')))[0];
+eq('loc frame', `${lf.type}|${lf.dst}|${lf.target}|${lf.seq}|${lf.status}|${lf.fix.lat},${lf.fix.lon}|${lf.fix.speedKmh}|${lf.fix.ageS}|${lf.fix.source}`, 'loc|3050002|1050002|7|0|-27.6261,152.766|null|3|lrrp');
+
+const bf = C.KellyFrame.scan(hx('a54b0c1affffff000c0105a04e657420746f6e6967687420373a3330706da1d6'))[0];
+eq('bulletin frame', `${bf.type}|${bf.dst}|${bf.id}|${bf.urgent}|${bf.expiresMin}|${bf.text}`, 'bulletin|16777215|12|true|1440|Net tonight 7:30pm');
+
+// --- Receiver busy / not busy, as the TM9100 sent them (Kelly's channel-busy check, 2026-10-10)
+eq('progress busy/idle checksums', [C.splitFrame('p0205C9').checksumOk, C.splitFrame('p0206C8').checksumOk, C.splitFrame('p0205C8').checksumOk].join(), 'true,true,false');
+
+// --- catalogue builds without throwing
+let built = 0;
+C.CATALOG.forEach(cmdDef => {
+  const p = {}; (cmdDef.params || []).forEach(x => p[x.key] = x.def);
+  try { const w = cmdDef.build(p); (Array.isArray(w) ? w : [w]).forEach(x => { const f = C.splitFrame(x.replace('\r', '')); if (!f || !f.checksumOk) throw new Error('bad frame ' + x); }); built++; }
+  catch (err) { log('bad', `FAIL catalogue ${cmdDef.id}: ${err}`); fails.push(cmdDef.id); }
+});
+log('ok', `catalogue: ${built}/${C.CATALOG.length} commands build valid frames`);
+
+log(fails.length ? 'bad' : 'ok', `RESULT: ${fails.length ? 'FAIL ' + fails.length + ' -> ' + fails.join(', ') : 'ALL PASS'}`);
+document.getElementById('out').innerHTML = out.join('\n');
+</script>
+</body></html>

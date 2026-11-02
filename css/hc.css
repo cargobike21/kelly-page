@@ -1,0 +1,30 @@
+/* Kelly Page -- LoRa Mesh > Ham Contacts tab shell (js/hc-ui.js, 2026-10-24). Layout + shared tokens only: each part
+ * has its own css/hc-*.css. Theme: a QSL-card desk -- warm "card stock" accents on the neon panels, a callsign is
+ * always the boldest thing in a row. Nothing loops (kelly-page/CLAUDE.md). */
+.hc { display: grid; gap: 14px;
+  --hc-card: #ffd9a0; --hc-call: #fff3d6; --hc-ok: #39ff88; --hc-bad: #ff3b5c; --hc-warn: #ffb020; --hc-pend: #a78bfa; --hc-ink: #0b1020;
+  --hc-great: #39ff88; --hc-good: #00e5ff; --hc-fair: #ffb020; --hc-poor: #ff3b5c; }
+.hc-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.hc-title h3 { margin: 0; }
+.hc-title .grow { flex: 1; }
+.hc-mode { font: 700 11px var(--mono); text-transform: uppercase; letter-spacing: .08em; padding: 3px 9px; border-radius: 999px; background: var(--raised); color: var(--dim); border: 1px solid var(--line2); }
+.hc-mode.live { color: var(--lime); border-color: var(--lime); box-shadow: 0 0 10px rgba(57, 255, 136, .35); }
+.hc-mode.demo { color: var(--amber); border-color: var(--amber); box-shadow: 0 0 10px rgba(255, 176, 32, .35); }
+.hc-cap { display: inline-flex; align-items: center; gap: 8px; font: 600 12px var(--mono); color: var(--dim); }
+.hc-cap-bar { width: 90px; height: 8px; border-radius: 4px; background: var(--raised); border: 1px solid var(--line2); overflow: hidden; }
+.hc-cap-bar i { display: block; height: 100%; width: 0; background: var(--cyan); transition: width .4s; }
+.hc-cap.warn .hc-cap-bar i { background: var(--hc-warn); } .hc-cap.warn b { color: var(--hc-warn); }
+.hc-cap.full .hc-cap-bar i { background: var(--hc-bad); } .hc-cap.full b { color: var(--hc-bad); }
+.hc-readout { margin: 10px 0 0; min-height: 20px; font: 600 13px var(--mono); color: var(--dim); }
+.hc-readout.ok { color: var(--hc-ok); } .hc-readout.bad { color: var(--hc-bad); }
+.hc-why { margin-top: 8px; font-size: 13px; color: var(--dim); }
+.hc-why summary { cursor: pointer; color: var(--hc-card); font-weight: 600; }
+.hc-why p { margin: 6px 0; max-width: 90ch; }
+.hc-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); gap: 14px; align-items: start; }
+.hc-grid-low { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.hc-col { display: grid; gap: 14px; min-width: 0; }
+.hc-col > div:empty { display: none; }
+.hc-broken { color: var(--hc-bad); }
+@media (max-width: 1100px) { .hc-grid, .hc-grid-low { grid-template-columns: 1fr; } }
+@media (max-width: 600px) { .hc-cap-bar { width: 60px; } .hc-title .btn { padding-inline: 10px; } }
+.hc, .hc * { scrollbar-color: var(--line2) transparent; scrollbar-width: thin; }

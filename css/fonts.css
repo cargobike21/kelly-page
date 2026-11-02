@@ -1,0 +1,7 @@
+/* Kelly's fonts, served with the page (SIL Open Font Licence, assets/fonts/OFL-*.txt) -- no Google Fonts request, and
+   they work offline and when Kelly is opened as a file. Latin subsets; Orbitron and JetBrains Mono are variable fonts. */
+@font-face { font-family: 'Orbitron'; font-style: normal; font-weight: 400 900; font-display: swap; src: url(../assets/fonts/orbitron.woff2) format('woff2'); }
+@font-face { font-family: 'Rajdhani'; font-style: normal; font-weight: 500; font-display: swap; src: url(../assets/fonts/rajdhani-500.woff2) format('woff2'); }
+@font-face { font-family: 'Rajdhani'; font-style: normal; font-weight: 600; font-display: swap; src: url(../assets/fonts/rajdhani-600.woff2) format('woff2'); }
+@font-face { font-family: 'Rajdhani'; font-style: normal; font-weight: 700; font-display: swap; src: url(../assets/fonts/rajdhani-700.woff2) format('woff2'); }
+@font-face { font-family: 'JetBrains Mono'; font-style: normal; font-weight: 100 800; font-display: swap; src: url(../assets/fonts/jetbrains-mono.woff2) format('woff2'); }

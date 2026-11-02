@@ -1,0 +1,164 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>SSTV protocol tests</title>
+<style>body{font:13px Consolas,monospace;background:#0b0f14;color:#dde}.ok{color:#3d8}.bad{color:#f55}</style>
+</head><body>
+<h3>Kelly Page -- P25X SSTV protocol tests</h3>
+<pre id="out"></pre>
+<script src="../js/sstv.js"></script>
+<script>
+// Golden frames from scripts/p25x_sstv.py; then a lossy loopback between two Links.
+// Run headless: chrome --headless --dump-dom tests/sstv-tests.html  -> look for "RESULT:".
+const S = window.KellySstv, out = [], fails = [];
+const hex = u => Array.from(u, b => b.toString(16).padStart(2, '0')).join('');
+function eq(name, got, want) {
+  if (String(got) === String(want)) out.push(`<span class="ok">PASS ${name}</span>`);
+  else { out.push(`<span class="bad">FAIL ${name}: got ${got} want ${want}</span>`); fails.push(name); }
+}
+const data = new Uint8Array(517); for (let i = 0; i < 512; i++) data[i] = i & 0xFF; data.set([107, 101, 108, 108, 121], 512);
+eq('crc32', S.crc32(data).toString(16), '9b6188b1');
+const t = { data, chunks: [0, 1, 2], mime: 'image/webp', w: 160, h: 120, crc: S.crc32(data), call: 'VK4XXX' };
+eq('START frame', hex(S.frame(S.T.START, 7, 0, S.startPayload(t))), 'a5530107000016000002050003f00100a000789b6188b1564b34585858c6e3');
+eq('DATA frame head + length', hex(S.frame(S.T.DATA, 7, 0, Array.from(data.slice(0, 240)))).slice(0, 40) + ' ' + S.frame(S.T.DATA, 7, 0, Array.from(data.slice(0, 240))).length,
+  'a55302070000f0000102030405060708090a0b0c 249');
+eq('NACK frame', hex(S.frame(S.T.NACK, 7, 0, [0, 1, 0xFF, 0xFF])), 'a55304070000040001ffff6bc2');
+eq('ACK frame', hex(S.frame(S.T.ACK, 7, 0)), 'a55305070000008b86');
+eq('parse(START).call', S.parseStart(S.parse(S.frame(S.T.START, 7, 0, S.startPayload(t))).payload).call, 'VK4XXX');
+// address trailer (radio-to-radio via the gateway): golden from p25x_sstv.start_payload(..., 5059999, 1234567, 7654321)
+const ta = Object.assign({}, t, { to: 5059999, dest: 1234567, from: 7654321 });
+eq('START frame with address', hex(S.frame(S.T.START, 7, 0, S.startPayload(ta))), 'a5530107000020000002050003f00100a000789b6188b1564b34585858004d359f12d68774cbb1a064');
+const pa = S.parseStart(S.startPayload(ta));
+eq('parse(START) address', `${pa.call} ${pa.to} ${pa.dest} ${pa.from}`, 'VK4XXX 5059999 1234567 7654321');
+eq('parse(START) no address', S.parseStart(S.startPayload(t)).to, 0);
+// splitter: junk + two frames split across pushes
+const sp = new S.Splitter(), a = S.frame(S.T.ACK, 9, 0), n = S.frame(S.T.NACK, 9, 0, [0, 3]);
+const all = [0x0D, 0x41, ...a, ...n, 0x0D];
+const got = [...sp.push(all.slice(0, 7)), ...sp.push(all.slice(7))].map(f => S.NAMES[f.type]).join(',');
+eq('splitter resync + split frames', got, 'ACK,NACK');
+
+// lossy loopback with a fake clock: drop DATA 1 and 3 the first time they're sent
+let clock = 0; const now = () => clock;
+const big = new Uint8Array(2000).map((_, i) => (i * 7) & 0xFF);
+const dropped = new Set(), events = [];
+let A, B;
+const deliver = (to, burst, lossy) => {
+  const frames = new S.Splitter().push(burst);
+  for (const f of frames) {
+    if (lossy && f.type === S.T.DATA && (f.seq === 1 || f.seq === 3) && !dropped.has(f.seq)) { dropped.add(f.seq); continue; }
+    to.onFrame(f);
+  }
+};
+A = new S.Link({ now, write: b => deliver(B, b, true), onEvent: e => events.push('A:' + e.kind) });
+B = new S.Link({ now, write: b => deliver(A, b, false), onEvent: e => events.push('B:' + e.kind) });
+A.canWrite = B.canWrite = true;
+A.sendImage(big, { mime: 'image/jpeg', w: 200, h: 100, call: 'VK4XXX' });
+for (let i = 0; i < 2000 && A.busy(); i++) { clock += 200; A.tick(); B.tick(); }
+const rx = [...B.rx.values()][0];
+eq('loopback: receiver has the picture', rx && rx.state === 'done' && hex(rx.data) === hex(big), true);
+eq('loopback: sender got ACK', [...A.tx.values()][0].state, 'done');
+eq('loopback: resent exactly the 2 dropped chunks', [...A.tx.values()][0].resent, 2);
+eq('loopback: receiver NACKed then ACKed', events.includes('B:rx-done') && events.includes('A:tx-progress'), true);
+// a receiver that can't transmit asks to answer (CCR monitor case)
+const C = new S.Link({ now, write: () => {}, onEvent: e => events.push('C:' + e.kind) });
+const D = new S.Link({ now, write: b => new S.Splitter().push(b).forEach(f => C.onFrame(f)) }); D.canWrite = true;
+D.sendImage(big.slice(0, 300)); for (let i = 0; i < 40; i++) { clock += 200; D.tick(); }
+eq('monitor receiver: complete + need-answer', events.includes('C:rx-done') && events.includes('C:need-answer') && C.queue.length > 0, true);
+// two pictures queued at once (2026-10-10): the first one's resends must go before the second's
+// chunks, and cancel() must stop both and drop their frames
+const sentFrames = [];
+const E = new S.Link({ now, write: b => new S.Splitter().push(b).forEach(f => sentFrames.push(f)) }); E.canWrite = true;
+const x1 = E.sendImage(big.slice(0, 1200)), x2 = E.sendImage(big.slice(0, 1200));
+E.onFrame(S.parse(S.frame(S.T.NACK, x1, 0, [0, 2])));   // the dashboard asks for picture 1's chunk 2 again
+clock += 5000; sentFrames.length = 0;
+for (let i = 0; i < 6; i++) { clock += 3000; E.pump(); }
+const firstData = sentFrames.find(f => f.type === S.T.DATA);
+eq('two pictures: picture 1 resend goes before picture 2', firstData && `${firstData.xid}:${firstData.seq}`, `${x1}:2`);
+eq('cancel: stops both pictures', E.cancel(), 2);
+eq('cancel: nothing left to send', E.busy() || E.sending(), false);
+// channel in use (2026-10-10): nothing goes out while busy, and a waiting picture doesn't give up
+// during a long over (3 min, like VK4RSA's) -- it carries on once the channel clears
+let chanBusyNow = true; const busyWrites = [];
+const F = new S.Link({ now, write: b => busyWrites.push(b), channelBusy: () => chanBusyNow }); F.canWrite = true;
+F.sendImage(big.slice(0, 600));
+for (let i = 0; i < 900; i++) { clock += 200; F.tick(); }   // 180 s busy
+eq('channel busy: nothing sent', busyWrites.length, 0);
+chanBusyNow = false;
+for (let i = 0; i < 100; i++) { clock += 200; F.tick(); }   // clear: the picture goes, then waits for its answer
+const ft = [...F.tx.values()][0];
+eq('channel busy: picture went once clear', busyWrites.length > 0 && ft.state === 'waiting', true);
+chanBusyNow = true;
+for (let i = 0; i < 900; i++) { clock += 200; F.tick(); }   // another 3-min over while waiting for the answer
+eq('channel busy: waiting picture did not give up', ft.state, 'waiting');
+// addressed pictures: a Kelly only takes (and answers) one whose "to" is its own ID
+const heardBy = (me) => { const L = new S.Link({ now, write: () => {}, me: () => me }); L.canWrite = true; return L; };
+const mine = heardBy(1234567), other = heardBy(3050002), unknown = heardBy(0);
+const G = new S.Link({ now, write: b => new S.Splitter().push(b).forEach(f => [mine, other, unknown].forEach(l => l.onFrame(f))) });
+G.canWrite = true; G.sendImage(big.slice(0, 600), { to: 1234567, dest: 1234567, from: 5059999 });
+for (let i = 0; i < 40; i++) { clock += 200; G.tick(); }
+eq('addressed: the "to" radio takes it', [...mine.rx.values()][0].state === 'done' && mine.queue.length > 0, true);
+eq('addressed: another radio ignores it and does not answer', [...other.rx.values()][0].ignored === true && other.queue.length === 0, true);
+eq('addressed: own ID unknown -> takes it', [...unknown.rx.values()][0].state, 'done');
+// give up on no progress, not on a round count (2026-10-16): a transfer whose missing list keeps
+// shrinking carries on past MAX_ROUNDS rounds; one that loses the same chunks every round gives up
+const lossyRun = (drop) => {
+  let R; const sends = new Map();
+  const T = new S.Link({ now, write: b => new S.Splitter().push(b).forEach(f => {
+    if (f.type === S.T.DATA) { const n = (sends.get(f.seq) || 0) + 1; sends.set(f.seq, n); if (drop(f.seq, n)) return; }
+    R.onFrame(f); }) });
+  R = new S.Link({ now, write: b => new S.Splitter().push(b).forEach(f => T.onFrame(f)) });
+  T.canWrite = R.canWrite = true; T.sendImage(new Uint8Array(6000).map((_, i) => (i * 13) & 0xFF));
+  const t = [...T.tx.values()][0];
+  for (let i = 0; i < 30000 && t.state !== 'done' && t.state !== 'failed'; i++) { clock += 200; T.tick(); R.tick(); }
+  return t;
+};
+const slow = lossyRun((seq, n) => n <= seq % 12);   // chunk s needs (s % 12) + 1 tries: shrinks every round
+eq('progress: delivered after more than 8 rounds', slow.state === 'done' && slow.rounds > 8, true);
+const stuck = lossyRun((seq) => seq === 3 || seq === 7);   // the same two chunks lost every time
+eq('no progress: gives up', stuck.state, 'failed');
+// SHORT frames (a whole request / answer in one frame): goldens from p25x_sstv.short_frame
+const KFM = 'application/x-kelly-kf', ME = 3050002;
+const sq = S.shortFrame(7, KFM, { from: ME }, [0x83, 23]);
+eq('SHORT request frame = 14 B (one TM9100 uplink call)', `${sq.length} ${hex(sq)}`, '14 a55306070a02052e8a128317ab7f');
+const sa = S.shortFrame(7, KFM, { to: ME }, [0x84, 0, ...new TextEncoder().encode('{"app":"x"}')]);
+eq('SHORT answer frame', hex(sa), 'a55306070a01102e8a1284007b22617070223a2278227db268');
+const ps = S.parseShort(S.parse(sa));
+eq('parseShort', `${ps.mime} ${ps.to} ${ps.from} ${ps.data.length}`, `${KFM} ${ME} 0 13`);
+// a Kelly (K) against a fake gateway: answer(xid, n) decides what the gateway does with the n-th copy of a request
+const shortRun = (answer, me = ME, ticks = 300) => {
+  const ev = [], heard = [];
+  let K;
+  const gw = new S.Link({ now, write: b => new S.Splitter().push(b).forEach(f => { K.onFrame(f); others.forEach(o => o.onFrame(f)); }) });
+  const others = [heardBy(1234567)];
+  const copies = new Map();
+  K = new S.Link({ now, me: () => me, onEvent: e => { if (e.kind !== 'tx-progress') ev.push(e.kind); }, write: b => new S.Splitter().push(b).forEach(f => {
+    heard.push(f.type);
+    if (f.type !== S.T.SHORT) { gw.onFrame(f); return; }
+    const n = (copies.get(f.xid) || 0) + 1; copies.set(f.xid, n);
+    answer(gw, f, n);
+  }) });
+  K.canWrite = gw.canWrite = true;
+  const xid = K.sendShort([0x83, 23], { from: me });
+  for (let i = 0; i < ticks; i++) { clock += 200; K.tick(); gw.tick(); }
+  return { t: K.tx.get(xid), r: K.rx.get(xid), ev, heard, others, xid };
+};
+const reply = (gw, f, to = ME) => gw.queue.push({ pri: 0, fr: S.shortFrame(f.xid, KFM, { to }, [0x84, 0, 0x7B, 0x7D]) });
+let sr = shortRun((gw, f) => reply(gw, f));
+eq('SHORT: quick answer = delivered + received, one frame each way', `${sr.t.state} ${sr.r && sr.r.state} ${sr.ev.join(',')} ${sr.heard.length}`, 'done done tx-done,rx-done 1');
+eq('SHORT: answer data handed over', hex(sr.r.data), '84007b7d');
+eq('SHORT: another radio ignores an answer for us', sr.others[0].rx.size, 0);
+sr = shortRun((gw, f, n) => { if (n > 1) reply(gw, f); });   // the first answer is lost
+eq('SHORT: lost answer -> request again -> answered', `${sr.t.state} ${sr.t.resent} ${sr.ev.join(',')}`, 'done 1 tx-done,rx-done');
+sr = shortRun((gw, f) => { reply(gw, f); reply(gw, f); });   // the gateway's answer arrives twice
+eq('SHORT: a repeated answer is taken once', sr.ev.filter(x => x === 'rx-done').length, 1);
+sr = shortRun((gw, f) => gw.queue.push({ pri: 0, fr: S.frame(S.T.ACK, f.xid, 0, [1]) }));   // slow answer: ACK first
+eq('SHORT: an ACK is the receipt, and says the gateway takes SHORT', `${sr.t.state} ${sr.ev.join(',')}`, 'done peer,tx-done');
+sr = shortRun(() => {});
+eq('SHORT: never answered -> gives up after 4 tries', `${sr.t.state} ${sr.heard.length}`, 'failed 4');
+sr = shortRun((gw, f) => reply(gw, f, 7777777));
+eq('SHORT: an answer for another radio is not ours', sr.t.state, 'failed');
+sr = shortRun((gw, f) => { gw.sendImage(big.slice(0, 900), { mime: KFM, to: ME, dest: ME, from: 5059999 }); const t = [...gw.tx.values()].pop(); gw.tx.delete(t.xid); t.xid = f.xid; gw.tx.set(f.xid, t);
+  gw.queue = gw.queue.map(q => { const g = S.parse(q.fr); return g && g.xid !== f.xid ? { pri: q.pri, fr: S.frame(g.type, f.xid, g.seq, Array.from(g.payload)) } : q; }); }, ME, 600);
+eq('SHORT: a big answer as a transfer on the same xid', `${sr.t.state} ${sr.r && sr.r.state} ${sr.r && sr.r.data.length}`, 'done done 900');
+out.push(fails.length ? `<span class="bad">RESULT: FAIL ${fails.length} -> ${fails.join(', ')}</span>` : '<span class="ok">RESULT: ALL PASS</span>');
+document.getElementById('out').innerHTML = out.join('\n');
+</script>
+</body></html>

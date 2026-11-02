@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>ISS orbit tests</title></head>
+<body><pre id="out"></pre>
+<script src="../vendor/satellite.js-5.0.0/satellite.min.js"></script>
+<script src="../js/issorbit.js"></script>
+<script>
+// ISS orbit + Doppler engine (js/issorbit.js on satellite.js SGP4). Headless:
+//   msedge --headless=new --allow-file-access-from-files --dump-dom kelly-page/tests/iss-tests.html  -> "RESULT: ALL PASS"
+(function () {
+  const out = [], O = window.KellyIssOrbit; let fails = 0;
+  const ok = (c, what) => { out.push(`${c ? 'PASS' : 'FAIL'}  ${what}`); if (!c) fails++; };
+  try {
+    // CelesTrak, 2026-10-18 (epoch 2026-10-18 03:28 UTC)
+    const r = O.rec('1 25544U 98067A   26291.14461894  .00007503  00000+0  14456-3 0  9994', '2 25544  51.6328  51.6259 0006780 277.7856  82.2363 15.48918166590814');
+    const t0 = Date.UTC(2026, 9, 18, 6, 0, 0), bne = { lat: -27.47, lon: 153.03, alt: 0.05 };
+    const l = O.look(r, t0, bne);
+    ok(l && l.alt > 380 && l.alt < 440, `ISS altitude ${l && l.alt.toFixed(0)} km (380-440)`);
+    ok(l && l.v > 7.5 && l.v < 7.8, `orbital speed ${l && l.v.toFixed(2)} km/s (~7.66)`);
+    ok(l && Math.abs(l.lat) <= 51.7, `sub-satellite latitude ${l && l.lat.toFixed(1)} within the 51.6 deg inclination`);
+    const ps = O.passes(r, bne, t0, 48, 0);
+    ok(ps.length >= 4 && ps.length <= 14, `${ps.length} passes over Brisbane in 48 h (4-14)`);
+    ok(ps.every(p => p.los > p.aos && (p.los - p.aos) < 12 * 60e3), 'every pass under 12 minutes, LOS after AOS');
+    ok(ps.every(p => p.maxEl > 0 && p.maxEl <= 90), 'max elevations between 0 and 90 deg');
+    // Doppler over the best pass: positive at AOS, negative at LOS, |max| ~3-3.6 kHz at 145.8 MHz
+    const p = ps.slice().sort((a, b) => b.maxEl - a.maxEl)[0];
+    const sh = t => O.rxHz(145.8e6, O.look(r, t, bne).rr) - 145.8e6;
+    const aos = sh(p.aos), los = sh(p.los), mid = sh(p.tca);
+    ok(aos > 2000 && los < -2000, `Doppler AOS ${aos.toFixed(0)} Hz (+), LOS ${los.toFixed(0)} Hz (-)`);
+    ok(Math.abs(aos) < 3700 && Math.abs(los) < 3700, 'Doppler within +-3.7 kHz at 145.8 MHz');
+    ok(Math.abs(mid) < Math.abs(aos), `Doppler near zero at closest approach (${mid.toFixed(0)} Hz)`);
+    // cross-check our range-rate Doppler against satellite.js's own dopplerFactor at one instant
+    const S = window.satellite, d = new Date(p.aos + 60e3), pv = S.propagate(r, d), g = S.gstime(d);
+    const obsEcf = S.geodeticToEcf({ latitude: bne.lat * Math.PI / 180, longitude: bne.lon * Math.PI / 180, height: bne.alt });
+    const fac = S.dopplerFactor(obsEcf, S.eciToEcf(pv.position, g), S.eciToEcf(pv.velocity, g));
+    const theirs = 145.8e6 * fac - 145.8e6, ours = sh(p.aos + 60e3);
+    ok(Math.abs(Math.abs(theirs) - Math.abs(ours)) < 300, `range-rate Doppler ${ours.toFixed(0)} Hz vs satellite.js dopplerFactor ${theirs.toFixed(0)} Hz (magnitude within 300 Hz)`);
+    // bank stepping
+    ok([4200, 2600, 900, -1300, -4800].map(s => O.bankChannel(s)).join() === '0,1,2,3,4', 'bank: +4.2/+2.6/+0.9/-1.3/-4.8 kHz -> CH1..CH5');
+    ok(Math.abs(O.footprintKm(410) - 2240) < 120, `footprint radius ${O.footprintKm(410).toFixed(0)} km at 410 km (~2200)`);
+  } catch (e) { ok(false, 'exception: ' + (e.stack || e)); }
+  out.push(fails ? `RESULT: ${fails} FAILED` : 'RESULT: ALL PASS');
+  document.getElementById('out').textContent = out.join('\n');
+})();
+</script>
+</body></html>

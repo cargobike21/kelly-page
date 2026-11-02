@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Packet Journey sound tests</title></head>
+<body><div id="mount"></div><pre id="out">running</pre>
+<script src="../js/mcdecode.js"></script>
+<script src="../js/pj-core.js"></script>
+<script src="../js/pj-sound.js"></script>
+<script>
+// js/pj-sound.js on OfflineAudioContexts. Open in a browser, or headless over CDP and read #out (--dump-dom snapshots at load,
+// before the offline renders finish; --virtual-time-budget stalls them) -> "RESULT: ALL PASS"
+(async function () {
+  const out = [], PJ = window.KellyPJ; let fails = 0;
+  const ok = (cond, what) => { out.push(`${cond ? 'PASS' : 'FAIL'}  ${what}`); if (!cond) fails++; document.getElementById('out').textContent = out.join('\n'); };
+  const SR = 22050;
+  function mk(opts = {}) {
+    const mem = new Map(opts.store || []), bus = PJ.createBus(), m = document.createElement('div');
+    document.getElementById('mount').appendChild(m);
+    const ac = new OfflineAudioContext(2, Math.round(SR * (opts.secs || 2)), SR);
+    let vis = opts.vis !== false;
+    const c = { bus, PJ, esc: s => String(s).replace(/[<>&"]/g, ''), store: { get: (k, d) => mem.has(k) ? JSON.parse(mem.get(k)) : d, set: (k, v) => mem.set(k, JSON.stringify(v)) },
+      audioCtx: () => ac, visible: () => vis };
+    const s = window.KellyPJSound(m, c);
+    return { s, c, bus, m, ac, mem, setVis(v) { vis = v; bus.emit('visible', v); } };
+  }
+  const render = async ac => { const b = await ac.startRendering(); const a = b.getChannelData(0); return a; };
+  const peak = a => { let p = 0; for (const x of a) p = Math.max(p, Math.abs(x)); return p; };
+  const ev = (kind, o = {}) => Object.assign({ kind, type: null, route: 'direct', snr: null, hops: null, path: null, snrs: null }, o);
+  try {
+    // 1. starts off; nothing plays until the toggle is clicked
+    const A = mk();
+    ok(A.m.querySelector('.pj-sound-tog') && A.m.querySelectorAll('.pj-sound-chip').length === 8, 'toggle + 8 mute chips (7 kinds + flood)');
+    A.bus.emit('packet', ev('chat', { snr: 5 }));
+    ok(A.s._test.stats().played === 0, 'silent while off');
+    A.m.querySelector('.pj-sound-tog').click();
+    ok(A.s._test.stats().on && A.s._test.stats().played === 1, 'click turns it on (hello ping)');
+    A.s.destroy(); ok(A.m.innerHTML === '', 'destroy empties the mount');
+    A.bus.emit('packet', ev('chat')); ok(true, 'packet after destroy does not throw');
+
+    // 2. every kind (and flood) is audible and doesn't clip; diff against a hello-only render
+    const base = mk({ secs: 1.6 }); base.s._test.setOn(true); const b0 = await render(base.ac); base.s.destroy();
+    const cases = [['advert', ev('advert', { snr: 8, hops: 3 })], ['chat', ev('chat', { snr: -5 })], ['dm', ev('dm')], ['ack', ev('ack', { snr: 10 })],
+      ['path', ev('path', { type: 'PATH' })], ['trace', ev('path', { type: 'TRACE', snrs: [4, -8, 12] })], ['req', ev('req', { type: 'REQ' })],
+      ['response', ev('req', { type: 'RESPONSE', snr: 2 })], ['unknown', ev('unknown')], ['flood chat', ev('chat', { route: 'flood', hops: 2, path: ['aa', 'bb'] })],
+      ['all-null', { kind: null }], ['bogus kind', { kind: 'zzz', snr: 'x', hops: NaN }]];
+    for (const [name, e] of cases) {
+      const T = mk({ secs: 1.6 }); T.s._test.setOn(true); T.bus.emit('packet', e);
+      const a = await render(T.ac); let d = 0; for (let i = 0; i < a.length; i++) d = Math.max(d, Math.abs(a[i] - b0[i]));
+      ok(T.s._test.stats().played === 2 && d > 0.002 && peak(a) < 0.99, `${name}: plays (diff ${d.toFixed(3)}, peak ${peak(a).toFixed(2)})`);
+      T.s.destroy();
+    }
+
+    // 3. a 50-packet burst: at most 6 sounds now, the rest merged into one cluster, no clipping
+    const B = mk({ secs: 3 }); B.s._test.setOn(true);
+    for (let i = 0; i < 50; i++) B.bus.emit('packet', ev(PJ.KINDS[i % 7], { snr: (i % 20) - 10, route: i % 3 ? 'direct' : 'flood', hops: i % 5 }));
+    let st = B.s._test.stats();
+    ok(st.played <= 7 && st.played >= 5, `burst: ${st.played} sounds played (the hello + a bucket of 6)`);
+    ok(st.clustered >= 44, `burst: ${st.clustered} merged into a cluster`);
+    ok(st.active <= 14, `burst: ${st.active} voices alive (cap 14)`);
+    await new Promise(r => setTimeout(r, 600));
+    st = B.s._test.stats();
+    ok(st.clusters === 1, `burst: one cluster sound (${st.clusters})`);
+    const ab = await render(B.ac);
+    ok(peak(ab) > 0.02 && peak(ab) < 0.99, `burst render audible, not clipped (peak ${peak(ab).toFixed(2)})`);
+    await new Promise(r => setTimeout(r, 50));
+    ok(B.s._test.stats().active === 0, `every voice disconnected after rendering (${B.s._test.stats().active} left)`);
+    B.s.destroy();
+
+    // 4. hidden tab, muted kind, saved settings
+    const C = mk({ store: [['pjSound', JSON.stringify({ vol: 0.3, mute: { dm: true } })]] });
+    ok(C.m.querySelector('.pj-sound-vol').value === '30', 'volume restored from store');
+    ok(C.m.querySelector('.pj-sound-chip[data-k="dm"]').classList.contains('off'), 'dm mute restored');
+    ok(!C.s._test.stats().on, 'still starts off even with saved settings');
+    C.s._test.setOn(true); C.bus.emit('packet', ev('dm'));
+    ok(C.s._test.stats().played === 1, 'muted kind is silent');
+    C.setVis(false); C.bus.emit('packet', ev('chat'));
+    ok(C.s._test.stats().played === 1, 'silent while hidden');
+    C.setVis(true); C.bus.emit('packet', ev('chat'));
+    ok(C.s._test.stats().played === 2, 'plays again when visible');
+    C.m.querySelector('.pj-sound-chip[data-k="ack"]').click();
+    ok(JSON.parse(C.mem.get('pjSound')).mute.ack === true, 'chip click saves the mute');
+    C.s.destroy();
+  } catch (e) { ok(false, 'threw: ' + (e && e.stack || e)); }
+  out.push(`RESULT: ${fails ? fails + ' FAIL' : 'ALL PASS'}`);
+  document.getElementById('out').textContent = out.join('\n');
+})();
+</script>
+</body></html>

@@ -1,0 +1,47 @@
+/* Kelly Page -- APRS iGate page (js/igateui.js). Nothing animates: it is a status page that redraws every few seconds. */
+.ig-ctl { align-items: flex-end; }
+.ig-note { margin-top: 10px; line-height: 1.5; }
+.ig-msg { margin: 8px 0; line-height: 1.5; }
+.ig-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 0 0 14px; }
+.ig-kpi { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ig-kpi > span { font-size: 11.5px; color: var(--dim); text-transform: uppercase; letter-spacing: .07em; }
+.ig-kpi > b { font: 700 22px var(--mono); color: var(--text); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.ig-kpi > em { font-style: normal; font-size: 12px; color: var(--mute); overflow-wrap: anywhere; }
+.ig-kpi.ok { border-color: rgba(57, 255, 136, .45); } .ig-kpi.ok > b { color: var(--lime); }
+.ig-kpi.warn { border-color: rgba(255, 176, 32, .45); } .ig-kpi.warn > b { color: var(--amber); }
+.ig-kpi.bad { border-color: rgba(255, 59, 92, .55); } .ig-kpi.bad > b { color: var(--red); }
+.ig-kpi.dim2 > b { color: var(--amber); }
+.ig-scroll { max-height: 420px; overflow: auto; }
+.ig-raw { overflow-wrap: anywhere; max-width: 520px; }
+.ig-more { margin-top: 12px; } .ig-more > summary { cursor: pointer; color: var(--dim); margin-bottom: 8px; }
+.ig-log { max-height: 300px; overflow: auto; line-height: 1.55; }
+.ig-l > span { color: var(--mute); margin-right: 6px; }
+.ig-l { overflow-wrap: anywhere; }
+.ig-l.out { color: var(--lime); } .ig-l.drop { color: var(--amber); } .ig-l.in { color: var(--cyan); } .ig-l.br { color: var(--dim); }
+.ig-acts { white-space: nowrap; }
+.warn-txt { color: var(--amber); }
+.ig-slots input, .ig-slots select { width: 100%; min-width: 0; font-size: 12.5px; padding: 3px 5px; }
+.ig-slots td { padding: 3px 4px; } .ig-slots td:first-child { color: var(--dim); font: 600 12px var(--mono); }
+.ig-slots td:nth-child(2) { min-width: 150px; } .ig-slots td:nth-child(n+3):not(:last-child) { width: 70px; }
+#ig-t-prev { white-space: pre-wrap; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; margin: 8px 0; }
+@media (max-width: 600px) {
+  .ig-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ig-raw { max-width: 220px; }
+}
+
+/* 🔎 Add my device (js/igateui.js renderFind): searchable heard nodes, newest first, a prefilled confirm card */
+.ig-find { margin: 12px 0; padding: 12px; border-radius: 12px; border: 1px solid rgba(0, 229, 255, .45); background: rgba(0, 229, 255, .05); display: grid; gap: 8px; }
+.ig-find-h { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.ig-find-h b { font: 700 15px var(--display); letter-spacing: .04em; color: var(--cyan); }
+.ig-find input#ig-find-q { min-width: 260px; background: #081022; border: 1px solid var(--line2); border-radius: 8px; padding: 6px 10px; }
+.ig-find-hint { padding: 6px 10px; border-radius: 8px; background: rgba(255, 176, 32, .08); border: 1px solid rgba(255, 176, 32, .4); }
+.ig-find-rows { display: grid; gap: 6px; }
+.ig-find-row { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line2); background: #0a1226; }
+.ig-find-row.fresh { border-color: var(--lime); box-shadow: 0 0 12px rgba(57, 255, 136, .25); }
+.ig-find-row.sel { border-color: var(--cyan); }
+.ig-find-row .grow { flex: 1; min-width: 0; }
+.ig-find-ic { font-size: 22px; flex: none; }
+.ig-find-mp { color: var(--lime); }
+.ig-find-card { padding: 12px; border-radius: 12px; border: 1px solid var(--cyan); background: #0a1226; display: grid; gap: 8px; }
+.ig-find-card p { margin: 0; }
+.ig-find-warn { color: var(--amber); min-height: 1em; }

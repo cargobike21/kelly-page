@@ -1,0 +1,38 @@
+/* Kelly Page -- LoRa Mesh > Trace Route tab shell (js/tr-ui.js, 2026-10-24). Layout only: each part has its own
+ * css/tr-*.css. The constellation theme's tokens live here (night sky, ice-blue outbound, gold return); anything that
+ * moves is drawn by JS and stops (kelly-page/CLAUDE.md). */
+.tr { display: grid; gap: 14px;
+  --tr-sky: #03060f; --tr-sky2: #0a1430; --tr-star: #eaf6ff; --tr-out: #7df9ff; --tr-back: #ffd36b; --tr-fail: #ff3b5c;
+  --tr-great: #39ff88; --tr-good: #00e5ff; --tr-fair: #ffb020; --tr-poor: #ff3b5c; }
+.tr-title { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.tr-title h2 { margin: 0; }
+.tr-mode { font: 700 11px var(--mono); text-transform: uppercase; letter-spacing: .08em; padding: 3px 9px; border-radius: 999px; background: var(--raised); color: var(--dim); border: 1px solid var(--line2); }
+.tr-mode.live { color: var(--lime); border-color: var(--lime); box-shadow: 0 0 10px rgba(57, 255, 136, .35); }
+.tr-mode.demo { color: var(--amber); border-color: var(--amber); box-shadow: 0 0 10px rgba(255, 176, 32, .35); }
+.tr-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+.tr-bar .grow { flex: 1; }
+.tr-sound { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* picker on the left, the sky on the right; one column on a phone (picker first, the stage scrolls into view on Trace) */
+.tr-main { display: grid; grid-template-columns: minmax(310px, 1fr) minmax(0, 1.8fr); gap: 14px; align-items: stretch; }
+.tr-pick { min-width: 0; }   /* the picker's own list scrolls (tr-picker.css) -- no box-in-a-box scrolling */
+.tr-stage { padding: 0; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+.tr-viz { position: relative; flex: 1; min-height: 440px; height: 60vh; background: radial-gradient(ellipse at 50% 30%, var(--tr-sky2), var(--tr-sky) 72%); }
+.tr-readout { border-top: 1px solid var(--line); min-height: 40px; padding: 10px 14px; font: 600 14px var(--mono); color: var(--dim); }
+.tr-readout.success { color: var(--tr-back); } .tr-readout.timeout, .tr-readout.no-path, .tr-readout.error { color: var(--tr-fail); }
+.tr-history { min-width: 0; } .tr-history:empty { display: none; }
+@media (max-width: 1100px) { .tr-main { grid-template-columns: 1fr; } }
+@media (max-width: 600px) { .tr-viz { min-height: 300px; height: 50vh; } .tr-bar .btn { padding-inline: 10px; } }
+
+/* full screen (Fullscreen API on .tr, or .tr-fs where the browser won't): the sky takes the room, the picker a strip */
+.tr:fullscreen, .tr.tr-fs { background: var(--bg); padding: 14px 18px; overflow: auto; grid-template-rows: auto 1fr auto; }
+.tr.tr-fs { position: fixed; inset: 0; z-index: 2000; }
+.tr:fullscreen .tr-head > p, .tr.tr-fs .tr-head > p { display: none; }
+/* the head + picker + sky fit one screen (the picker scrolls inside its column); history waits below the fold */
+.tr:fullscreen .tr-main, .tr.tr-fs .tr-main { grid-template-columns: minmax(330px, .8fr) minmax(0, 3fr); height: calc(100vh - 195px); min-height: 0; }
+.tr:fullscreen .tr-pick, .tr.tr-fs .tr-pick { min-height: 0; overflow: auto; }
+.tr:fullscreen .tr-stage, .tr.tr-fs .tr-stage { min-height: 0; }
+.tr:fullscreen .tr-viz, .tr.tr-fs .tr-viz { height: auto; min-height: 0; }
+.tr:fullscreen .tr-head, .tr.tr-fs .tr-head, .tr:fullscreen .tr-readout, .tr.tr-fs .tr-readout { zoom: 1.25; }
+@media (max-width: 900px) { .tr:fullscreen .tr-main, .tr.tr-fs .tr-main { grid-template-columns: 1fr; height: auto; } .tr:fullscreen .tr-viz, .tr.tr-fs .tr-viz { min-height: 60vh; } .tr:fullscreen .tr-head, .tr.tr-fs .tr-head, .tr:fullscreen .tr-readout, .tr.tr-fs .tr-readout { zoom: 1; } }
+.tr, .tr * { scrollbar-color: var(--line2) transparent; scrollbar-width: thin; }

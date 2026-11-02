@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Mackay gas turbine tests</title></head>
+<body><pre id="out"></pre>
+<script>
+// A fake clock, installed before the scripts load: setTimeout / performance.now run on simulated time, so the
+// master's timeouts, the outstation's select timer and the P25 link's air time all run in milliseconds of wall time.
+//   msedge --headless=new --allow-file-access-from-files --dump-dom kelly-page/tests/mackaygt-tests.html  -> "RESULT: ALL PASS"
+let T = 0, tid = 0; const Q = [];
+window.setTimeout = (fn, ms) => { Q.push({ id: ++tid, at: T + Math.max(0, +ms || 0), fn }); return tid; };
+window.clearTimeout = id => { const k = Q.findIndex(q => q.id === id); if (k >= 0) Q.splice(k, 1); };
+Object.defineProperty(performance, 'now', { value: () => T, configurable: true });
+function advance(ms) {
+  const end = T + ms;
+  for (;;) { Q.sort((a, b) => a.at - b.at || a.id - b.id); const q = Q[0]; if (!q || q.at > end) break; Q.shift(); T = q.at; q.fn(); }
+  T = end;
+}
+</script>
+<script src="../js/dnp3.js"></script>
+<script src="../js/dnp3sim.js"></script>
+<script src="../js/dnp3link.js"></script>
+<script src="../js/scadacore.js"></script>
+<script src="../js/mackaygt.js"></script>
+<script>
+(function () {
+  const out = [], D = window.DNP3, S = window.DNP3Sim, G = window.MackayGT, P = G.POINTS, C = G.C; let fails = 0;
+  const ok = (c, what) => { out.push(`${c ? 'PASS' : 'FAIL'}  ${what}`); if (!c) fails++; };
+  const near = (a, b, tol, what) => ok(Math.abs(a - b) <= tol, `${what} (got ${typeof a === 'number' ? a.toFixed(3) : a}, want ${b} ± ${tol})`);
+  // run the plant (real seconds) until pred, or max s; returns the seconds taken
+  const until = (m, pred, max = 400, dt = 0.25) => { let t = 0; while (t < max && !pred(m)) { m.tick(dt); t += dt; } return t; };
+  const tick = (m, secs, dt = 0.25) => { for (let t = 0; t < secs; t += dt) m.tick(dt); };
+  const fresh = (o = {}) => new G.Plant(Object.assign({ accel: 1, seed: 7 }, o));
+  const onLoad = (mw = 30) => { const m = fresh({ online: mw }); tick(m, 5); return m; };
+  try {
+    // ================================================================ fuel maths
+    const full = G.fullLoadLph();
+    ok(full >= 12000 && full <= 13500, `34 MW x 0.30 kg/kWh / 0.84 kg/L = ${full.toFixed(0)} L/h (brief: 12,000-13,500)`);
+    near(G.fuelLph(34), full, 0.01, 'fuelLph(34 MW) = full-load fuel');
+    near(G.fuelLph(0), full * G.FUEL.fsnl, 0.01, 'fuelLph(0 MW) = full speed no load (22 % of full-load fuel)');
+    const sfc17 = G.fuelLph(17) * G.FUEL.density / 17000;
+    ok(sfc17 > 0.33 && sfc17 < 0.40, `part load is worse per MWh: SFC at 17 MW = ${sfc17.toFixed(3)} kg/kWh`);
+    const fs = G.fuelStats(full);
+    near(fs.carSecs, 60 / (full / 3600), 0.01, `fills a 60 L car tank every ${fs.carSecs.toFixed(1)} s`);
+    near(fs.tankersPerHour, full / 55000, 1e-6, `${fs.tankersPerHour.toFixed(2)} B-double tankers (55 kL) per hour`);
+    near(fs.poolsPerWeek, full * 168 / 2.5e6, 1e-6, `${fs.poolsPerWeek.toFixed(2)} Olympic pools per week at full load`);
+    near(fs.costPerHour, full * 1.9, 0.01, `$${fs.costPerHour.toFixed(0)} an hour at $1.90/L`); near(fs.co2tPerHour, full * 2.68 / 1000, 1e-6, `${fs.co2tPerHour.toFixed(1)} t CO2 an hour`);
+    let tw = G.town(); ok(tw.mw === 27 && tw.fits && tw.units === 1 && Math.abs(tw.lph - G.fuelLph(27)) < 1e-6 && tw.hours > 50, `18,000 homes x 1.5 kW = ${tw.mw} MW, ${tw.lph.toFixed(0)} L/h, storage lasts ${tw.hours.toFixed(0)} h`);
+    tw = G.town(Object.assign({}, G.FUEL, { homes: 40000 })); ok(!tw.fits && tw.units === 2, '40,000 homes (60 MW) needs 2 units');
+
+    // ================================================================ start sequence
+    let m = fresh(), ev = [];
+    m.on(e => ev.push(e));
+    let r = m.command('start');
+    ok(r.ok && m.state === 'perm' && m.starts === 1, 'BO2001 start: pre-start checks, start counter 1');
+    const seen = []; let t = 0;
+    while (t < 300 && m.state !== 'run') { if (seen[seen.length - 1] !== m.state) seen.push(m.state); m.tick(0.25); t += 0.25; }
+    ok(JSON.stringify(seen) === JSON.stringify(G.STAGES.map(s => s[0])), 'stages in order: ' + seen.join(' > '));
+    ok(m.state === 'run' && t > 60 && t < 110, `cold to on-load in ${t.toFixed(0)} s (watchable in real time)`);
+    ok(ev.filter(e => e.type === 'can').length === 8 && ev.filter(e => e.type === 'can').map(e => e.i).join('') === '01234567' && ev.some(e => e.type === 'lightoff'), 'light-off: cans 1-8 ignite one after another, then LIGHT-OFF');
+    ok(ev.some(e => e.type === 'starter' && e.on) && ev.some(e => e.type === 'starter' && !e.on), 'starter engages for the crank and drops out at self-sustaining speed');
+    const sync = ev.find(e => e.type === 'breaker' && e.id === 'gencb' && e.closed);
+    ok(sync && sync.how === 'sync', 'generator breaker closed by the auto-synchroniser');
+    ok(m.genCB && m.flames.every(Boolean) && Math.abs(m.pt - 3000) < 15 && Math.abs(m.hz - 50) < 0.1 && Math.abs(m.mw - 20) < 0.6, `on load: ${m.mw.toFixed(1)} MW, PT ${m.pt.toFixed(0)} rpm, ${m.hz.toFixed(2)} Hz, 8 flames`);
+    tick(m, 10);
+    near(m.fuelLph, G.fuelLph(m.mw), G.fuelLph(m.mw) * 0.03, 'fuel flow matches the fuel curve at this load');
+    ok(m.n2 > 90 && m.n1 > 85 && m.egt > 380 && m.egt < C.EGT_ALARM && m.spread < C.SPREAD_ALARM && m.vib < C.VIB_ALARM && m.oilP > C.OIL_LOW, `healthy: N1 ${m.n1.toFixed(0)} %, N2 ${m.n2.toFixed(0)} %, EGT ${m.egt.toFixed(0)} °C, spread ${m.spread.toFixed(0)}, vib ${m.vib.toFixed(1)}, oil ${m.oilP.toFixed(1)} bar`);
+    ok(m.cdp > 8 && m.cdp < 12 && m.cdt > 250 && m.cdt < 450 && m.kv > 10.8 && m.amps > 500 && m.pf > 0.9 && m.field > 100, `compressor ${m.cdp.toFixed(1)} bar ${m.cdt.toFixed(0)} °C; ${m.kv.toFixed(2)} kV ${m.amps.toFixed(0)} A PF ${m.pf.toFixed(2)}`);
+    r = m.setpoint('mwsp', 34); tick(m, 25);
+    ok(r.ok && Math.abs(m.mw - 34) < 0.6, `AO3001 = 34 MW: ramps to ${m.mw.toFixed(1)} MW`);
+    near(m.fuelLph, full, full * 0.02, 'full load burns the full-load figure');
+    ok(m.setpoint('mwsp', 40).status === 12 && m.setpoint('kvsp', 9).status === 12, 'setpoints out of range are refused (OUT OF RANGE)');
+    // normal stop
+    ev = []; m.command('stop'); const stopSeen = []; t = 0;
+    while (t < 300 && m.state !== 'stopped') { if (stopSeen[stopSeen.length - 1] !== m.state) stopSeen.push(m.state); m.tick(0.25); t += 0.25; }
+    ok(stopSeen.join(' > ') === 'unload > cool > rundown > runon' && m.state === 'stopped', 'normal stop: ' + stopSeen.join(' > ') + ' > stopped');
+    ok(!m.genCB && !m.lubePump && !m.fuelPump && m.n2 === 0 && m.pt === 0 && m.fuelLph === 0 && m.tripCount === 0, 'stopped: breaker open, pumps off, rotors still, no fuel, no trips');
+    ok(m.mwh > 0 && m.litres > 0 && m.hours > 0 && m.run.litres > 0, `this run: ${m.run.litres.toFixed(0)} L, ${m.run.mwh.toFixed(2)} MWh`);
+
+    // ================================================================ interlocks
+    m = fresh(); m.estop = true;
+    ok(/^Can't start: the emergency stop/.test(m.check('start')), 'interlock: ' + m.check('start'));
+    m = fresh({ gridLive: false, lineCB: false });
+    ok(/BLACK START/.test(m.check('start')), 'dead bus: ' + m.check('start'));
+    m = fresh(); m.batt = 108; ok(/battery low/.test(m.check('start')), 'battery: ' + m.check('start'));
+    m = fresh({ dayPct: 10 }); ok(/day tank/.test(m.check('start')), 'fuel: ' + m.check('start'));
+    m = fresh(); ok(/isn't at speed/.test(m.check('gencb.close')), 'generator breaker: ' + m.check('gencb.close'));
+    m = onLoad(); ok(/still/.test(m.check('reset')) || /nothing is latched/.test(m.check('reset')), 'reset: ' + m.check('reset'));
+    ok(m.check('start') === 'Already running' && m.command('start').status === 14, 'start while running: Already running (status 14 = already done)');
+    m.command('linecb.open'); tick(m, 1);
+    ok(/both sides are live/.test(m.check('linecb.close')), 'line breaker: ' + m.check('linecb.close'));
+    m = fresh(); m.fault('oil'); let fail = null; m.on(e => { if (e.type === 'startfail') fail = e.reason; });
+    m.command('start'); until(m, x => fail, 30);
+    ok(fail && /lube oil pressure did not build/.test(fail) && m.lubePump !== undefined, 'start aborted: ' + fail);
+    const perms = fresh().permissives(); ok(perms.length >= 9 && perms.every(p => p.ok), `${perms.length} permissives, all ticked on a healthy cold unit`);
+
+    // ================================================================ trips (each with its first-up)
+    const tripTest = (name, setup, cause, re, max = 120) => {
+      const x = setup(); let te = null; x.on(e => { if (e.type === 'trip' && !te) te = e; });
+      const secs = until(x, y => y.tripped, max);
+      ok(x.tripped && x.firstUp && x.firstUp.cause === cause && (!re || re.test(x.firstUp.text)) && !x.genCB && ['rundown', 'runon', 'stopped'].includes(x.state) && x.trips[cause].first,
+        `${name}: first-up "${x.firstUp ? x.firstUp.text : '-'}" after ${secs.toFixed(1)} s${te && te.smoke ? ' (black smoke)' : ''}`);
+      const bi = P.bi.findIndex(p => p.id === G.TRIPS[cause].bi); ok(bi >= 0 && P.bi[bi].get(x) === 1 && P.bi[0].get(x) === 0, `  ${P.bi[bi].code} ${P.bi[bi].name} ON, BI0001 Unit Available OFF`);
+      return x;
+    };
+    tripTest('Overspeed', () => { const x = onLoad(); x.fault('overspeed'); return x; }, 'overspeed', /OVERSPEED/);
+    tripTest('High EGT', () => { const x = onLoad(); x.fault('egt'); return x; }, 'egt', /exhaust gas temperature/);
+    tripTest('High EGT spread', () => { const x = onLoad(); x.fault('spread'); return x; }, 'egt', /SPREAD/);
+    tripTest('High vibration', () => { const x = onLoad(); x.fault('vibration'); return x; }, 'vibration', /vibration/);
+    tripTest('Low lube oil pressure', () => { const x = onLoad(); x.fault('oil'); return x; }, 'oil', /lube oil/);
+    tripTest('Flame out', () => { const x = onLoad(); x.fault('flameout'); return x; }, 'flameout', /Flame out/);
+    const fx = tripTest('Fire', () => { const x = onLoad(); x.fault('fire'); return x; }, 'fire', /FIRE/);
+    ok(fx.co2 && P.bi[G.idx.bi.co2].get(fx) === 1, '  CO2 released (BI0012)');
+    tripTest('Fuel tank low-low', () => { const x = onLoad(34); x.accel = 60; x.fault('fuel'); return x; }, 'fuel', /low-low/, 400);
+    tripTest('Reverse power', () => { const x = onLoad(); x.fault('revpower'); return x; }, 'genprot', /REVERSE POWER/);
+    tripTest('Emergency stop', () => { const x = onLoad(); x.command('estop'); return x; }, 'estop', /EMERGENCY/);
+    tripTest('Bad start (no light-off)', () => { const x = fresh(); x.fault('nolight'); x.command('start'); return x; }, 'flameout', /Failed to light/);
+    // under-frequency: a black start onto a town bigger than the engine
+    tripTest('Under-frequency', () => { const x = fresh({ gridLive: false, lineCB: false, fuel: { homes: 40000 } }); x.command('blackstart.on'); x.command('start'); until(x, y => y.state === 'run', 200); x.command('linecb.close'); return x; }, 'genprot', /UNDER-FREQUENCY/);
+    // first-up holds: a second trip after the first doesn't take it over
+    m = onLoad(); m.fault('vibration'); until(m, x => x.tripped); m.command('estop');
+    ok(m.firstUp.cause === 'vibration' && m.trips.estop && !m.trips.estop.first && m.trips.vibration.first, 'first-up stays with the first trip (vibration), the E-STOP after it is not first');
+    ok(/Can't reset yet/.test(m.check('reset')), 'reset refused while running down');
+    until(m, x => x.state === 'stopped', 200);
+    r = m.command('reset'); ok(r.ok && !m.tripped && !m.estop && m.available && m.check('start') === null, 'after run-down: BO2004 reset clears the trips, the unit is available again');
+    ok(m.tripCount === 1, `trip counter ${m.tripCount} (the E-STOP after the trip didn't count again)`);
+
+    // ================================================================ black start
+    m = fresh({ gridLive: false, lineCB: false }); ev = []; m.on(e => ev.push(e));
+    ok(!m.busLive && !m.townLit, 'blackout: station bus dead, town dark');
+    m.command('blackstart.on'); r = m.command('start'); t = until(m, x => x.state === 'run', 200);
+    const dead = ev.find(e => e.type === 'breaker' && e.id === 'gencb' && e.closed);
+    ok(r.ok && m.genCB && dead && dead.how === 'deadbus' && m.island && Math.abs(m.hz - 50) < 0.3, `black start: dead-bus close after ${t.toFixed(0)} s, island at ${m.hz.toFixed(2)} Hz`);
+    m.command('linecb.close'); let minHz = 99; for (let s = 0; s < 40; s += 0.25) { m.tick(0.25); minHz = Math.min(minHz, m.hz); }
+    ok(m.townLit && !m.tripped && minHz > C.HZ_LO && Math.abs(m.hz - 50) < 0.2 && Math.abs(m.mw - m.townMW - C.AUX_MW) < 0.5, `town picked up: dip to ${minHz.toFixed(2)} Hz, now ${m.mw.toFixed(1)} MW at ${m.hz.toFixed(2)} Hz`);
+    m.fault('gridback'); tick(m, 10); ok(m.paralleled && !m.tripped, 'network restored: the island is paralleled with the grid');
+
+    // ================================================================ point map
+    const codes = Object.values(P).flat().map(p => p.code);
+    ok(P.bi.length === 23 && P.ai.length === 26 && P.ctr.length === 7 && P.bo.length === 8 && P.ao.length === 2, '23 BI (BI0001-21 + BI0022/23), 26 AI, 7 counters, 8 BO, 2 AO');
+    ok(P.bi.every((p, i) => p.code === 'BI' + String(i + 1).padStart(4, '0')) && P.ai.every((p, i) => p.code === 'AI' + (1001 + i)) && P.ctr.every((p, i) => p.code === 'C' + (4001 + i)) && P.bo.every((p, i) => p.code === 'BO' + (2001 + i)) && P.ao.every((p, i) => p.code === 'AO' + (3001 + i)), 'codes run in DNP3 index order (BI0001 = BI 0)');
+    ok(new Set(codes).size === codes.length, 'point codes are unique');
+    let maxRaw = 0; m = fresh(); m.command('start'); m.setpoint('mwsp', 34);
+    for (let s = 0; s < 160; s += 0.5) { m.tick(0.5); for (const p of P.ai) maxRaw = Math.max(maxRaw, Math.abs(Math.round(p.get(m) * p.scale))); }
+    ok(Object.values(P).flat().every(p => !p.get || Number.isFinite(p.get(m))) && maxRaw < 32768, `every point reads a number; largest AI raw through a start to full load = ${maxRaw} (fits 16-bit)`);
+
+    // ================================================================ outstation <-> master (instant wire)
+    m = fresh();
+    let os = new S.Outstation(m, { addr: 10 }), ms = new S.Master({ addr: 1, dest: 10, autoTime: false, points: P });
+    const wire = []; os.send = f => wire.push(['o', f]); ms.send = f => wire.push(['m', f]);
+    const pump = () => { for (let n = 0; n < 80 && wire.length; n++) { const [who, f] = wire.shift(); (who === 'o' ? ms : os).receive(f); } };
+    ms.integrity(); pump();
+    ok(ms.db.bi.length === 23 && ms.db.ai.length === 26 && ms.db.ctr.length === 7 && ms.db.ao.length === 2, 'integrity poll: all 23 BI, 26 AI, 7 counters, 2 AO statuses');
+    ok(P.bi.every((p, i) => ms.db.bi[i] === p.get(m)) && P.ai.every((p, i) => ms.db.ai[i] === Math.round(p.get(m) * p.scale)), 'master BI + AI values = the plant (raw = value x scale)');
+    ok(ms.db.ao[0] === 200 && ms.db.ao[1] === 1100, 'g40: AO3001 20.0 MW (raw 200), AO3002 11.00 kV (raw 1100)');
+    ms.direct(G.idx.bo.gencb, D.CROB.PULSE_ON); pump();
+    ok(ms.log.some(l => /FORMAT ERROR/.test(l.text)), 'BO2005 needs TRIP/CLOSE: PULSE ON is a FORMAT ERROR');
+    let blocked = null; m.on(e => { if (e.type === 'block') blocked = e.reason; });
+    m.estop = true; ms.sbo(G.idx.bo.start, D.CROB.PULSE_ON); pump(); m.estop = false;
+    ok(m.state === 'stopped' && ms.log.some(l => /BLOCKED/.test(l.text)) && /emergency stop/.test(blocked), 'SELECT start against an interlock comes back BLOCKED, with the reason: ' + blocked);
+    ms.direct(G.idx.bo.rl, D.CROB.TRIP); pump();
+    ok(!m.remote, 'BO2008 TRIP = LOCAL');
+    ms.direct(G.idx.bo.start, D.CROB.PULSE_ON); pump();
+    ok(m.state === 'stopped' && ms.log.some(l => /LOCAL/.test(l.text)), 'in LOCAL the RTU refuses SCADA controls (status LOCAL)');
+    ms.direct(G.idx.bo.rl, D.CROB.CLOSE); pump();
+    ok(m.remote, '... but still takes BO2008 CLOSE = back to REMOTE');
+    ms.setpoint(G.idx.ao.mwsp, 300); pump(); ms.setpoint(G.idx.ao.kvsp, 1120, { direct: true }); pump();
+    ok(m.mwSp === 30 && m.kvSp === 11.2, 'AO3001 = 30.0 MW by SELECT/OPERATE, AO3002 = 11.20 kV by direct operate');
+    ms.setpoint(G.idx.ao.mwsp, 400, { direct: true }); pump(); ok(m.mwSp === 30 && ms.log.some(l => /OUT OF RANGE/.test(l.text)), 'AO3001 = 40 MW refused OUT OF RANGE');
+    ms.sbo(G.idx.bo.start, D.CROB.PULSE_ON); pump(); ok(m.state === 'perm', 'BO2001 SELECT + OPERATE starts the unit');
+    until(m, x => x.state === 'run', 200); ms.integrity(); pump();
+    let v = G.viewFromPoints(ms.db);
+    ok(v.state === 'run' && v.genCB && v.running && Math.abs(v.mw - m.mw) < 0.1 && Math.abs(v.pt - m.pt) < 1 && v.mwSp === 30, `viewFromPoints rebuilds the SCADA screen from DNP3: ${v.state}, ${v.mw.toFixed(1)} MW, sp ${v.mwSp}`);
+    // first-up over SCADA comes from the RTU's time-stamped events
+    ms.poll([1, 2, 3]); pump();
+    m.fault('vibration'); until(m, x => x.tripped); T += 1500; m.command('estop'); os.scan(); ms.poll([1, 2, 3]); pump();
+    v = G.viewFromPoints(ms.db);
+    ok(v.tripped && v.trips.vibration && v.trips.estop && v.firstUp === 'vibration', `SCADA first-up from event timestamps: ${v.firstUp} (then E-STOP)`);
+
+    // ================================================================ integration: master polls over the simulated P25 link
+    T = 0; Q.length = 0;
+    m = fresh();
+    os = new S.Outstation(m, { addr: 10, cfg: { lean: true, biStatic: 1, aiStatic: 4, classMax: { 1: 50, 2: 50, 3: 20 }, mostRecent: ['ai', 'ctr'] } });
+    ms = new S.Master({ addr: 1, dest: 10, autoTime: false, timeout: 7000, points: P });
+    const link = new DNP3Link.Link({ lat: 50, loss: 0, rssi: -85, p25: true }); link.join(ms, os);
+    const run = secs => { for (let s = 0; s < secs; s += 0.25) { m.tick(0.25); G.rtuComms(m, os, { timeoutMs: 20000, rssi: link.cfg.rssi }); os.scan(); advance(250); } };
+    ms.integrity(); run(6);
+    ok(ms.db.at > 0 && ms.db.bi.length === 23 && ms.db.ai.length === 26, `integrity over the simulated P25 link (${Math.round(ms.stats.lastRtt)} ms round trip)`);
+    ms.sbo(G.idx.bo.start, D.CROB.PULSE_ON); run(6);
+    ok(m.starting && ms.log.some(l => /^OPERATE Start Unit/.test(l.text)), 'CROB start (SELECT then OPERATE) over the link: the start sequence began');
+    ms.setpoint(G.idx.ao.mwsp, 340); run(6);
+    let polls = 0; for (let s = 0; s < 150 && !(ms.db.bi[G.idx.bi.gencb] && ms.db.ai[G.idx.ai.mw] > 330); s += 5) { if (!ms.cur && !ms.queue.length) { ms.poll([1, 2, 3]); polls++; } run(5); }
+    ok(m.mw > 33 && ms.db.bi[G.idx.bi.gencb] === 1 && Math.abs(ms.db.ai[G.idx.ai.mw] / 10 - m.mw) < 1, `${polls} event polls later the master reads ${(ms.db.ai[G.idx.ai.mw] / 10).toFixed(1)} MW, generator breaker closed`);
+    const fuelSc = ms.db.ai[G.idx.ai.fuel];
+    ok(Math.abs(fuelSc - m.fuelLph) < 300, `fuel flow over SCADA ${fuelSc} L/h (plant ${m.fuelLph.toFixed(0)})`);
+    // cut the link: events buffer, the master goes stale, then everything flushes
+    link.cut(true); const to0 = ms.stats.timeouts;
+    ms.poll([1, 2, 3]); run(25);
+    ok(ms.stats.timeouts > to0 && !m.p25.healthy, 'link cut: polls time out, the RTU drops BI0021 P25 Link Healthy after 20 s');
+    m.fault('egt'); until(m, x => x.tripped, 60); run(2);
+    ok(m.trips.egt && os.events.some(e => e.type === 'bi' && e.index === G.idx.bi['trip.egt'] && e.value === 1), 'the High EGT trip happens while the master is blind: its event waits in the RTU');
+    ok(ms.db.bi[G.idx.bi['trip.egt']] === 0 && ms.db.bi[G.idx.bi.run] === 1, 'meanwhile the master still shows the unit running (stale)');
+    link.cut(false);
+    for (let k = 0; k < 4; k++) { ms.poll([1, 2, 3]); run(6); }
+    v = G.viewFromPoints(ms.db);
+    ok(ms.db.bi[G.idx.bi['trip.egt']] === 1 && ms.db.events.some(e => e.g === 2 && e.index === G.idx.bi['trip.egt'] && e.value === 1) && v.firstUp === 'egt', 'link back: buffered events flush, SCADA shows the High EGT trip as first-up');
+    ok(ms.db.events.some(e => e.g === 2 && e.index === G.idx.bi.link && e.value === 0) && ms.db.bi[G.idx.bi.link] === 1, 'the master also learns BI0021 went false while it was cut off, and is true again');
+    ms.integrity(); run(6);
+    ok(P.bi.every((p, i) => ms.db.bi[i] === p.get(m)), 'after recovery the master matches the plant');
+
+    // ================================================================ demo cycle (truth view, no link)
+    m = fresh({ accel: 30 }); const sq = new G.Sequencer('demo'); const steps = new Set(); let sent = [];
+    for (let s = 0; s < 1400 && steps.size < G.DEMO.length; s += 0.25) {
+      steps.add(sq.i);
+      const c = sq.next(0.25, m.view(), id => m.check(id));
+      if (c && typeof c === 'object') m.setpoint(P.ao[c.ao].id, c.value, 'demo');
+      else if (c && c.startsWith('fault:')) m.fault(c.slice(6), 'demo');
+      else if (c) m.command(c, 'demo');
+      if (c) sent.push(typeof c === 'object' ? 'AO' : c);
+      m.tick(0.25);
+    }
+    ok(steps.size === G.DEMO.length, `the demo cycle walks all ${G.DEMO.length} steps: ${[...new Set(sent)].join(', ')}`);
+    ok(m.starts >= 2 && m.tripCount >= 1 && m.litres > 10000, `demo: ${m.starts} starts, ${m.tripCount} trip, ${Math.round(m.litres).toLocaleString()} L burned`);
+
+    // ================================================================ challenges (scripted operators)
+    const ctx = { setLoss() {}, ctrlOk: 5, polls: 10, answered: 9, staleMax: 10 };
+    const chal = (key, drive, max) => { const c = G.CHALLENGES[key], x = new G.Plant({ seed: 3 }); c.setup(x, ctx); let res = null, s = 0; for (; s < max && !res; s += 0.25) { drive(x, s); x.tick(0.25); res = c.tick(x, ctx, s); } if (c.end) c.end(x); return res; };
+    let res = chal('peak', (x, s) => { if (s === 0) { x.command('start'); x.setpoint('mwsp', 34); } }, 400);
+    ok(res && res.pass && res.stars >= 2, `Peak demand, scripted: ${res && res.text} (${res && res.stars} stars)`);
+    res = chal('blackout', (x, s) => { if (s === 0) { x.command('blackstart.on'); x.command('start'); } if (x.state === 'run' && !x.lineCB) x.command('linecb.close'); }, 400);
+    ok(res && res.pass, `Blackout!, scripted: ${res && res.text}`);
+    res = chal('fuel', (x, s) => { if (x.demandMW != null && Math.abs(x.mwSp - x.demandMW) > 0.5) x.setpoint('mwsp', Math.round(x.demandMW * 10) / 10); }, 300);
+    ok(res && res.pass, `Fuel watch, following demand: ${res && res.text}`);
+    res = chal('fuel', (x, s) => { if (s === 0) x.setpoint('mwsp', 34); }, 300);
+    ok(res && !res.pass, `Fuel watch, flat out at 34 MW: fails -- ${res && res.text}`);
+  } catch (e) { ok(false, 'exception: ' + (e.stack || e)); }
+  out.push(fails ? `RESULT: ${fails} FAILED` : 'RESULT: ALL PASS');
+  document.getElementById('out').textContent = out.join('\n');
+})();
+</script>
+</body></html>

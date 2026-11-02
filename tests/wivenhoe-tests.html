@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Wivenhoe tests</title></head>
+<body><pre id="out"></pre>
+<script>
+// A fake clock, installed before the scripts load: setTimeout / performance.now run on simulated time, so the
+// master's timeouts, the outstation's select timer and the P25 link's air time all run in milliseconds of wall time.
+//   msedge --headless=new --allow-file-access-from-files --dump-dom kelly-page/tests/wivenhoe-tests.html  -> "RESULT: ALL PASS"
+let T = 0, tid = 0; const Q = [];
+window.setTimeout = (fn, ms) => { Q.push({ id: ++tid, at: T + Math.max(0, +ms || 0), fn }); return tid; };
+window.clearTimeout = id => { const k = Q.findIndex(q => q.id === id); if (k >= 0) Q.splice(k, 1); };
+Object.defineProperty(performance, 'now', { value: () => T, configurable: true });
+function advance(ms) {
+  const end = T + ms;
+  for (;;) { Q.sort((a, b) => a.at - b.at || a.id - b.id); const q = Q[0]; if (!q || q.at > end) break; Q.shift(); T = q.at; q.fn(); }
+  T = end;
+}
+</script>
+<script src="../js/dnp3.js"></script>
+<script src="../js/dnp3sim.js"></script>
+<script src="../js/dnp3link.js"></script>
+<script src="../js/scadacore.js"></script>
+<script src="../js/wivenhoe.js"></script>
+<script>
+(function () {
+  const out = [], D = window.DNP3, S = window.DNP3Sim, W = window.Wivenhoe; let fails = 0;
+  const ok = (c, what) => { out.push(`${c ? 'PASS' : 'FAIL'}  ${what}`); if (!c) fails++; };
+  const near = (a, b, tol, what) => ok(Math.abs(a - b) <= tol, `${what} (got ${typeof a === 'number' ? a.toFixed(3) : a}, want ${b} ± ${tol})`);
+  const tick = (m, secs, dt = 0.25) => { for (let t = 0; t < secs; t += dt) m.tick(dt); };
+  try {
+    // ================================================================ plant model
+    let m = new W.Plant({ accel: 60 });
+    ok(Math.abs(m.up - 50) < 1e-9 && m.genCB && m.gridCB && m.units.every(u => u.state === 'stop' && m.available(u)), 'starts idle, 50 %, both breakers closed, units available');
+    ok(m.command('u1.pump').ok && m.units[0].state === 'pump-start' && m.units[0].starts === 1, 'Unit 1 start pumping: spinning up, start counted');
+    tick(m, 7);
+    ok(m.units[0].state === 'pump', 'Unit 1 reaches pumping after the start time');
+    let up0 = m.up, low0 = m.low; tick(m, 10);
+    near(m.units[0].mw, -W.C.PUMP_MW, 0.01, 'pumping draws the fixed pump power (MW negative)');
+    ok(m.up > up0 && m.low < low0 && m.flow < 0, `pumping: upper rises (${up0.toFixed(2)} -> ${m.up.toFixed(2)} %), lower falls, flow uphill`);
+    ok(m.pumpMW > 0 && m.mwhUsed > 0, 'pump power and MWh consumed count up');
+    let r = m.command('u1.gen');
+    ok(!r.ok && r.status === 15 && /straight from pumping/.test(r.reason), 'pumping -> generating directly is refused: ' + r.reason);
+    m.command('u1.stop'); tick(m, 6);
+    ok(m.units[0].state === 'stop' && m.units[0].mw === 0, 'stop: the unit runs down to idle');
+    m.setpoint(1, 220);
+    ok(m.command('u1.gen').ok, 'from idle, start generating is allowed');
+    tick(m, 15);
+    near(m.units[0].mw, 220, 0.01, 'generating ramps to the 220 MW setpoint');
+    up0 = m.up; low0 = m.low; tick(m, 10);
+    ok(m.up < up0 && m.low > low0 && m.flow > 0 && m.mwhGen > 0, 'generating: upper falls, lower rises, flow downhill, MWh generated');
+    const q = 220e6 / (W.C.RHO_G * W.head(m.up) * W.C.ETA);
+    near(m.flow, q, 1, 'flow = P / (rho g H eta)');
+    ok(!m.setpoint(1, 400).ok && m.setpoint(1, 400).status === 12, 'setpoint 400 MW is out of range (status 12)');
+    // interlocks on reservoir level
+    m = new W.Plant({ up: 96 }); m.tick(0.25);
+    ok(m.hi && m.alarms.hi, 'upper 96 % -> HIGH level alarm');
+    r = m.command('u2.pump'); ok(!r.ok && /HIGH level alarm/.test(r.reason), "can't pump with HIGH alarm: " + r.reason);
+    ok(m.command('u2.gen').ok, 'can still generate with HIGH alarm');
+    m = new W.Plant({ up: 9 }); m.tick(0.25);
+    r = m.command('u1.gen'); ok(m.lo && !r.ok && /LOW level alarm/.test(r.reason), "can't generate with LOW alarm: " + r.reason);
+    // protection stop
+    m = new W.Plant({ up: 96.95, accel: 600 }); m.command('u1.pump'); m.hi = false; m.units[0].state = 'pump'; m.units[0].speed = 1; m.units[0].mw = -250;
+    tick(m, 3);
+    ok(m.units[0].state === 'stopping' || m.units[0].state === 'stop', 'protection stops pumping at ' + W.C.HI_STOP + ' %');
+    // breakers
+    m = new W.Plant(); m.command('u1.gen'); m.command('u2.pump'); tick(m, 8);
+    m.command('gridcb.open');
+    ok(!m.gridCB && m.units.every(u => u.state === 'stopping') && m.alarms.trip1 && m.alarms.trip2, 'opening the grid breaker trips both running units');
+    ok(!m.available(m.units[0]) && /not available/.test(m.check('u1.gen')), 'a tripped unit is locked out: ' + m.check('u1.gen'));
+    ok(/grid breaker is open/.test((m.command('gridcb.close'), m.tick(11), m.command('gridcb.open'), m.check('u1.gen'))), "units can't start with the grid breaker open");
+    m.tick(0.25); ok(m.alarms.aux, 'grid breaker open -> station auxiliary supply alarm');
+    const b0 = m.batt; m.accel = 600; tick(m, 6); ok(m.batt < b0, `battery runs down off-grid (${b0.toFixed(1)} -> ${m.batt.toFixed(1)} V)`);
+    // emergency stop
+    m = new W.Plant(); m.command('u1.gen'); m.command('u2.gen'); tick(m, 8);
+    m.command('estop');
+    ok(m.estop && !m.genCB && m.units.every(u => u.state === 'stopping') && m.alarms.estop, 'E-STOP trips both units and opens the generator breaker');
+    ok(/emergency stop is active/.test(m.command('gencb.close').reason) && /emergency stop/.test(m.check('u1.pump')), 'E-STOP latches: no breaker close, no start');
+    ok(m.command('estop.reset').ok && m.command('gencb.close').ok && !m.estop, 'E-STOP reset, then the generator breaker closes');
+    ok(m.command('estop.reset').status === 14, 'resetting again = ALREADY COMPLETE (14)');
+
+    // ================================================================ demo sequencer (10 minute demo, local commands)
+    m = new W.Plant({ up: 40, accel: W.MODES.demo10.accel }); m.units.forEach(u => { u.sp = 200; });
+    const seq = new W.Sequencer('demo10'); let hiUp = 0, endPump = 0, issued = 0;
+    for (let s = 0; s < 595; s += 0.25) {
+      m.tick(0.25); const c = seq.next(0.25, m.view(), id => m.check(id)); if (c) { m.command(c); issued++; }
+      if (Math.abs(s - 239.75) < 0.01) endPump = m.up; hiUp = Math.max(hiUp, m.up);
+    }
+    ok(endPump > 75, `10 min demo: 4 min pumping fills the upper reservoir visibly (40 -> ${endPump.toFixed(1)} %)`);
+    ok(m.up < endPump - 30 && m.units.every(u => u.state === 'stop'), `then generating draws it down (${m.up.toFixed(1)} %) and it ends idle [${m.units.map(u => u.state + ' ' + u.mw.toFixed(0)).join(', ')}; ${seq.held}]`);
+    ok(issued >= 6 && issued < 30, `sequencer issued ${issued} commands`);
+    ok(W.dayPhase(new Date(2026, 9, 20, 18, 0)) === 'gen' && W.dayPhase(new Date(2026, 9, 20, 2, 0)) === 'pump' && W.dayPhase(new Date(2026, 9, 20, 11, 0)) === 'idle', 'real-time day schedule: pump overnight, generate the evening peak');
+
+    // ================================================================ point map
+    const P = W.POINTS;
+    ok(P.bi.length === 12 && P.ai.length === 12 && P.ctr.length === 6 && P.bo.length === 10 && P.ao.length === 2, 'point list: 12 BI, 12 AI, 6 counters, 10 BO, 2 AO');
+    ok(P.bi[0].code === 'BI0001' && P.bi[11].code === 'BI0012' && P.ai[0].code === 'AI1001' && P.bo[0].code === 'BO2001' && P.ao[1].code === 'AO3002' && P.ctr[5].code === 'C4006', 'codes run in DNP3 index order (BI0001 = index 0)');
+    const codes = Object.values(P).flat().map(p => p.code); ok(new Set(codes).size === codes.length, 'point codes are unique');
+    m = new W.Plant(); ok(Object.values(P).flat().every(p => !p.get || Number.isFinite(p.get(m))), 'every point reads a number');
+    ok(P.ai.every(p => Math.abs(Math.round(p.get(m) * p.scale)) < 32768), 'every AI fits a 16-bit lean (P25) reply');
+
+    // ================================================================ outstation <-> master (instant wire)
+    m = new W.Plant();
+    let os = new S.Outstation(m, { addr: 10 }), ms = new S.Master({ addr: 1, dest: 10, autoTime: false, points: P });
+    const wire = []; os.send = f => wire.push(['o', f]); ms.send = f => wire.push(['m', f]);
+    const pump = () => { for (let n = 0; n < 80 && wire.length; n++) { const [who, f] = wire.shift(); (who === 'o' ? ms : os).receive(f); } };
+    ms.integrity(); pump();
+    ok(ms.db.bi.length === 12 && ms.db.ai.length === 12 && ms.db.ctr.length === 6 && ms.db.ao.length === 2, 'integrity poll: all 12 BI, 12 AI, 6 counters, 2 AO statuses');
+    ok(P.bi.every((p, i) => ms.db.bi[i] === p.get(m)) && P.ai.every((p, i) => ms.db.ai[i] === Math.round(p.get(m) * p.scale)), 'master BI + AI values = the plant (raw = value x scale)');
+    ok(ms.db.ao[0] === 200, 'g40 analog output status reports the 200 MW setpoint');
+    ms.direct(W.idx.bo['u1.pump'], D.CROB.PULSE_ON); pump();
+    ok(m.units[0].state === 'pump-start', 'BO2001 PULSE ON over DNP3 starts Unit 1 pumping');
+    ms.direct(W.idx.bo.gencb, D.CROB.PULSE_ON); pump();
+    ok(ms.log.some(l => /FORMAT ERROR/.test(l.text)) && m.genCB, 'BO2007 needs TRIP/CLOSE: PULSE ON is a FORMAT ERROR');
+    let blocked = null; m.on(e => { if (e.type === 'block') blocked = e.reason; });
+    m.hi = true; ms.sbo(W.idx.bo['u2.pump'], D.CROB.PULSE_ON); pump(); m.hi = false;
+    ok(m.units[1].state === 'stop' && ms.log.some(l => /BLOCKED/.test(l.text)) && /HIGH level/.test(blocked), 'SELECT against an interlock comes back BLOCKED (15), with the reason: ' + blocked);
+    ms.setpoint(W.idx.ao['u2.sp'], 250); pump();
+    ok(m.units[1].sp === 250 && ms.log.some(l => /^SELECT Unit 2 MW Setpoint/.test(l.text)) && ms.log.some(l => /^OPERATE Unit 2 MW Setpoint/.test(l.text)), 'AO3002 = 250 MW by SELECT then OPERATE');
+    ms.setpoint(W.idx.ao['u1.sp'], 400, { direct: true }); pump();
+    ok(m.units[0].sp === 200 && ms.log.some(l => /OUT OF RANGE/.test(l.text)), 'AO3001 = 400 MW refused OUT OF RANGE');
+    ms.direct(W.idx.bo.estop, D.CROB.PULSE_ON); pump(); ms.integrity(); pump();
+    ok(ms.db.bi[W.idx.bi.estop] === 1 && ms.db.bi[W.idx.bi.gencb] === 0 && (ms.db.iin & (1 << D.IIN.DEVICE_TROUBLE)), 'E-STOP over DNP3: BI0011 on, BI0007 open, IIN DEVICE TROUBLE');
+    const v = W.viewFromPoints(ms.db);
+    ok(v.estop && !v.genCB && v.gridCB && Math.abs(v.up - m.up) < 0.01, 'viewFromPoints rebuilds the SCADA screen from DNP3 alone');
+
+    // ================================================================ integration: master polls over the simulated P25 link
+    T = 0; Q.length = 0;
+    m = new W.Plant();
+    os = new S.Outstation(m, { addr: 10, cfg: { lean: true, biStatic: 1, aiStatic: 4, classMax: { 1: 50, 2: 50, 3: 20 } } });
+    ms = new S.Master({ addr: 1, dest: 10, autoTime: false, timeout: 7000, points: P });
+    const link = new DNP3Link.Link({ lat: 50, loss: 0, rssi: -85, p25: true }); link.join(ms, os);
+    let lost = 0; link.on(e => { if (e.type === 'lost') lost++; });
+    const run = secs => { for (let s = 0; s < secs; s += 0.25) { m.tick(0.25); W.rtuComms(m, os, { timeoutMs: 20000, rssi: link.cfg.rssi }); os.scan(); advance(250); } };
+    ms.integrity(); run(5);
+    ok(ms.db.at > 0 && ms.db.bi.length === 12 && ms.db.ai[W.idx.ai.up] === 5000, 'integrity poll over the simulated P25 link returns the plant (upper 50.00 %)');
+    ok(ms.stats.lastRtt > 1000 && ms.stats.lastRtt < 3000, `round trip ${Math.round(ms.stats.lastRtt)} ms: P25 air time, not LAN speed`);
+    const st = link.stats(); ok(st.pps > 0 && st.bps > 0 && st.busy > 0, `link stats: ${st.pps.toFixed(1)} pkt/s, ${st.bps.toFixed(0)} B/s, channel ${st.busy.toFixed(0)} % busy`);
+    // cut the link
+    link.cut(true);
+    const to0 = ms.stats.timeouts;
+    ms.poll([1, 2, 3]); run(25);
+    ok(ms.stats.timeouts > to0 && ms.stats.retries >= 1, `link cut: the poll times out (timeouts ${ms.stats.timeouts}, retries ${ms.stats.retries})`);
+    ok(!m.p25.healthy && m.alarms.comms, 'no polls for 20 s: the RTU drops BI0012 P25 Link Healthy');
+    m.command('u1.pump'); m.command('u2.gen'); run(8);
+    ok(os.events.some(e => e.type === 'bi' && e.index === W.idx.bi.link && e.value === 0), 'the BI0012 -> false event waits in the outstation buffer');
+    m.command('u1.stop'); m.command('u2.stop'); run(7); m.command('u1.gen'); run(8);
+    ok(ms.db.bi[W.idx.bi['u1.pump']] === 0, 'meanwhile the master still shows the old state (stale)');
+    // link back
+    link.cut(false);
+    ms.poll([1, 2, 3]); run(6); ms.poll([1, 2, 3]); run(6); ms.poll([1, 2, 3]); run(6);
+    ok(ms.db.events.some(e => e.g === 2 && e.index === W.idx.bi.link && e.value === 0) && ms.db.bi[W.idx.bi.link] === 1, 'after the link returns the master gets BI0012 false, then true again');
+    ok(ms.db.events.some(e => e.g === 2 && e.index === W.idx.bi['u1.gen'] && e.value === 1), 'buffered events flush: the master learns Unit 1 generated while it was blind');
+    ok(!os.events.some(e => e.cls === 1), 'confirmed: the outstation class 1 buffer is empty again');
+    ms.integrity(); run(6);
+    ok(P.bi.every((p, i) => ms.db.bi[i] === p.get(m)), 'after recovery the master matches the plant');
+    // a small class 1 buffer overflows while the link is down: the oldest events are lost, and IIN2.3 says so
+    os.cfg.classMax = { 1: 3 }; link.cut(true);
+    m.command('u1.stop'); run(7); m.command('u2.pump'); run(8); m.command('u2.stop'); run(7); m.command('u1.pump'); run(8);
+    const c1 = os.events.filter(e => e.cls === 1).length;
+    ok(c1 === 3 && (os.iin & (1 << D.IIN.EVENT_OVERFLOW)), `class 1 buffer capped at 3 (${c1}) with IIN2.3 EVENT BUFFER OVERFLOW`);
+    link.cut(false); ms.poll([1, 2, 3]); run(6);
+    ok(ms.db.iin & (1 << D.IIN.EVENT_OVERFLOW), 'the master sees EVENT BUFFER OVERFLOW once the link is back');
+    os.cfg.classMax = { 1: 50 }; ms.poll([1, 2, 3]); run(6);
+    // "most recent" event mode: a ramping analog holds one event, binary inputs keep every change
+    os.cfg.mostRecent = ['ai', 'ctr']; link.cut(true); os.events = [];
+    m.command('u2.gen'); run(14);
+    const mw2 = os.events.filter(e => e.type === 'ai' && e.index === W.idx.ai['u2.mw']);
+    ok(mw2.length === 1 && mw2[0].value === Math.round(m.units[1].mw * 10), `most-recent mode: Unit 2 MW ramped 0 -> ${m.units[1].mw.toFixed(0)} MW and the RTU holds 1 event (its latest value)`);
+    ok(os.events.filter(e => e.type === 'bi' && e.index === W.idx.bi['u2.gen']).length === 1, 'binary inputs still keep every change');
+    link.cut(false); ms.poll([1, 2, 3]); run(6); ms.poll([1, 2, 3]); run(6);
+    // weak signal
+    link.cfg.rssi = -125; const lost0 = lost; ms.poll([1]); run(20);
+    ok(lost > lost0 && DNP3Link.rssiLoss(-125) === 100 && DNP3Link.rssiLoss(-90) === 0, 'RSSI -125 dBm loses everything; -90 dBm nothing');
+  } catch (e) { ok(false, 'exception: ' + (e.stack || e)); }
+  out.push(fails ? `RESULT: ${fails} FAILED` : 'RESULT: ALL PASS');
+  document.getElementById('out').textContent = out.join('\n');
+})();
+</script>
+</body></html>

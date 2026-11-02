@@ -1,0 +1,185 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>hc QR tests</title>
+<link rel="stylesheet" href="../css/kelly.css">
+<link rel="stylesheet" href="../css/hc.css">
+<link rel="stylesheet" href="../css/hc-share.css">
+<link rel="stylesheet" href="../css/meshqr.css">
+<script src="../vendor/tweetnacl-1.0.3/nacl-fast.min.js"></script>
+<script src="../js/secure.js"></script>
+<script src="../js/meshqr.js"></script>
+<script src="../js/hc-core.js"></script>
+<script src="../js/hc-calls.js"></script>
+<script src="../js/hc-service.js"></script>
+<script src="../js/hc-demo.js"></script>
+<script src="../js/hc-share.js"></script>
+</head><body style="width:420px">
+<!-- Ham Contacts QR work (QR_REVIEW.md, 2026-10-24) with the REAL callsign registry (js/hc-calls.js) over the demo service:
+     the callsign trust labels (✅ directory / ⛔ conflict only for THIS key / ℹ️ other nodes / 👤 / 🖊️ / ❔), the
+     "Add anyway" second step, qrClaim after an unsigned add + advertSeen from a NEW_ADVERT, the 🤝 swap (direct add,
+     the pre-filled DM and its ACK, the two-tick checklist, the opt-in zero-hop advert offers).
+     Run: msedge --headless=new --allow-file-access-from-files --virtual-time-budget=40000 --dump-dom
+          file:///.../kelly-page/tests/hc-qr-tests.html   -> RESULT: ALL PASS -->
+<div class="hc"><div id="hc-share"></div></div>
+<pre id="out">running…</pre>
+<script>
+(async function () {
+  const out = [], ok = (cond, name, extra) => out.push((cond ? 'PASS ' : 'FAIL ') + name + (cond || extra === undefined ? '' : ` -- ${typeof extra === 'string' ? extra : JSON.stringify(extra)}`));
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const until = async (fn, ms = 6000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (fn()) return true; } catch { /* not yet */ } await wait(50); } return false; };
+  const warns = []; const cw = console.warn; console.warn = (...a) => { warns.push(a.join(' ')); cw.apply(console, a); };
+  let part = null, world = null;
+  try {
+    const HC = KellyHC, ed = HC.naclEd(nacl), K = KellyHamCalls;
+    const mem = new Map(), store = { get: (k, d) => (mem.has(k) ? JSON.parse(mem.get(k)) : d), set: (k, v) => mem.set(k, JSON.stringify(v)) };
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    const bus = HC.createBus(); world = KellyHamDemo({ nacl });
+    K.init({ store });   // the real registry, on this page's memory store (no bus: not in demo mode, so qrClaim records)
+    const svc = KellyHamContactsService({ backend: world.backend, bus, store, ed, myCall: () => 'VK4ZZA', distKm: () => 1, myPos: () => ({ lat: world.me.lat, lon: world.me.lon }), demo: true, active: () => true });
+    const facade = {}, addCalls = [], dms = [];
+    ['state', 'contacts', 'heard', 'get', 'refresh', 'add', 'remove', 'resetPath', 'setFav', 'share', 'shareWait', 'allowDiscover', 'setTelemetryBase', 'advert', 'advertWait', 'setAutoAdd', 'myCard', 'signEntry', 'room', 'forgetHeard', 'demo']
+      .forEach(fn => { facade[fn] = (...a) => svc[fn](...a); });
+    // retry past the demo's 3 % lost answers, recording every call (and its options)
+    facade.add = async (...a) => { addCalls.push(a); let r; for (let i = 0; i < 6; i++) { r = await svc.add(...a); if (r.ok || r.code !== 'timeout') break; } return r; };
+    facade.myCard = async () => { let r; for (let i = 0; i < 6; i++) { r = await svc.myCard(); if (r.ok || r.code !== 'timeout') break; } return r; };
+    let dmAnswer = null;
+    const c = { bus, HC, svc: facade, $: s => document.querySelector(s), esc, store, toast: () => {}, fmtAgo: ms => `${Math.round((Date.now() - ms) / 1000)} s`,
+      ed, myCall: () => 'VK4ZZA', reduced: () => true, root: () => document.body, visible: () => true, demo: () => true, setDemo: () => {}, demoWorld: () => world,
+      openTrace: () => ({ ok: false, reason: 'test' }), openChat: () => {}, kfRequest: () => null, onGateway: () => () => {}, say: () => {},
+      sendDm: async (key, text) => { dms.push([key, text]); return dmAnswer ? dmAnswer(key, text) : { ok: false, reason: 'no' }; } };
+    world.start(svc);
+    await wait(150);
+    const key = n => world.keyOf(n);
+    const kB = key('VK4ZZB Springfield'), kH = key('VK4ZZH Logan'), kJ = key('VK4ZZJ Caboolture'), kF = key('VK4ZZF Redbank'), kK = key('VK4ZZK Beaudesert');
+    const kOther = 'ab'.repeat(31) + 'cd';
+
+    // ---- the trust labels (KellyHamCalls.trust): one key's directory entry decides; several keys per call is normal
+    K.fromDir([{ k: kB, c: 'VK4ZZB', n: 'VK4ZZB Springfield', t: 1, at: 1.75e9, x: 0 }, { k: kOther, c: 'VK4ZZB', n: 'VK4ZZB second node', t: 1, at: 1.75e9, x: 0 },
+      { k: kH, c: 'VK4ZZH', n: 'VK4ZZH Logan', t: 1, at: 1.75e9, x: 0 }]);
+    let tr = K.trust(kB, { name: 'VK4ZZB Springfield', signed: true });
+    ok(tr.code === 'dir' && tr.icon === '✅' && /P25X directory/.test(tr.text) && /not cryptographic/.test(tr.text) && !tr.info, 'trust: this key in the directory with this call -> ✅ (gateway-attested)', tr);
+    tr = K.trust(kB, { name: 'Springfield shack' });
+    ok(tr.code === 'dir' && tr.call === 'VK4ZZB', 'trust: no call in the name, the directory gives it', tr);
+    tr = K.trust(kH, { name: 'VK4ZZQ Imposter', qr: true });
+    ok(tr.code === 'conflict' && tr.icon === '⛔' && /VK4ZZH, not VK4ZZQ/.test(tr.text), 'trust: the directory lists THIS key under another call -> ⛔', tr);
+    tr = K.trust(kJ, { name: 'VK4ZZB Portable', qr: true });
+    ok(tr.code === 'claimed' && tr.icon === '❔' && /2 other nodes/.test(tr.info || ''), 'trust: another key under that call is no conflict -- ❔ claimed + ℹ️ other nodes', tr);
+    tr = K.trust(kJ, { name: 'VK4ZZB Portable', signed: true });
+    ok(tr.code === 'signed' && tr.icon === '🖊️' && /not checked/.test(tr.text) && /other nodes/.test(tr.info || ''), 'trust: a signed advert name -> 🖊️ (callsign not checked)', tr);
+    K.set(kF, 'VK4ZZF', 'VK4ZZF Redbank');
+    tr = K.trust(kF, { name: 'VK4ZZF Redbank', signed: true });
+    ok(tr.code === 'mine' && tr.icon === '👤', 'trust: you set it -> 👤', tr);
+    K.clear(kF);
+    tr = K.trust(kJ, { name: 'Caboolture node', signed: true });
+    ok(tr.code === 'none' && !tr.icon, 'trust: no callsign -> none', tr);
+    ok(K.dirOf(kB).call === 'VK4ZZB' && K.dirKeys('vk4zzb').length === 2 && K.dirOf(kJ) === null, 'dirOf / dirKeys');
+
+    const mount = document.getElementById('hc-share');
+    const cardEv = []; bus.on('card', p => cardEv.push(p));
+    part = KellyHCShare(mount, c);
+    const $ = s => mount.querySelector(s), prev = () => $('[data-sh="prev"]').textContent, dlg = () => document.getElementById('mqr');
+    const paste = $('[data-sh="paste"]');
+    const type = t => { paste.value = t; paste.dispatchEvent(new Event('input', { bubbles: true })); };
+
+    // ---- the preview: ⛔ conflict = a deliberate second step; Cancel adds nothing
+    type(HC.qrLink({ key: kH, type: 1, name: 'VK4ZZQ Imposter' }));
+    ok(/⛔/.test($('[data-sh="pcallsrc"]').textContent) && /not VK4ZZQ/.test($('[data-sh="add"]').textContent) && $('[data-sh="add"]').classList.contains('danger'), 'preview: conflict label + "Add anyway"', $('[data-sh="add"]').textContent);
+    $('[data-sh="add"]').click();
+    await until(() => dlg() && !dlg().hidden, 2000);
+    ok(dlg() && !dlg().hidden && /not the callsign/i.test(dlg().textContent), 'Add anyway asks first');
+    dlg().querySelector('[data-mqr="no"]').click(); await wait(300);
+    ok(!addCalls.length && !(svc.get(kH) || {}).onRadio, 'cancelled: nothing added');
+    $('[data-sh="add"]').click(); await until(() => dlg() && !dlg().hidden, 2000);
+    dlg().querySelector('[data-mqr="yes"]').click();
+    await until(() => (svc.get(kH) || {}).onRadio, 20000);
+    ok((svc.get(kH) || {}).onRadio && addCalls.length === 1, 'confirmed: added');
+    // qrClaim after an unsigned add; the key's own advert (a NEW_ADVERT) ends the claim
+    ok(K.claimOf(kH) === 'VK4ZZQ Imposter', 'unsigned add -> KellyHamCalls.qrClaim(key, name)', K.claimOf(kH));
+    svc._node({ key: kH, longName: 'VK4ZZH Logan', role: 1, hops: 1 }, true);
+    ok(K.claimOf(kH) === null, 'its NEW_ADVERT -> advertSeen: no longer a claim');
+    // ❔ claimed + ℹ️ for a name call that has other nodes in the directory
+    type(HC.qrLink({ key: kJ, type: 1, name: 'VK4ZZB Portable' }));
+    ok(/❔/.test($('[data-sh="pcallsrc"]').textContent) && /2 other nodes/.test($('[data-sh="pinfo"]').textContent) && !$('[data-sh="add"]').classList.contains('danger'), 'preview: ❔ claimed + ℹ️, no conflict', prev());
+    // 🖊️ a signed card; no qrClaim when it is added
+    type(world.cardOf('VK4ZZF Redbank'));
+    ok(/🖊️/.test($('[data-sh="pcallsrc"]').textContent) && /signed by this radio \(callsign not checked\)/.test(prev()), 'preview: 🖊️ signed card', prev());
+    $('[data-sh="add"]').click(); await until(() => (svc.get(kF) || {}).onRadio, 20000);
+    ok((svc.get(kF) || {}).onRadio && K.claimOf(kF) === null, 'a signed card added: no claim');
+    ok(!/<img|onerror/i.test(mount.innerHTML), 'nothing unescaped');
+
+    // ---- 🤝 swap: my QR + fingerprint, scan theirs -> preview -> direct add -> DM -> its ACK
+    const nCard = cardEv.length;
+    $('[data-sh="swap"]').click();
+    await until(() => $('[data-sh="swapqr"]'), 25000);
+    const me = part._card();
+    ok(me && $('[data-sh="swapqr"]') && $('.hc-sh-swap .hc-sh-fp').textContent.replace(/ /g, '') === KellyMeshQR.fingerprint(me.key), 'swap: big QR + my fingerprint to read aloud');
+    await until(() => $('[data-sh="swapqr"]').width !== 300, 4000);
+    KellyMeshQR.native = false;
+    let txt = null; try { txt = await KellyMeshQR.decode($('[data-sh="swapqr"]'), true); } catch (e) { txt = 'decode error ' + e.message; }
+    ok(txt === me.qr && /^meshcore:\/\/contact\/add\?/.test(txt), 'swap QR = my contact/add', txt);
+    ok(cardEv.length === nCard + 1 && cardEv[nCard].how === 'qr', 'swap QR shown -> card {how: qr}', JSON.stringify(cardEv.slice(nCard)));
+    ok(/Now scan theirs/.test(mount.textContent) && !!$('[data-sh="swapscan"]') && /⬜ I have them/.test(mount.textContent) && /⬜ they have me/.test(mount.textContent), 'swap: "Now scan theirs" + an empty checklist');
+    // theirs is read (the camera hands swapGot the parsed card)
+    const theirs = HC.parseCard(HC.qrLink({ key: kK, type: 1, name: 'VK4ZZK Beaudesert' }), { ed });
+    const nAdd = addCalls.length;
+    const got = part._swapGot(theirs);
+    await until(() => dlg() && !dlg().hidden && dlg().querySelector('[data-mqr="yes"]'), 2000);
+    ok(/Add this contact/.test(dlg().textContent) && /unsigned app QR/i.test(dlg().textContent) && dlg().textContent.includes(KellyMeshQR.fingerprint(kK)), 'swap: the shared preview, unsigned + fingerprint', dlg().textContent.slice(0, 200));
+    dlg().querySelector('[data-mqr="yes"]').click();
+    await got;
+    ok(addCalls.length === nAdd + 1 && addCalls[nAdd][1] && addCalls[nAdd][1].direct === true, 'swap: added with { direct: true }', addCalls[nAdd] && addCalls[nAdd][1]);
+    ok((svc.get(kK) || {}).onRadio && /✅ I have them/.test(mount.textContent) && /⬜ they have me/.test(mount.textContent), 'swap: tick 1 -- I have them');
+    ok(K.claimOf(kK) === 'VK4ZZK Beaudesert' && cardEv.some(e => e.how === 'scan' && e.key === kK), 'swap: qrClaim + card {how: scan, key}', JSON.stringify(cardEv.slice(nCard)));
+    ok($('[data-sh="dmtext"]') && $('[data-sh="dmtext"]').value === '73 de VK4ZZA, QR swap' && dms.length === 0, 'swap: the DM is pre-filled and not sent until tapped');
+    const msg = { state: 'sent' };
+    dmAnswer = () => ({ ok: true, msg });
+    $('[data-sh="swapdm"]').click();
+    await until(() => dms.length === 1 && /waiting for their node/.test($('[data-sh="dmstate"]').textContent), 2000);
+    ok(dms.length === 1 && dms[0][0] === kK && dms[0][1] === '73 de VK4ZZA, QR swap', 'swap: tapped -> c.sendDm(their key, text)', dms);
+    msg.state = 'delivered';
+    await until(() => /✅ they have me/.test(mount.textContent), 3000);
+    ok(/✅ they have me/.test(mount.textContent) && /ACKed/.test($('[data-sh="dmstate"]').textContent), 'swap: their ACK -> tick 2 -- they have me');
+    $('[data-sh="swapdone"]').click();
+    ok(!$('[data-sh="swapqr"]') && !part._swap(), 'swap: Done closes it');
+
+    // the demo / chat-fallback ways: a 'mutual' for that key ticks it; the chat path says to look for ✓✓
+    $('[data-sh="swap"]').click(); await until(() => $('[data-sh="swapqr"]'), 5000);
+    const g2 = part._swapGot(HC.parseCard(world.cardOf('VK4ZZB Springfield'), { ed }));
+    await until(() => dlg() && !dlg().hidden && dlg().querySelector('[data-mqr="yes"]'), 2000);
+    ok(/Already on your radio/.test(dlg().textContent) && /P25X directory/.test(dlg().textContent), 'swap preview: on-radio status + directory trust', dlg().textContent.slice(0, 300));
+    const nA2 = addCalls.length;
+    dlg().querySelector('[data-mqr="yes"]').click(); await g2;
+    ok(addCalls.length === nA2 && /✅ I have them/.test(mount.textContent), 'swap: already on the radio -> ticked without another write');
+    dmAnswer = () => ({ ok: true, chat: true });
+    $('[data-sh="swapdm"]').click(); await until(() => /✓✓/.test($('[data-sh="dmstate"]').textContent), 2000);
+    ok(/✓✓/.test($('[data-sh="dmstate"]').textContent) && !!$('[data-sh="swapticked"]'), 'swap: the chat fallback says to look for ✓✓');
+    bus.emit('mutual', { key: kB, how: 'ack', type: 1, demo: true, at: Date.now() });
+    ok(/✅ they have me/.test(mount.textContent), 'swap: a mutual for that key ticks "they have me"');
+
+    // opt-in: a NEW zero-hop advert heard while the swap is open is offered (❔), never added by itself
+    const kNear = 'cd'.repeat(32), kFar = 'ce'.repeat(32);
+    svc._node({ key: kNear, longName: 'VK4ZZX Near', role: 1, hops: 0 }, true);
+    await wait(300);
+    ok(!$('.hc-sh-offers'), 'offers: off until opted in');
+    const box = $('[data-sh="swaplisten"]'); box.checked = true; box.dispatchEvent(new Event('change', { bubbles: true }));
+    await until(() => $(`[data-sh="offeradd"][data-k="${kNear}"]`), 3000);
+    ok(!!$(`[data-sh="offeradd"][data-k="${kNear}"]`) && /❔/.test($('.hc-sh-offers').textContent) && !(svc.get(kNear) || {}).onRadio, 'offers: a zero-hop advert offered with ❔, not added');
+    svc._node({ key: kFar, longName: 'VK4ZZW Far', role: 1, hops: 2 }, true);
+    await wait(300);
+    ok(!$(`[data-sh="offeradd"][data-k="${kFar}"]`), 'offers: a relayed advert is not offered');
+    const nA3 = addCalls.length;
+    $(`[data-sh="offeradd"][data-k="${kNear}"]`).click();
+    await until(() => (svc.get(kNear) || {}).onRadio, 20000);
+    ok((svc.get(kNear) || {}).onRadio && addCalls[nA3] && addCalls[nA3][0] === kNear && addCalls[nA3][1].direct === true, 'offers: Add adds it (direct)', addCalls[nA3]);
+
+    // destroy
+    part.destroy(); part = null;
+    bus.emit('heard', []); bus.emit('mutual', { key: kB }); await wait(200);
+    ok(mount.innerHTML === '' && !warns.some(w => /share/i.test(w)), 'destroy: empty, no handler errors', warns);
+  } catch (e) { out.push('FAIL exception ' + (e && e.stack || e)); }
+  try { if (part) part.destroy(); } catch { /* */ }
+  try { if (world) world.stop(); } catch { /* */ }
+  const fails = out.filter(l => l.startsWith('FAIL'));
+  document.getElementById('out').textContent = out.join('\n') + '\n' + (fails.length ? `RESULT: FAIL ${fails.length} of ${out.length}` : `RESULT: ALL PASS (${out.length})`);
+})();
+</script>
+</body></html>

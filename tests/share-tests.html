@@ -1,0 +1,37 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Kelly Share tests</title>
+<style>body{font:13px Consolas,monospace;background:#0b0f14;color:#dde}.ok{color:#3d8}.bad{color:#f55}</style>
+</head><body>
+<h3>Kelly Page -- Kelly Share (P25X Transfer) tests</h3>
+<pre id="out">running…</pre>
+<script src="../js/share.js"></script>
+<script>
+// js/share.js: the plain-JS SHA-256 (used where crypto.subtle isn't allowed -- Kelly from the Pi over http) against the
+// browser's, at the padding edges and for a 5 MB file; the piece format. Headless: chrome --headless=new --dump-dom tests/share-tests.html
+const out = [], fails = [];
+function eq(name, got, want) { if (String(got) === String(want)) out.push(`<span class="ok">PASS ${name}</span>`); else { out.push(`<span class="bad">FAIL ${name}: got ${got} want ${want}</span>`); fails.push(name); } }
+const hex = b => Array.from(new Uint8Array(b), x => x.toString(16).padStart(2, '0')).join('');
+(async () => {
+  try {
+    const S = window.KellyShareUI;
+    eq('SHA-256 of "abc" (FIPS 180-2 vector)', S.sha256js(new TextEncoder().encode('abc')), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+    eq('SHA-256 of ""', S.sha256js(new Uint8Array(0)), 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+    for (const n of [1, 55, 56, 63, 64, 65, 119, 120, 128, 1000, 48 * 1024 + 7]) {
+      const d = crypto.getRandomValues(new Uint8Array(n));
+      eq(`SHA-256 ${n} B = crypto.subtle`, S.sha256js(d), hex(await crypto.subtle.digest('SHA-256', d)));
+    }
+    const big = new Uint8Array(5 * 1048576); for (let i = 0; i < big.length; i += 65536) crypto.getRandomValues(big.subarray(i, i + 65536));
+    const t0 = performance.now(), mine = S.sha256js(big), ms = Math.round(performance.now() - t0);
+    eq(`SHA-256 of 5 MB = crypto.subtle (plain JS took ${ms} ms)`, mine, hex(await crypto.subtle.digest('SHA-256', big)));
+    // a piece: header + bytes, as the gateway's share.js packPiece builds it
+    const data = crypto.getRandomValues(new Uint8Array(3000));
+    const p = S.packPiece({ u: 'u7', i: 2, sha256: 'ab'.repeat(32) }, data);
+    eq('piece header', `${p[0]} ${p[1]} ${p[2]}`, '83 72 1');
+    const n = (p[3] << 8) | p[4], meta = JSON.parse(new TextDecoder().decode(p.subarray(5, 5 + n)));
+    eq('piece meta + bytes', `${meta.u} ${meta.i} ${hex(p.subarray(5 + n)) === hex(data)}`, 'u7 2 true');
+  } catch (e) { out.push(`<span class="bad">ERROR ${e.stack}</span>`); fails.push('exception'); }
+  out.push(`RESULT: ${fails.length ? 'FAIL ' + fails.join(', ') : 'ALL PASS'}`);
+  document.getElementById('out').innerHTML = out.join('\n');
+})();
+</script>
+</body></html>

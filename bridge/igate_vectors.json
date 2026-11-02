@@ -1,0 +1,49 @@
+{
+  "_": "APRS iGate vectors: js/igate.js (tests/igate-tests.html) and kelly_igate.py (test_kelly_igate.py) must both pass every one.",
+  "passcode": [
+    ["N0CALL", 13023], ["VK9TST", 20393], ["VK9TST-10", 20393], ["vk9tst", 20393], ["ZL9ZZZ", 19118], ["K1A", 31187]
+  ],
+  "base": [
+    ["VK4XXX", true], ["VK4RBX", true], ["N0CALL", true], ["K1A", true], ["9V1AB", true], ["2E0ABC", true],
+    ["VK4XXXZZ", false], ["VKAZ", false], ["4AZ", false], ["TCPIP", false], ["VK4", false], ["", false], ["VK4XXX-1", false], ["vk4xxx", false]
+  ],
+  "full": [
+    ["VK4XXX", 1, "VK4XXX-1"], ["vk4xxx", 15, "VK4XXX-15"], ["VK4XXX", 10, "VK4XXX-10"], ["VK4XXX", "9", "VK4XXX-9"],
+    ["VK4XXX", 0, null], ["VK4XXX", 16, null], ["VK4XXX", 1.5, null], ["VK4XXX", "x", null], ["TCPIP", 1, null]
+  ],
+  "symbol": [["/>", true], ["/[", true], ["\\>", true], ["S#", true], ["/ ", false], ["x>", false], [">", false], ["//>", false]],
+  "lat": [
+    [-27.4545, 0, "2727.27S"], [27.4545, 0, "2727.27N"], [0.5, 0, "0030.00N"], [-0.0001, 0, "0000.01S"], [59.999999, 0, "6000.00N"],
+    [-89.9999, 0, "8959.99S"], [-89.99999, 0, "9000.00S"], [-27.4545, 1, "2727.2 S"], [-27.4545, 2, "2727.  S"], [-27.4545, 3, "272 .  S"], [-27.4545, 4, "27  .  S"]
+  ],
+  "lon": [
+    [152.9876, 0, "15259.26E"], [-152.9876, 0, "15259.26W"], [5.5, 0, "00530.00E"], [-179.99999, 0, "18000.00W"], [0.0, 0, "00000.00E"],
+    [152.9876, 3, "1525 .  E"], [12.25, 4, "012  .  E"]
+  ],
+  "packet": [
+    [{"src": "VK4XXX-9", "igate": "VK4XXX-10", "lat": -27.4545, "lon": 152.9876, "sym": "/>", "comment": "MeshCore"},
+     "VK4XXX-9>APZKPG,qAO,VK4XXX-10:!2727.27S/15259.26E>MeshCore"],
+    [{"src": "VK4ZQ-7", "igate": "VK4RBX-10", "lat": -27.61, "lon": 152.76, "sym": "/[", "comment": "  hi|there~é "},
+     "VK4ZQ-7>APZKPG,qAO,VK4RBX-10:!2736.60S/15245.60E[hithere"],
+    [{"src": "VK4XXX-9", "igate": "VK4XXX-10", "lat": -27.4545, "lon": 152.9876, "sym": "bad", "comment": "", "amb": 2},
+     "VK4XXX-9>APZKPG,qAO,VK4XXX-10:!2727.  S/15259.  E>"]
+  ],
+  "status": [["VK4XXX-10", "Kelly Page MeshCore iGate", "VK4XXX-10>APZKPG,TCPIP*:>Kelly Page MeshCore iGate"]],
+  "telemetry": [
+    {"name": "repeater preset, status", "src": "VK4XXX-12", "seq": 123, "map": {"a": [{"src": "st:battV", "name": "Battery", "unit": "V", "min": 3, "max": 4.5}, {"src": "st:noise", "name": "Noise", "unit": "dBm", "min": -130, "max": -53.5}, {"src": "st:txAir", "name": "TX air", "unit": "%", "min": 0, "max": 25.5}, {"src": "st:rssi", "name": "RSSI", "unit": "dBm", "min": -130, "max": -53.5}, {"src": "st:snr", "name": "SNR", "unit": "dB", "min": -20, "max": 31}], "b": [{"src": "st:battV", "op": "<", "v": 3.5, "name": "LowBat"}]}, "lpp": [], "st": {"battV": 4.12, "noise": -112, "rssi": -95, "snr": 7.5, "txAirS": 360, "rxAirS": 900, "uptimeS": 36000, "sentFlood": 300, "sentDirect": 60, "txQueue": 0, "errors": 0}, "body": "T#123,190,060,010,117,138,00000000", "defs": [":VK4XXX-12:PARM.Battery,Noise,TX air,RSSI,SNR,LowBat", ":VK4XXX-12:UNIT.V,dBm,%,dBm,dB,on", ":VK4XXX-12:EQNS.0,0.00588235,3,0,0.3,-130,0,0.1,0,0,0.3,-130,0,0.2,-20", ":VK4XXX-12:BITS.11111111,MeshCore via Kelly"]},
+    {"name": "tracker preset, LPP battery", "src": "VK4ZR-9", "seq": 7, "map": {"a": [{"src": "lpp:*:116", "name": "Battery", "unit": "V", "min": 3, "max": 4.5}], "b": []}, "lpp": [{"ch": 1, "type": 116, "name": "voltage", "value": 3.98, "unit": "V"}], "st": null, "body": "T#007,167,,,,,00000000", "defs": [":VK4ZR-9  :PARM.Battery", ":VK4ZR-9  :UNIT.V", ":VK4ZR-9  :EQNS.0,0.00588235,3,0,1,0,0,1,0,0,1,0,0,1,0", ":VK4ZR-9  :BITS.11111111,MeshCore via Kelly"]},
+    {"name": "env preset, custom title", "src": "VK4ZB-13", "seq": 999, "map": {"a": [{"src": "lpp:*:116", "name": "Battery", "unit": "V", "min": 3, "max": 4.5}, {"src": "lpp:*:103", "name": "Temp", "unit": "degC", "min": -20, "max": 63.5}, {"src": "lpp:*:104", "name": "Humid", "unit": "%", "min": 0, "max": 100}, {"src": "lpp:*:115", "name": "Press", "unit": "hPa", "min": 900, "max": 1100}], "b": [], "title": "Back yard, west"}, "lpp": [{"ch": 1, "type": 116, "name": "voltage", "value": 4.2, "unit": "V"}, {"ch": 2, "type": 103, "name": "temperature", "value": 23.4, "unit": "°C"}, {"ch": 2, "type": 104, "name": "humidity", "value": 55, "unit": "%"}, {"ch": 3, "type": 115, "name": "pressure", "value": 1013.2, "unit": "hPa"}], "st": null, "body": "T#999,204,133,140,144,,00000000", "defs": [":VK4ZB-13 :PARM.Battery,Temp,Humid,Press", ":VK4ZB-13 :UNIT.V,degC,%,hPa", ":VK4ZB-13 :EQNS.0,0.00588235,3,0,0.327451,-20,0,0.392157,0,0,0.784314,900,0,1,0", ":VK4ZB-13 :BITS.11111111,Back yard west"]},
+    {"name": "battery + a bit: bit names keep their place", "src": "VK4ZR-9", "seq": 42, "map": {"a": [{"src": "lpp:*:116", "name": "Battery", "unit": "V", "min": 3, "max": 4.5}], "b": [{"src": "lpp:*:116", "op": "<", "v": 3.5, "name": "LowBat", "label": "low"}]}, "lpp": [{"ch": 1, "type": 116, "name": "voltage", "value": 3.4, "unit": "V"}], "st": null, "body": "T#042,068,,,,,10000000", "defs": [":VK4ZR-9  :PARM.Battery,,,,,LowBat", ":VK4ZR-9  :UNIT.V,,,,,low", ":VK4ZR-9  :EQNS.0,0.00588235,3,0,1,0,0,1,0,0,1,0,0,1,0", ":VK4ZR-9  :BITS.11111111,MeshCore via Kelly"]},
+    {"name": "repeater preset, nothing answered", "src": "VK4XXX-12", "seq": 0, "map": {"a": [{"src": "st:battV", "name": "Battery", "unit": "V", "min": 3, "max": 4.5}, {"src": "st:noise", "name": "Noise", "unit": "dBm", "min": -130, "max": -53.5}, {"src": "st:txAir", "name": "TX air", "unit": "%", "min": 0, "max": 25.5}, {"src": "st:rssi", "name": "RSSI", "unit": "dBm", "min": -130, "max": -53.5}, {"src": "st:snr", "name": "SNR", "unit": "dB", "min": -20, "max": 31}], "b": [{"src": "st:battV", "op": "<", "v": 3.5, "name": "LowBat"}]}, "lpp": [], "st": null, "body": "T#000,,,,,,00000000", "defs": [":VK4XXX-12:PARM.Battery,Noise,TX air,RSSI,SNR,LowBat", ":VK4XXX-12:UNIT.V,dBm,%,dBm,dB,on", ":VK4XXX-12:EQNS.0,0.00588235,3,0,0.3,-130,0,0.1,0,0,0.3,-130,0,0.2,-20", ":VK4XXX-12:BITS.11111111,MeshCore via Kelly"]}
+  ],
+  "telemetry_bad": [["VK4XXX-12", "T#123,256,,,,,00000000"], ["VK4XXX-12", "T#12,1,,,,,00000000"], ["VK4XXX-12", "T#123,1,,,,,0000000"], ["VK4XXX-12", ":VK4XX-1  :PARM.Battery"], ["VK4XXX-12", ":VK4XXX-12:Hello there"], ["VK4XXX-12", ":VK4XXX-12:PARM.a|b"], ["VK4XXX-12", ":VK4XXX-12 :PARM.Battery"], ["VK4XXX-1", ":VK4XXX-1:PARM.Battery"], ["VK4XXX-12", "!2727.27S/15259.26E>"], ["VK4XXX-12", ":VK4XXX-12:PARM.x{12"]],
+  "_from_name": "HAM ONLY: the FIRST or SECOND word of a node name must be a VK / ZL amateur callsign (the first wins) (js/igate.js callFromName = kelly_igate.py call_from_name); ham_node also needs it to be the line's own source callsign.",
+  "from_name": [
+    ["VK4XXX Tracker", "VK4XXX"], ["vk4zr-9 car", "VK4ZR-9"], ["VK4KHP Laidley Repeater", "VK4KHP"], ["VK4ZE", "VK4ZE"], ["VK4ABX Rep01", "VK4ABX"], ["ZL1ABC home", "ZL1ABC"], ["VK3ABC", "VK3ABC"], ["  VK4ZB bike", "VK4ZB"], ["VK4XXX_bike", "VK4XXX"], ["VK4XXX-12 Bike", "VK4XXX-12"], ["VK4XXX Bike", "VK4XXX"], ["VK4XXX VK4ZB", "VK4XXX"], ["My bike VK4XXX", null], ["Club rpt VK4RBX", null], ["BARC   VK4BA", "VK4BA"], ["Rpt R3P", null],
+    ["BARC VK4BA Repeater", "VK4BA"], ["m3sh3dup r3p", null], ["R3P", null], ["Rpt VK4RBX-1", "VK4RBX-1"], ["🚗 VK4ZB", "VK4ZB"], ["2E0ABC home", null], ["K4ABC", null], ["AX4ABC", null], ["VK42ABC", null], ["VK4ABCDE", null], ["VK4XXXBIKE", null],
+    ["VK4XXX-0", null], ["VK4XXX-16", null], ["VK4XXX-12bike", "VK4XXX"], ["VK4", null], ["Heltec V3", null], ["RAK4631", null], ["T1000-E", null], ["MESH2GO", null], ["SenseCAP Solar", null], ["", null]
+  ],
+  "ham_node": [
+    ["VK4XXX-12", "VK4XXX Bike", true], ["VK4XXX-12", "VK4ZB Bike", false], ["VK4XXX-12", "Bike VK4XXX", true], ["VK4XXX-12", "My bike VK4XXX", false], ["R3P-1", "m3sh3dup r3p", false], ["VK4BA-1", "BARC VK4BA Repeater", true], ["2E0ABC-9", "2E0ABC home", false], ["VK4KHP-1", "VK4KHP Laidley Repeater", true], ["ZL1ABC-7", "ZL1ABC", true], ["VK4XXX-12", "", false], ["VK4XXX-12", null, false]
+  ]
+}

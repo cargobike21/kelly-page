@@ -1,0 +1,14 @@
+[Unit]
+Description=Kelly Page first boot (retire the shared kelly login if Raspberry Pi Imager made your own)
+# cloud-init makes Imager's users in its network stage, before cloud-config. (Not After=cloud-final:
+# that runs after multi-user.target, and systemd drops a unit ordered between them.)
+After=cloud-config.service
+ConditionPathExists=!/var/lib/kellypage/firstboot-done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/kellypage/kellypage-firstboot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

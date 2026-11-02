@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>DNP3 tests</title></head>
+<body><pre id="out"></pre>
+<script src="../js/dnp3.js"></script>
+<script src="../js/dnp3sim.js"></script>
+<script>
+// DNP3 codec (js/dnp3.js) against scripts/dnp3.py + the bench outstation sim, then the lab's outstation/master loop
+// (js/dnp3sim.js). Headless:
+//   msedge --headless=new --allow-file-access-from-files --dump-dom kelly-page/tests/dnp3-tests.html  -> "RESULT: ALL PASS"
+(function () {
+  const out = [], D = window.DNP3; let fails = 0;
+  const ok = (c, what) => { out.push(`${c ? 'PASS' : 'FAIL'}  ${what}`); if (!c) fails++; };
+  const eq = (a, b, what) => ok(a === b, what + (a === b ? '' : `\n        got  ${a}\n        want ${b}`));
+  try {
+    // ---- CRC + golden frames from scripts/dnp3.py (2026-10-18)
+    eq(D.crc(new TextEncoder().encode('123456789')), 0xEA82, 'CRC-16/DNP check value 0xEA82');
+    eq(D.hex(D.buildFrame(4, 1, D.appRequest(D.FC.READ, D.readIntegrity()))), '056414c404000100220cc0c0013c02063c03063c04063c01068a51', 'integrity poll = dnp3.py --build integrity');
+    eq(D.hex(D.buildFrame(10, 3, D.appRequest(D.FC.READ, D.readIntegrity(), { seq: 5 }))), '056414c40a0003006af6c0c5013c02063c03063c04063c0106ba94', 'integrity seq 5 dest 10 src 3');
+    eq(D.hex(D.buildFrame(4, 1, D.appRequest(D.FC.DIRECT_OPERATE, D.crob(0, D.CROB.TRIP)))), '056418c40400010090dbc0c0050c0117010081016400000064001024000000ffff', 'CROB TRIP idx 0 = dnp3.py');
+    eq(D.hex(D.buildFrame(4, 1, D.appRequest(D.FC.DIRECT_OPERATE, D.crob(1, D.CROB.CLOSE), { seq: 2 }))), '056418c40400010090dbc0c2050c01170101410164000000640034b8000000ffff', 'CROB CLOSE idx 1 seq 2 = dnp3.py');
+    eq(D.hex(D.buildFrame(4, 1, D.appRequest(D.FC.CONFIRM, null, { seq: 3, uns: true }))), '056408c40400010051a3c0d300b0f9', 'unsolicited CONFIRM = dnp3.py');
+    // ---- decoding the bench outstation's own replies (scripts/dnp3_outstation_sim.py)
+    let d = D.decodePy(D.unhex('056411c401000400ec76c0c081000001010000090500b508'));
+    ok(d.ok && d.application.function === 0x81 && d.application.iin === '0x0000', 'sim integrity reply: RESPONSE, IIN 0x0000');
+    const bi = d.objects[0];
+    ok(bi.g === 1 && bi.v === 1 && bi.points.length === 10 && bi.points[0].value === 1 && bi.points[2].value === 1 && bi.points[1].value === 0, 'sim reply: g1v1 packed, 10 points, CB closed + charger healthy');
+    d = D.decodePy(D.unhex('05641ac401000400607fc0c08100000c0117010081016400000033bb6400000000005b'));
+    ok(d.ok && d.objects[0].points[0].code === 0x81 && d.objects[0].points[0].status === 0, 'sim CROB echo: TRIP, status SUCCESS');
+    // ---- inspector annotations
+    const ins = D.inspect('056418c40400010090dbc0c0050c0117010081016400000064001024000000ffff');
+    ok(ins.ok && ins.byteField.every(f => f >= 0), 'inspector labels every byte of a CROB frame');
+    const crcF = ins.fields.filter(f => f.tag === 'crc');
+    eq(crcF.length, 3, 'header CRC + two block CRCs found');
+    const bad = D.unhex('056418c40400010090dbc0c0050c0117010081016400000064001024000000ffff'); bad[12] ^= 0x10;
+    ok(!D.inspect(bad).ok && D.inspect(bad).fields.some(f => f.tag === 'crcbad'), 'corrupted block -> block CRC flagged');
+    // ---- object round trips + timestamps
+    const t0 = Date.UTC(2026, 9, 18, 3, 4, 5, 678);
+    let app = D.appResponse(0x81, 0x0010, D.cat(D.events(2, 2, [{ index: 3, value: 1, time: t0 }]), D.events(32, 3, [{ index: 7, value: -1234, time: t0 + 5 }])));
+    let pa = D.parseApp(app);
+    ok(pa.ok && pa.objects[0].points[0].time === t0 && pa.objects[0].points[0].value === 1, 'g2v2 event: state + 48-bit time round trip');
+    ok(pa.objects[1].points[0].value === -1234 && pa.objects[1].points[0].time === t0 + 5, 'g32v3 event: int32 + time round trip');
+    ok(pa.iinSet.length === 1 && /NEED TIME/.test(pa.iinSet[0]), 'IIN1.4 NEED TIME decodes');
+    ok(pa.objects[0].time === 'abs' && D.OBJ['30.1'].t === 'none' && D.OBJ['2.1'].t === 'none', 'time-carrying flags: g2v2 abs, g30v1/g2v1 none');
+    app = D.appResponse(0x81, 0, D.cat(D.binaryStatic([{ value: 1 }, { value: 0 }, { value: 1 }], 1), D.analogStatic([{ value: 1100 }, { value: -5 }], 2, 4), D.analogStatic([{ value: 49.98 }], 5, 0), D.counterStatic([{ value: 4000000000 }])));
+    pa = D.parseApp(app);
+    ok(pa.ok && pa.objects[0].points.map(p => p.value).join() === '1,0,1', 'g1v1 packed round trip');
+    ok(pa.objects[1].start === 4 && pa.objects[1].points[1].value === -5, 'g30v2 16-bit range 4..5 round trip');
+    ok(Math.abs(pa.objects[2].points[0].value - 49.98) < 1e-4, 'g30v5 float round trip');
+    eq(pa.objects[3].points[0].value, 4000000000, 'g20v1 uint32 counter round trip');
+    pa = D.parseApp(D.appRequest(D.FC.WRITE, D.timeWrite(t0)));
+    eq(pa.objects[0].points[0].time, t0, 'WRITE g50v1 time round trip');
+    pa = D.parseApp(D.appRequest(D.FC.WRITE, D.iinClear(7)));
+    ok(pa.objects[0].g === 80 && pa.objects[0].points[0].index === 7 && pa.objects[0].points[0].value === 0, 'WRITE g80v1 idx 7 = 0 (clear DEVICE RESTART)');
+    pa = D.parseApp(D.appResponse(0x81, 0, D.delayFine(37)));
+    eq(pa.objects[0].points[0].value, 37, 'g52v2 delay fine round trip');
+    pa = D.parseApp(D.appRequest(D.FC.READ, Uint8Array.from([30, 1, 0x00, 2, 5])));
+    ok(pa.ok && pa.objects[0].count === 4 && !pa.objects[0].points.length, 'READ g30v1 range 2..5 carries no values');
+    // ---- analog outputs (g40 status, g41 setpoint block)
+    eq(D.hex(D.aoBlock(1, 2500)), '2902170101c40900', 'g41v2 setpoint idx 1 = 2500: 29 02 17 01 01 c409 status 00');
+    pa = D.parseApp(D.appRequest(D.FC.SELECT, D.aoBlock(0, -300)));
+    ok(pa.ok && pa.objects[0].g === 41 && pa.objects[0].points[0].value === -300 && pa.objects[0].points[0].status === 0, 'SELECT g41v2 round trip (negative value)');
+    pa = D.parseApp(D.appResponse(0x81, 0, D.cat(D.aoEcho([{ index: 3, value: 7, status: 12 }]), D.aoStatus([{ value: 11 }, { value: 22 }]))));
+    ok(pa.ok && pa.objects[0].points[0].status === 12 && pa.objects[1].g === 40 && pa.objects[1].points[1].value === 22, 'g41 echo with OUT OF RANGE status + g40v2 statics decode');
+    ok(/AO\[3\] = 7/.test(D.inspect(D.buildFrame(1, 4, D.appResponse(0x81, 0, D.aoEcho([{ index: 3, value: 7 }])), { dir: false })).summary), 'inspector summary names the setpoint');
+    // ---- multi-segment transport + framer
+    const big = new Uint8Array(600).map((_, i) => i & 0xFF); big[0] = 0xC0; big[1] = 0x81;
+    const frames = D.buildFrames(1, 4, big, { dir: false });
+    eq(frames.length, 3, '600-octet fragment -> 3 transport segments');
+    const ra = new D.Reassembler(); let whole = null;
+    frames.forEach(f => { const L = D.parseLink(f); whole = ra.feed(L.user) || whole; });
+    ok(whole && whole.length === 600 && whole[599] === big[599], 'segments reassemble to the same fragment');
+    const got = []; const fr = new D.Framer(f => got.push(D.hex(f)));
+    const stream = [0xAA, 0x05, 0x64, 0x00, ...frames[0], ...frames[1].slice(0, 5)];
+    fr.push(stream); fr.push(frames[1].slice(5));
+    ok(got.length === 2 && got[0] === D.hex(frames[0]) && got[1] === D.hex(frames[1]), 'byte-stream framer resyncs past junk + a false 05 64');
+    // ---- outstation <-> master loop (dnp3sim.js)
+    if (window.DNP3Sim) {
+      const S = window.DNP3Sim;
+      const sub = new S.Substation();
+      const os = new S.Outstation(sub, { addr: 4 }), ms = new S.Master({ addr: 1, dest: 4, autoTime: false });
+      const wire = [];
+      os.send = f => wire.push(['o', f]); ms.send = f => wire.push(['m', f]);
+      const pump = () => { for (let n = 0; n < 50 && wire.length; n++) { const [who, f] = wire.shift(); (who === 'o' ? ms : os).receive(f); } };
+      ms.integrity(); pump();
+      ok(ms.db.bi.length >= 20 && ms.db.ai.length >= 10, `integrity poll fills the master's view (${ms.db.bi.length} BI, ${ms.db.ai.length} AI)`);
+      const f1 = S.POINTS.bi.findIndex(p => p.id === 'cb.F1');
+      ok(ms.db.bi[f1] === 1, 'master sees F1 closed');
+      const bo = S.POINTS.bo.findIndex(p => p.id === 'cb.F1');
+      ms.sbo(bo, D.CROB.TRIP); pump();
+      ok(!sub.el['cb.F1'].closed, 'SELECT then OPERATE trips F1 in the outstation');
+      ms.poll([1]); pump();
+      ok(ms.db.bi[f1] === 0, 'class 1 event poll reports F1 open');
+      ok(!os.events.some(e => e.cls === 1), 'confirmed class 1 events leave the outstation buffer');
+      const ev = ms.db.events.find(e => e.g === 2 && e.index === f1);
+      ok(ev && ev.timed && Math.abs(ev.time - Date.now() - 4217) < 500, 'g2v2 event carries the outstation\'s (wrong, +4.2 s) clock');
+      ms.direct(bo, D.CROB.CLOSE); pump();
+      ok(sub.el['cb.F1'].closed, 'DIRECT OPERATE closes F1');
+      os.clockOffset = 3700; os.iin |= 1 << D.IIN.NEED_TIME;
+      ms.timeSync(); pump();
+      ok(Math.abs(os.clockOffset) < 50 && !(os.iin & (1 << D.IIN.NEED_TIME)), `time sync: delay measure + write g50v1 clears NEED TIME (offset ${os.clockOffset} ms)`);
+      ms.sbo(bo, D.CROB.TRIP, { skipSelect: true }); pump();
+      ok(sub.el['cb.F1'].closed && ms.log.some(l => /NO SELECT/.test(l.text)), 'OPERATE without SELECT is refused (NO SELECT)');
+    } else ok(false, 'dnp3sim.js loaded');
+  } catch (e) { ok(false, 'exception: ' + (e.stack || e)); }
+  out.push(fails ? `RESULT: ${fails} FAILED` : 'RESULT: ALL PASS');
+  document.getElementById('out').textContent = out.join('\n');
+})();
+</script>
+</body></html>

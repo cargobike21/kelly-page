@@ -1,0 +1,43 @@
+/* Kelly Page -- SEQ Grid Map tab of QLD Grid Power (js/gridmap.js). Lines: red/orange 275-110 kV, amber 33 kV,
+ * yellow-green 11 kV, blue storage; steady glows only -- the particles are a timed burst from JS, never a CSS loop. */
+#page-grid { --gm275: #ff3b5c; --gm110: #ff7a1a; --gm33: #ffb020; --gm11: #c8ff3a; --gmst: #3ba8ff; }
+.gr-hero .tabs { margin-top: 12px; }
+.gm-wrap { position: relative; border-radius: 12px; background: radial-gradient(ellipse at 40% 30%, #0b1630, #050912 75%); border: 1px solid var(--line); }
+.gm-svg { display: block; width: 100%; height: auto; }
+.gm-e { fill: none; stroke-linecap: round; opacity: .85; }
+.gm-e.kv275 { stroke: var(--gm275); filter: drop-shadow(0 0 4px var(--gm275)); } .gm-e.kv110 { stroke: var(--gm110); filter: drop-shadow(0 0 4px var(--gm110)); }
+.gm-e.kv33 { stroke: var(--gm33); } .gm-e.kv11 { stroke: var(--gm11); filter: drop-shadow(0 0 3px rgba(200, 255, 58, .6)); }
+.gm-e.kvst { stroke: var(--gmst); filter: drop-shadow(0 0 4px var(--gmst)); } .gm-e.idle { stroke: #4b5875; filter: none; opacity: .5; stroke-dasharray: 4 5; }
+.gm-dir { fill: none; stroke: none; } .gm-arrh { fill: #fff; opacity: .85; }
+.gm-mw { font: 600 11px var(--mono); fill: #e8f1ff; paint-order: stroke; stroke: #050912; stroke-width: 3px; }
+.gm-dot { fill: #fff; } .gm-dot.kv275 { fill: #ffc2cc; } .gm-dot.kv110 { fill: #ffd2b0; } .gm-dot.kv33 { fill: #ffe6a8; } .gm-dot.kv11 { fill: #f0ffc8; } .gm-dot.kvst { fill: #bfe2ff; }
+.gm-n { cursor: pointer; } .gm-n rect { fill: #0a1226; stroke: var(--line2); stroke-width: 1.5; }
+.gm-n.t-gen rect { stroke: var(--gm275); } .gm-n.t-gen.store rect { stroke: var(--gmst); } .gm-n.t-tx rect { stroke: var(--gm275); stroke-width: 2.5; }
+.gm-n.t-bsp rect { stroke: var(--gm110); } .gm-n.t-zone rect { stroke: var(--gm33); } .gm-n.t-town rect { stroke: var(--gm11); } .gm-n.t-sink rect { stroke: var(--mute); stroke-dasharray: 4 4; }
+.gm-n:hover rect, .gm-n:focus rect, .gm-n.sel rect { stroke: var(--cyan); stroke-width: 3; outline: none; }
+.gm-n:focus { outline: none; }
+.gm-nm { font: 700 12px var(--ui); fill: #fff; } .gm-sub { font: 600 10.5px var(--mono); fill: var(--cyan); }
+.gm-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(240px, 1fr); gap: 16px; }
+@media (max-width: 900px) { .gm-grid { grid-template-columns: 1fr; } }
+.gm-sum { display: flex; flex-wrap: wrap; gap: 18px; margin: 8px 0; font-size: 13.5px; color: var(--dim); } .gm-sum b { color: #fff; font: 800 16px var(--display); }
+#gm-panel h3 { margin: 0 0 4px; font: 700 14px var(--display); color: #fff; letter-spacing: .05em; }
+.gm-io { list-style: none; padding: 0; margin: 8px 0; font-size: 13px; } .gm-io li { padding: 3px 0; border-bottom: 1px solid var(--line); } .gm-io b { float: right; font-family: var(--mono); }
+.gm-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin-top: 8px; }
+.gm-legend i { display: inline-block; width: 18px; height: 4px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+
+/* full screen (Fullscreen API on #gm-card, or .gm-fs where the browser won't allow it): the map takes the screen height */
+#gm-card:fullscreen, #gm-card.gm-fs { background: var(--bg); padding: 16px 20px; overflow: auto; border-radius: 0; display: flex; flex-direction: column; gap: 8px; }
+#gm-card.gm-fs { position: fixed; inset: 0; z-index: 2000; }
+#gm-card:fullscreen .gm-grid, #gm-card.gm-fs .gm-grid { flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr) 300px; }
+#gm-card:fullscreen .gm-wrap, #gm-card.gm-fs .gm-wrap { height: 100%; min-height: 0; display: flex; align-items: center; }
+#gm-card:fullscreen .gm-svg, #gm-card.gm-fs .gm-svg { width: 100%; height: 100%; max-height: calc(100vh - 150px); }
+#gm-card:fullscreen .gm-nm, #gm-card.gm-fs .gm-nm { font-size: 13px; }
+#gm-card:fullscreen > p, #gm-card.gm-fs > p { display: none; }
+@media (max-width: 900px) { #gm-card:fullscreen .gm-grid, #gm-card.gm-fs .gm-grid { grid-template-columns: 1fr; } }
+
+/* QLD overview full screen (#gr-overview = live gauges + generation mix); .gm-fs is the shared full-window fallback */
+#gr-overview { display: flex; flex-direction: column; gap: 16px; }
+.gm-fs { position: fixed; inset: 0; z-index: 2000; }
+#gr-overview:fullscreen, #gr-overview.gm-fs { background: var(--bg); padding: 20px 24px; overflow: auto; justify-content: center; }
+#gr-overview:fullscreen .tabs, #gr-overview.gm-fs .tabs { display: none; }
+#gr-overview:fullscreen > *, #gr-overview.gm-fs > * { zoom: 1.12; }   /* a little bigger to read across the room (Chrome/Edge) */

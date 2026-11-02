@@ -1,0 +1,126 @@
+/* Kelly Page -- the Mackay gas turbine trainer's own drawing (js/mackaygtui.js). The shared trainer parts -- controls,
+ * annunciator, link card, breakers, the grid line, operator tracker, inspector, points, challenges -- are css/scadakit.css.
+ * Steady glows; one-shot effects only (a can's light-off flash runs once); the effects canvas and the blades are moved by
+ * the page's fxLoop only while the engine turns (kelly-page/CLAUDE.md "nothing loops forever"). */
+.gt-root { --gt-fuel: #ffb020; --gt-hot: #ff7a1a; --gt-blue: #56b8ff; --gt-steel: #7f93bd; --gt-dead: #4b5875; }
+.sk-mimicbox .gt-fx { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; border-radius: 12px; }
+
+/* ---------------------------------------------------------------- mimic */
+.gt-mimic .gt-banner { font: 800 26px var(--display); fill: #fff; letter-spacing: .04em; }
+.gt-mimic .gt-banner.good { fill: var(--good); } .gt-mimic .gt-banner.warn { fill: var(--amber); } .gt-mimic .gt-banner.bad { fill: var(--red); }
+.gt-mimic .encl { fill: rgba(10, 17, 36, .55); stroke: #2c3e68; stroke-width: 2; stroke-dasharray: 7 5; transition: fill .6s; }
+.gt-mimic .encl.co2 { fill: rgba(220, 235, 255, .16); stroke: #cfe0ff; }
+.gt-mimic .co2n path { fill: #5b6b8c; }
+.gt-mimic .gt-fire { display: none; } .gt-mimic .gt-fire.on { display: inline; }
+.gt-mimic .gt-fire path { fill: var(--red); filter: drop-shadow(0 0 8px #ff3b5c); } .gt-mimic .gt-fire text { fill: var(--red); }
+.gt-mimic .filter { fill: #0c1426; stroke: #2c3e68; stroke-width: 2; }
+.gt-mimic .louv { stroke: #33456f; stroke-width: 3; }
+.gt-mimic .duct { fill: #0d1a33; stroke: #2c3e68; stroke-width: 2; }
+.gt-mimic .air { fill: none; stroke: #8fe3ff; stroke-width: 2.5; stroke-linecap: round; }
+.gt-mimic .casing { fill: #101c38; stroke: #3b4f7d; stroke-width: 2.5; }
+.gt-mimic .casing.pt { fill: #12203f; }
+.gt-mimic .stg { stroke: #2f4170; stroke-width: 3; }
+.gt-mimic .stg.tb { stroke: #5a3a2a; }
+.gt-mimic .shaft { stroke: #5b6b8c; stroke-width: 6; stroke-linecap: round; }
+.gt-mimic .gt-rot .hub { fill: rgba(13, 26, 51, .85); stroke: var(--gt-steel); stroke-width: 2; }
+.gt-mimic .gt-rot .blur { fill: none; stroke: rgba(143, 227, 255, .5); stroke-width: 4; opacity: calc(var(--sp, 0) * .8); }
+.gt-mimic .gt-rot path { fill: none; stroke: #9fb2d9; stroke-width: 3; stroke-linecap: round; }
+.gt-mimic .gt-rot g circle { fill: #9fb2d9; }
+.gt-mimic .can .cb { fill: #1a2442; stroke: #46598a; stroke-width: 1.5; }
+.gt-mimic .can .fl { fill: url(#gt-flame); opacity: 0; filter: drop-shadow(0 0 5px rgba(255, 140, 40, .85)); }
+.gt-mimic .can .ig { fill: #4b5875; }
+.gt-mimic .can.lit .cb { stroke: var(--gt-hot); }
+.gt-mimic .can.ign .cb { animation: gt-ign .6s ease-out 1; }
+@keyframes gt-ign { 0% { fill: #fff; stroke: #fff; } 35% { fill: #56b8ff; stroke: #ffcf5a; } 100% { fill: #1a2442; } }
+.gt-mimic .hgd { fill: url(#gt-hot); stroke: #5a3a2a; stroke-width: 2; opacity: 0; transition: opacity .6s; }
+.gt-mimic .stack { fill: #0f1a33; stroke: #3b4f7d; stroke-width: 2.5; }
+.gt-mimic .stack-glow { fill: var(--gt-hot); opacity: 0; transition: opacity .8s; mix-blend-mode: screen; }
+.gt-mimic .gen { fill: #0d1a33; stroke: var(--gt-dead); stroke-width: 3; transition: stroke .4s; }
+.gt-mimic .gen.live { stroke: var(--sk-exp); filter: drop-shadow(0 0 6px rgba(57, 255, 136, .55)); }
+.gt-mimic .el.bus { stroke-width: 6; }
+.gt-mimic .chip { font: 800 12px var(--ui); letter-spacing: .1em; fill: var(--amber); }
+.gt-mimic .aux rect { fill: #0a1124; stroke: #2c3e68; stroke-width: 2; }
+.gt-mimic .tl.dead { stroke: var(--sk-dead); stroke-dasharray: 6 5; }
+.gt-mimic .feed { fill: none; stroke: var(--sk-dead); stroke-width: 2; stroke-dasharray: 4 4; }
+.gt-mimic .feed.live { stroke: var(--sk-live); }
+.gt-mimic .house path { fill: #121c36; stroke: #3b4f7d; stroke-width: 1.5; }
+.gt-mimic .house .win { fill: #1c2747; transition: fill .5s; transition-delay: calc(var(--d, 0) * .15s); }
+.gt-mimic .town.lit .house .win { fill: #ffd76a; filter: drop-shadow(0 0 4px #ffcf3a); }
+.gt-mimic .town.dark .house path { stroke: #2a3352; }
+.gt-mimic .sync { opacity: .35; transition: opacity .4s; }
+.gt-mimic .sync.on { opacity: 1; }
+.gt-mimic .sync .face { fill: #0a1124; stroke: #3b4f7d; stroke-width: 3; }
+.gt-mimic .sync.on .face { stroke: var(--cyan); }
+.gt-mimic .sync .mark { stroke: var(--good); stroke-width: 4; }
+.gt-mimic .sync .needle { stroke: var(--amber); stroke-width: 4; stroke-linecap: round; }
+.gt-mimic .sync .pin { fill: #cfe0ff; }
+.gt-mimic .sync .tiny { font: 700 10px var(--ui); fill: var(--mute); }
+.gt-mimic .tank { fill: #0a1124; stroke: #3b4f7d; stroke-width: 2.5; }
+.gt-mimic .fuel { fill: url(#gt-fuelg); opacity: .85; }
+.gt-mimic .fuel.low { fill: var(--red); }
+.gt-mimic .pipe { fill: none; stroke: #3a3020; stroke-width: 7; stroke-linecap: round; }
+.gt-mimic .ppath { fill: none; stroke: none; }
+.gt-mimic [data-parts] circle { fill: #ffd76a; filter: drop-shadow(0 0 3px #ffb020); }
+.gt-mimic .pump { fill: #0d1a33; stroke: var(--gt-dead); stroke-width: 3; }
+.gt-mimic .pump.on { stroke: var(--good); }
+.gt-mimic .fcv path { fill: #1a2442; stroke: var(--gt-fuel); stroke-width: 2; }
+.gt-mimic .fuelbig { fill: var(--gt-fuel); font-size: 30px; }
+.gt-mimic .oiltank { fill: #0a1124; stroke: #3b4f7d; stroke-width: 2; }
+.gt-mimic .oil { fill: none; stroke: #2c2a1a; stroke-width: 3; stroke-dasharray: 5 4; }
+.gt-mimic .oil.on { stroke: #c9a84a; }
+
+/* ---------------------------------------------------------------- start progress + fuel strip (under the mimic) */
+.gt-prog { padding: 10px 14px; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+.gt-pt { font: 800 15px var(--display); color: #fff; min-width: 90px; }
+.gt-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.gt-chips span { padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line2); color: var(--mute); font: 700 12px var(--ui); }
+.gt-chips .ok { color: var(--good); border-color: rgba(57, 255, 136, .45); }
+.gt-chips .now { color: #fff; border-color: var(--amber); background: rgba(255, 176, 32, .16); }
+.gt-tripchip { padding: 5px 10px; border-radius: 8px; background: rgba(255, 59, 92, .2); border: 1px solid var(--red); color: #ffb3c0; font: 800 13px var(--ui); }
+.gt-held { margin: 0; flex-basis: 100%; color: var(--amber); font-size: 13.5px; } .gt-held.bad { color: var(--red); }
+.gt-fuel { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px 18px; align-items: center; position: relative; padding-top: 22px; }
+.gt-big { display: flex; flex-direction: column; }
+.gt-big span { font: 700 11px var(--ui); letter-spacing: .14em; text-transform: uppercase; color: var(--mute); }
+.gt-big b { font: 800 40px var(--mono); color: var(--gt-fuel, #ffb020); line-height: 1.05; text-shadow: 0 0 14px rgba(255, 176, 32, .35); font-variant-numeric: tabular-nums; }
+.gt-big i { font-style: normal; color: var(--dim); font-size: 13px; }
+.gt-big small { color: var(--dim); font: 600 13px var(--mono); margin-top: 2px; }
+.gt-cmp { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; grid-column: span 2; }
+.gt-cmp b { color: #fff; }
+.gt-tanks { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.gt-gauge { position: relative; width: 54px; height: 96px; border: 2px solid var(--line2); border-radius: 8px; overflow: hidden; background: var(--bg2); }
+.gt-gauge i { position: absolute; left: 0; right: 0; bottom: 0; height: 100%; background: linear-gradient(#ffcf5a, #b86a00); transform-origin: bottom; transform: scaleY(0); transition: transform .5s; }
+.gt-gauge.low i { background: linear-gradient(#ff6b85, #c4122f); }
+.gt-gauge span { position: absolute; top: 3px; left: 0; right: 0; text-align: center; font: 800 9px var(--ui); letter-spacing: .08em; color: #fff; text-shadow: 0 0 3px #000; }
+.gt-gauge b { position: absolute; bottom: 4px; left: 0; right: 0; text-align: center; font: 700 12px var(--mono); color: #fff; text-shadow: 0 0 3px #000; }
+.gt-tanks p { flex-basis: 100%; margin: 0; }
+.gt-est { position: absolute; top: 6px; right: 10px; background: rgba(255, 176, 32, .1); border-color: rgba(255, 176, 32, .4); color: var(--amber); font-size: 10.5px; }
+@media (max-width: 640px) { .gt-cmp { grid-column: auto; } .gt-big b { font-size: 32px; } }
+
+/* ---------------------------------------------------------------- operator */
+.gt-ops { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 16px; }
+.gt-state { font: 800 12px var(--ui); letter-spacing: .1em; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line2); color: var(--dim); text-transform: uppercase; }
+.gt-state.s-run { color: var(--good); border-color: var(--good); }
+.gt-state.bad { color: var(--red); border-color: var(--red); }
+.gt-state.s-perm, .gt-state.s-lube, .gt-state.s-crank, .gt-state.s-ignite, .gt-state.s-accel, .gt-state.s-pt, .gt-state.s-excite, .gt-state.s-sync, .gt-state.s-ramp { color: var(--amber); border-color: var(--amber); }
+.gt-why { margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--red); background: rgba(255, 59, 92, .08); border-radius: 0 8px 8px 0; font-size: 14px; }
+.gt-h3 { margin: 10px 0 4px; font: 800 12px var(--ui); letter-spacing: .12em; text-transform: uppercase; color: var(--mute); }
+.gt-perms { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 3px; font-size: 13.5px; }
+.gt-perms b { display: inline-block; width: 18px; }
+.gt-perms .ok b { color: var(--good); } .gt-perms .no b { color: var(--red); } .gt-perms .no { color: #ffd0d8; }
+.gt-unit .sk-sl { display: block; margin: 10px 0 4px; }
+.sk-brk b.warn { color: var(--amber); }
+.gt-fbtns { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ---------------------------------------------------------------- tabs: fuel, engine, facts */
+.gt-townout { display: flex; flex-wrap: wrap; gap: 10px 22px; margin: 10px 0; }
+.gt-tbig { display: flex; flex-direction: column; } .gt-tbig b { font: 800 28px var(--mono); color: var(--gt-fuel, #ffb020); } .gt-tbig span { font-size: 12.5px; color: var(--dim); }
+.gt-hbar { height: 14px; border-radius: 7px; border: 1px solid var(--line2); background: var(--bg2); overflow: hidden; }
+.gt-hbar i { display: block; height: 100%; background: linear-gradient(90deg, #b86a00, #ffcf5a); transform-origin: left; transform: scaleX(0); transition: transform .5s; }
+.gt-fuelout p { font-size: 14px; }
+.gt-eng tr.warn td { color: var(--amber); } .gt-eng tr.bad td { color: var(--red); }
+.gt-tcs { width: 100%; max-width: 420px; height: auto; display: block; }
+.gt-tcs rect { fill: var(--gt-fuel, #ffb020); } .gt-tcs rect.warn { fill: var(--red); } .gt-tcs rect.cold { fill: var(--gt-blue, #56b8ff); }
+.gt-tcs text { font: 600 11px var(--mono); fill: var(--dim); }
+.gt-facts { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 14.5px; }
+.gt-fun h3 { margin: 12px 0 4px; font: 800 15px var(--display); } .gt-fun p { margin: 0; font-size: 14px; }
+@media (prefers-reduced-motion: reduce) { .gt-mimic .can.ign .cb { animation: none; } .gt-gauge i, .gt-hbar i { transition: none; } }

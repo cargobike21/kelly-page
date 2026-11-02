@@ -1,0 +1,20 @@
+{
+  "name": "Kelly Page",
+  "short_name": "Kelly",
+  "description": "A P25 operating console for Tait radios, with LoRa Mesh, over the Kelly bridge.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#050912",
+  "theme_color": "#0a1124",
+  "categories": ["utilities", "communication"],
+  "icons": [
+    { "src": "assets/icons/kelly-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icons/kelly-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icons/kelly-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "assets/icons/kelly-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "assets/kelly-mark.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

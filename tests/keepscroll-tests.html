@@ -1,0 +1,53 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Kelly keepscroll tests</title>
+<style>.box { height: 60px; overflow: auto; } .box p { height: 30px; margin: 0; }</style></head>
+<body>
+<h3>Kelly Page -- keep the scroll place on redraw (js/keepscroll.js)</h3>
+<pre id="out"></pre>
+<div id="reader"></div>
+<div id="log"></div>
+<script src="../js/keepscroll.js"></script>
+<script>
+// Headless: msedge --headless=new --dump-dom tests/keepscroll-tests.html
+const out = [], fails = [];
+const eq = (name, got, want) => { if (JSON.stringify(got) === JSON.stringify(want)) out.push(`PASS ${name}`); else { out.push(`FAIL ${name}: got ${JSON.stringify(got)} want ${JSON.stringify(want)}`); fails.push(name); } };
+const tick = (ms = 0) => new Promise(r => setTimeout(r, ms));
+const msg = (title, n) => `<div class="hdr"><b>${title}</b></div><pre class="box">${Array.from({ length: n }, (_, i) => `<p>${title} line ${i}</p>`).join('')}</pre>`;
+// headless (virtual time) doesn't always run the frame that fires a real scroll event: fire it ourselves
+const scrollAndWait = async (el, top) => { el.scrollTop = top; el.dispatchEvent(new Event('scroll')); await tick(30); };
+(async () => {
+  try {
+    const R = document.getElementById('reader');
+    R.innerHTML = msg('Message one', 20);
+    await scrollAndWait(R.querySelector('.box'), 200);
+    eq('scrolled box is remembered', KellyKeepScroll.boxes.size, 1);
+    // a redraw: same message, new elements
+    R.innerHTML = msg('Message one', 20); await tick(10);
+    eq('redraw of the same content keeps the place', R.querySelector('.box').scrollTop, 200);
+    // the redraw adds lines at the end (a log growing): still the same place
+    R.innerHTML = msg('Message one', 25); await tick(10);
+    eq('content grown at the end: place kept', R.querySelector('.box').scrollTop, 200);
+    // a different message: starts at the top
+    R.innerHTML = msg('Another message', 20); await tick(10);
+    eq('different content opens at the top', R.querySelector('.box').scrollTop, 0);
+    eq('...and the old place is forgotten', KellyKeepScroll.boxes.size, 0);
+    // a render that scrolls its own new box (log kept at the bottom) wins
+    const L = document.getElementById('log');
+    L.innerHTML = msg('Log', 20); await scrollAndWait(L.querySelector('.box'), 100);
+    L.innerHTML = msg('Log', 30); const b = L.querySelector('.box'); b.scrollTop = b.scrollHeight; const want = b.scrollTop; await tick(10);
+    eq('the render\'s own scroll wins', b.scrollTop, want);
+    // scrolled back to the top: forgotten
+    await scrollAndWait(b, 0);
+    eq('scrolled back to the top: forgotten', [...KellyKeepScroll.boxes.values()].some(x => x.el === b), false);
+    // two boxes side by side are told apart
+    R.innerHTML = msg('Left', 20) + msg('Right', 20);
+    const [l, r] = R.querySelectorAll('.box'); await scrollAndWait(l, 90); await scrollAndWait(r, 240);
+    R.innerHTML = msg('Left', 20) + msg('Right', 20); await tick(10);
+    const [l2, r2] = R.querySelectorAll('.box');
+    eq('sibling boxes keep their own places', [l2.scrollTop, r2.scrollTop], [90, 240]);
+  } catch (e) { out.push(`ERROR ${e.stack}`); fails.push('exception'); }
+  out.push(`RESULT: ${fails.length ? 'FAIL ' + fails.join(', ') : 'ALL PASS'}`);
+  document.getElementById('out').textContent = out.join('\n');
+})();
+</script>
+</body></html>

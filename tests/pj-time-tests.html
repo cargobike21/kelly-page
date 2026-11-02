@@ -1,0 +1,152 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pj-time tests</title>
+<link rel="stylesheet" href="../css/kelly.css"><link rel="stylesheet" href="../css/pj.css"><link rel="stylesheet" href="../css/pj-time.css">
+</head><body>
+<!-- Packet Journey time card (js/pj-time.js): the pure aggregator with set timestamps (heat cells, busiest, new vs returning
+     across days, folding, storage cap at 2000 known stations), then the mounted view fed with pj-demo's real MeshCore bytes
+     through KellyPJ.ingest and a fake shell context: draw, filter, tap, hidden, demo split, null fields, persistence, reset.
+     Run: msedge --headless=new --allow-file-access-from-files --dump-dom file:///.../tests/pj-time-tests.html  -> RESULT: ALL PASS -->
+<div class="pj" style="width:600px"><div id="pj-time" class="pj-part"></div></div>
+<div class="pj" style="width:390px"><div id="pj-time2" class="pj-part"></div></div>
+<pre id="out"></pre>
+<script src="../js/mcdecode.js"></script><script src="../js/pj-core.js"></script><script src="../js/pj-demo.js"></script><script src="../js/pj-time.js"></script>
+<script>
+(async function () {
+  const out = [], D = KellyMcDecode, PJ = KellyPJ; let fails = 0;
+  const eq = (name, got, want) => { const ok = JSON.stringify(got) === JSON.stringify(want); if (!ok) fails++; out.push(`${ok ? 'PASS' : 'FAIL'} ${name}${ok ? '' : ` -- got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`}`); };
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  try {
+    // ---------------------------------------------------------- pure aggregator
+    const A = KellyPJTime.createAgg(PJ.KINDS);
+    const at = (y, m, d, h, mi) => new Date(y, m - 1, d, h, mi || 0).getTime();
+    const ev = (t, kind, id) => ({ t, kind, src: id ? { id } : null });
+    const now = Date.now(), dn = KellyPJTime.dayNum(now);
+    let s = A.empty(now - 3 * 864e5);
+    // Sunday 25 Oct 2026 19:xx (a Sunday), lots of chat
+    for (let i = 0; i < 30; i++) A.add(s, ev(at(2026, 10, 25, 19, i), i % 3 ? 'chat' : 'advert', null));
+    A.add(s, ev(at(2026, 10, 26, 7, 5), 'advert', null));
+    let V = A.view(s, null, now, 'all');
+    eq('agg: Sunday 7 pm cell = 30', V.cells[6 * 24 + 19].n, 30);
+    eq('agg: Monday 7 am cell = 1', V.cells[0 * 24 + 7].n, 1);
+    eq('agg: top kind is chat', V.cells[6 * 24 + 19].top, 'chat');
+    eq('agg: busiest line', V.busiest && [V.busiest.label, V.busiest.guess], ['Sunday 7-8 pm', 'weekend net night?']);
+    eq('agg: chat filter', A.view(s, null, now, 'chat').cells[6 * 24 + 19].n, 20);
+    eq('agg: advert filter', A.view(s, null, now, 'advert').cells[6 * 24 + 19].n, 10);
+    eq('agg: hourRange edges', [KellyPJTime.hourRange(11), KellyPJTime.hourRange(23), KellyPJTime.hourRange(0)], ['11 am-12 pm', '11 pm-12 am', '12-1 am']);
+
+    // new vs returning over three days (timestamps relative to now)
+    s = A.empty(now - 5 * 864e5);
+    const dayT = k => now - k * 864e5;
+    A.add(s, ev(dayT(2), 'advert', 'aa')); A.add(s, ev(dayT(2), 'advert', 'bb')); A.add(s, ev(dayT(2), 'chat', 'aa'));
+    A.add(s, ev(dayT(1), 'advert', 'aa')); A.add(s, ev(dayT(1), 'advert', 'cc'));
+    A.add(s, ev(dayT(0), 'advert', 'bb')); A.add(s, ev(dayT(0), 'advert', 'dd')); A.add(s, ev(dayT(0), 'advert', 'me')); A.add(s, ev(dayT(0), 'advert', 'unknown'));
+    V = A.view(s, null, now, 'all');
+    eq('agg: 14 days', V.days.length, 14);
+    eq('agg: day -2 = 2 new', [V.days[11].n, V.days[11].r], [2, 0]);
+    eq('agg: day -1 = 1 new 1 back', [V.days[12].n, V.days[12].r], [1, 1]);
+    eq('agg: today = 1 new 1 back', [V.today.n, V.today.r], [1, 1]);
+    eq('agg: known = 4 (me / unknown skipped)', V.known, 4);
+    // folding: today's 'h:ee' turns out to be key 'ee11...' heard as well -> one station
+    A.add(s, ev(dayT(0), 'chat', 'h:ee')); A.add(s, ev(dayT(0), 'advert', 'ee1122'));
+    eq('agg: before fold = 3 new', A.view(s, null, now).today.n, 3);
+    eq('agg: after fold = 2 new', A.view(s, id => id === 'h:ee' ? 'ee1122' : id, now).today.n, 2);
+    // a day with no traffic since: view still freezes yesterday
+    V = A.view(s, null, now + 864e5);
+    eq('agg: next day, yesterday frozen', [V.days[12].n + V.days[12].r, V.today.n + V.today.r], [4, 0]);
+
+    // storage cap: 5000 stations over 14 days
+    s = A.empty(now - 14 * 864e5);
+    for (let i = 0; i < 5000; i++) A.add(s, ev(now - (13 - Math.floor(i / 400)) * 864e5, PJ.KINDS[i % 7], 'k' + i.toString(16).padStart(64, '0')));
+    eq('agg: known capped at 2000', Object.keys(s.known).length, KellyPJTime.MAX_KNOWN);
+    const js = JSON.stringify({ v: 1, live: A.compact(s) });
+    out.push(`INFO saved size at cap: ${js.length} bytes`);
+    eq('agg: saved copy < 60 KB', js.length < 60000, true);
+    const rs = A.restore(JSON.parse(js).live);
+    eq('agg: restore round-trips', [rs.total, Object.keys(rs.known).length, A.view(rs, null, now).today.n], [s.total, Object.keys(A.compact(s).known).length, A.view(s, null, now).today.n]);
+    eq('agg: restore rejects junk', [A.restore(null), A.restore({ heat: [1] })], [null, null]);
+
+    // ---------------------------------------------------------- mounted view
+    for (const k of Object.keys(localStorage)) if (k.startsWith('pjtest.')) localStorage.removeItem(k);
+    let vis = true;
+    const bus = PJ.createBus(), reg = PJ.createRegistry({});
+    const store = { get(k, d) { const v = localStorage.getItem('pjtest.' + k); return v == null ? d : JSON.parse(v); }, set(k, v) { localStorage.setItem('pjtest.' + k, JSON.stringify(v)); } };
+    const esc = x => String(x).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    const c = { bus, PJ, D, reg, esc, store, fmtAgo: t => Math.round((Date.now() - t) / 1000) + 's ago', fx: () => true, reduced: () => false,
+      visible: () => vis, ingest: rx => PJ.ingest(bus, reg, rx, { channels: [PJ.DEMO_CHANNEL], expectHash: 2 }) };
+    const mount = document.getElementById('pj-time'), $ = q => mount.querySelector(q);
+    let P = KellyPJTime(mount, c);
+    eq('factory returns destroy()', typeof P.destroy, 'function');
+    const E = KellyPJDemo._engine(D, PJ.DEMO_CHANNEL, 7);
+    let fed = 0; const evs = [];
+    while (fed < 300) for (const p of E.next()) { evs.push(c.ingest({ raw: p.raw, snr: p.snr, rssi: p.rssi })); fed++; }
+    V = P._view();
+    eq('live: total = fed', V.total, fed);
+    const srcs = new Set(evs.filter(e => e && e.src && e.src.id && e.src.id !== 'unknown' && e.src.id !== 'me').map(e => reg.canonical(e.src.id)));
+    eq('live: today new = distinct origins', V.today.n, srcs.size);
+    eq('live: now cell holds them', V.cells[V.now].n, fed);
+    await sleep(1150);
+    eq('DOM: 168 cells', mount.querySelectorAll('.pj-time-cell').length, 168);
+    eq('DOM: now cell outlined', $(`.pj-time-cell[data-i="${V.now}"]`).classList.contains('pj-time-now'), true);
+    eq('DOM: now cell coloured', !!$(`.pj-time-cell[data-i="${V.now}"]`).style.background, true);
+    eq('DOM: new today number', $('[data-r="tn"]').textContent, String(srcs.size));
+    eq('DOM: 14 bars', mount.querySelectorAll('.pj-time-day').length, 14);
+    eq('DOM: busiest line', /Busiest/.test($('[data-r="busy"]').textContent), true);
+    eq('DOM: tag live', $('[data-r="set"]').textContent, 'live');
+    $('.pj-time-f[data-f="advert"]').click();
+    eq('filter: adverts only', P._view().cells[V.now].n, evs.filter(e => e.kind === 'advert').length);
+    $('.pj-time-f[data-f="all"]').click();
+    $(`.pj-time-cell[data-i="${V.now}"]`).click();
+    eq('tap: shows count', $('[data-r="pick"]').textContent.includes(`${fed} packets`), true);
+    eq('no page scroll at 600 px', document.documentElement.scrollWidth <= document.documentElement.clientWidth, true);
+
+    // hidden: no redraw; visible: at once
+    const before = $(".pj-time-cell[data-i=\"" + V.now + "\"]").title;
+    vis = false; bus.emit('visible', false);
+    const f0 = fed; while (fed === f0) for (const p of E.next()) { c.ingest({ raw: p.raw, snr: p.snr, rssi: p.rssi }); fed++; }
+    await sleep(1150);
+    eq('hidden: no redraw', $(".pj-time-cell[data-i=\"" + V.now + "\"]").title, before);
+    vis = true; bus.emit('visible', true);
+    eq('visible: redraws at once', $('.pj-time-cell[data-i="' + V.now + '"]').title !== before, true);
+
+    // demo split
+    bus.emit('demo', true);
+    const dv = P._view();
+    eq('demo: seeded fortnight shape', dv.total > 500 && dv.busiest && dv.busiest.label, 'Sunday 7-8 pm');
+    c.ingest({ raw: E.next()[0].raw, snr: 1, rssi: -100, demo: true });
+    eq('demo: live untouched', P._sets().live.total, fed);
+    await sleep(1100);
+    eq('demo: tag says demo', $('[data-r="set"]').textContent, 'demo');
+    bus.emit('demo', false);
+    eq('demo off: back to live', P._view().total, fed);
+
+    // null fields never throw
+    bus.emit('packet', {}); bus.emit('packet', { kind: null, src: { id: null }, t: null }); bus.emit('packet', { src: 5, t: 'x' }); bus.emit('packet', null);
+    eq('null fields counted, no throw', P._view().total, fed + 3);
+
+    // persistence
+    P._save();
+    const saved = localStorage.getItem('pjtest.pjTime');
+    eq('saved, versioned', !!saved && JSON.parse(saved).v === 1, true);
+    P.destroy();
+    eq('destroy empties mount', mount.innerHTML, '');
+    P = KellyPJTime(mount, c);
+    eq('restore: totals back', P._view().total, fed + 3);
+    eq('restore: today new back', P._view().today.n, srcs.size);
+    // phone width: heatmap scrolls inside the card, page doesn't
+    const P2 = KellyPJTime(document.getElementById('pj-time2'), c);
+    await sleep(50);
+    const sc = document.querySelector('#pj-time2 .pj-time-scroll');
+    eq('phone: heatmap scrolls inside', sc.scrollWidth > sc.clientWidth && sc.clientWidth <= 390, true);
+    P2.destroy();
+
+    // reset
+    bus.emit('reset');
+    eq('reset: cleared', [P._view().total, P._view().known], [0, 0]);
+    eq('reset: saved copy null', localStorage.getItem('pjtest.pjTime'), 'null');
+    P.destroy();
+  } catch (e) { fails++; out.push('FAIL threw ' + (e && e.stack || e)); }
+  out.push(`RESULT: ${fails ? fails + ' FAILED' : 'ALL PASS'}`);
+  document.getElementById('out').textContent = out.join('\n');
+})();
+</script>
+</body></html>

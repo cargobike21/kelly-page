@@ -1,0 +1,135 @@
+/* Kelly Page -- the DNP3 Demo's plant switch + the SCADA trainer kit (js/scadakit.js), shared by every trainer plant
+ * (css/wivenhoe.css, css/mackaygt.css add only their own mimic). Kelly's neon tokens.
+ * Steady glows only: a new alarm flashes 3 times then stays lit (UNACK marker until acknowledged); motion is the page's
+ * fxLoop, only while the plant moves (kelly-page/CLAUDE.md "nothing loops forever"). */
+
+/* ---------------------------------------------------------------- plant switch on the DNP3 Demo page */
+.d3-plant { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 4px 0 8px; }
+.d3-plant > span { font: 700 12px var(--ui); letter-spacing: .12em; text-transform: uppercase; color: var(--dim); margin-right: 4px; }
+.d3-plant button, .sk-seg button { all: unset; cursor: pointer; padding: 6px 12px; border: 1px solid var(--line2); border-radius: 999px; font: 700 13px var(--ui); color: var(--dim); transition: color .2s, border-color .2s, background .2s; }
+.d3-plant button.on, .sk-seg button.on { color: #fff; border-color: var(--cyan); background: rgba(0, 229, 255, .12); box-shadow: 0 0 10px rgba(0, 229, 255, .25); }
+.d3-plant button:focus-visible, .sk-seg button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.sk-seg button[disabled] { opacity: .35; cursor: not-allowed; }
+/* a trainer plant's root shows when app.js marks it .on; the substation lab's own parts hide while one is */
+#page-dnp3 .sk-root { display: none; }
+#page-dnp3 .sk-root.on { display: flex; flex-direction: column; gap: 16px; }
+#page-dnp3.plant-alt .d3-intro, #page-dnp3.plant-alt .d3-link, #page-dnp3.plant-alt [data-tabs="dnp3"], #page-dnp3.plant-alt [data-tabpane^="dnp3:"], #page-dnp3.plant-alt .d3-subtag { display: none !important; }
+#page-dnp3.plant-alt .d3-top { padding-bottom: 8px; }
+
+/* ---------------------------------------------------------------- top controls */
+.sk-root { --sk-exp: #39ff88; --sk-imp: #ffb020; --sk-dead: #4b5875; --sk-live: #7fb8ff; }
+.sk-sim { background: rgba(255, 176, 32, .12); border-color: rgba(255, 176, 32, .5); color: var(--amber); }
+.sk-ctl { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 18px; margin-top: 8px; }
+.sk-ctl > div { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sk-k { font: 700 11px var(--ui); letter-spacing: .14em; text-transform: uppercase; color: var(--mute); min-width: 46px; }
+.sk-seg { display: flex; gap: 4px; flex-wrap: wrap; }
+.sk-ctl select { background: var(--bg2); color: var(--text); border: 1px solid var(--line2); border-radius: 8px; padding: 5px 8px; font: 600 13px var(--ui); }
+.sk-snd input[type=range] { width: 90px; }
+.sk-linkst { margin: 10px 0 0; padding: 8px 12px; border-radius: 10px; font-size: 13.5px; border: 1px solid var(--line); }
+.sk-linkst.ok { border-color: rgba(57, 255, 136, .35); background: rgba(57, 255, 136, .06); }
+.sk-linkst.bad { border-color: rgba(255, 59, 92, .5); background: rgba(255, 59, 92, .08); }
+
+/* ---------------------------------------------------------------- mimic frame (the plant draws inside) + link card */
+.sk-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.sk-simlink { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0 18px; align-items: end; }
+.sk-mwrap { padding: 10px; }
+.sk-mimicbox { position: relative; }
+.sk-mimic { display: block; width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--line); }
+.sk-mimic text { font: 600 15px var(--ui); fill: var(--dim); }
+.sk-mimic .lab { fill: #cfe0ff; font-weight: 700; letter-spacing: .04em; }
+.sk-mimic .dim, .sk-mimic tspan.dim { fill: var(--mute); font-weight: 600; }
+.sk-mimic .val { fill: var(--cyan); font: 600 15px var(--mono); }
+.sk-mimic .big { fill: #fff; font: 800 28px var(--display); paint-order: stroke; stroke: rgba(5, 9, 18, .8); stroke-width: 4px; }
+.sk-mimic .el { fill: none; stroke: var(--sk-dead); stroke-width: 3; transition: stroke .3s; }
+.sk-mimic .el.live { stroke: var(--sk-live); filter: drop-shadow(0 0 3px rgba(127, 184, 255, .7)); }
+.sk-mimic .sk-cb { cursor: pointer; }
+.sk-mimic .sk-cb .hit { fill: transparent; }
+.sk-mimic .sk-cb circle { fill: #cfe0ff; }
+.sk-mimic .sk-cb .blade { stroke: var(--red); stroke-width: 4; stroke-linecap: round; transform-box: fill-box; transform-origin: left center; transform: rotate(-34deg); transition: transform .35s cubic-bezier(.5, 1.6, .4, 1), stroke .2s; }
+.sk-mimic .sk-cb.closed .blade { stroke: var(--sk-exp); transform: rotate(0deg); }
+.sk-mimic .sk-cb:focus-visible { outline: none; } .sk-mimic .sk-cb:focus-visible .hit { stroke: var(--cyan); stroke-width: 2; }
+.sk-mimic .pylon { fill: none; stroke: #5b6b8c; stroke-width: 2; }
+.sk-mimic .tl { fill: none; stroke: var(--sk-dead); stroke-width: 3; transition: stroke .4s; }
+.sk-mimic .tl.live { stroke: var(--sk-live); }
+.sk-mimic .tl.exp { stroke: var(--sk-exp); stroke-width: 4; filter: drop-shadow(0 0 7px var(--sk-exp)); }
+.sk-mimic .tl.imp { stroke: var(--sk-imp); stroke-width: 4; filter: drop-shadow(0 0 7px var(--sk-imp)); }
+.sk-mimic .stale .sbox { fill: rgba(5, 9, 18, .9); stroke: var(--amber); stroke-width: 2; }
+.sk-mimic .stale .stxt { fill: var(--amber); font: 800 17px var(--display); letter-spacing: .06em; }
+.sk-mimic .badge { fill: var(--amber); font: 700 13px var(--ui); letter-spacing: .08em; opacity: .85; }
+@media (max-width: 640px) { .sk-mimic .lab tspan.dim { display: none; } }
+
+/* annunciator: new = 3 flashes then steady; acknowledged = dimmer, no marker; the first-up trip is marked */
+.sk-ann { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+.sk-alm { padding: 6px 10px; border-radius: 8px; font: 700 13px var(--ui); border: 1px solid var(--line2); color: var(--text); background: var(--bg2); }
+.sk-alm.none { color: var(--good); border-color: rgba(57, 255, 136, .35); }
+.sk-alm.unack.bad { background: rgba(255, 59, 92, .22); border-color: var(--red); animation: sk-flash .5s steps(2, jump-none) 3; }
+.sk-alm.unack.warn { background: rgba(255, 176, 32, .2); border-color: var(--amber); animation: sk-flash .5s steps(2, jump-none) 3; }
+.sk-alm.ack.bad { border-color: rgba(255, 59, 92, .55); color: #ffb3c0; }
+.sk-alm.ack.warn { border-color: rgba(255, 176, 32, .5); color: #ffd98f; }
+.sk-alm.first { border-width: 2px; box-shadow: 0 0 0 2px rgba(255, 59, 92, .35); }
+.sk-alm em { font-style: normal; margin-right: 8px; font-size: 10px; letter-spacing: .12em; padding: 1px 5px; border-radius: 4px; background: #ffcf3a; color: #1a1a1a; }
+.sk-alm i { font-style: normal; margin-left: 8px; font-size: 10px; letter-spacing: .12em; padding: 1px 5px; border-radius: 4px; background: var(--red); color: #fff; }
+@keyframes sk-flash { from { opacity: 1; } to { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .sk-alm.unack { animation: none !important; } }
+
+/* link card */
+.sk-linkcard .sk-sl { display: block; margin: 6px 0 10px; }
+.sk-sl span { display: flex; justify-content: space-between; font-size: 13px; color: var(--dim); }
+.sk-sl b { color: var(--cyan); font: 600 12px var(--mono); }
+.sk-sl input { width: 100%; }
+.sk-cut { border-color: var(--red) !important; color: #ffb3c0 !important; }
+.sk-cut.down { border-color: var(--good) !important; color: var(--good) !important; }
+.sk-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px; margin-top: 10px; }
+.sk-stats > div { background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; display: flex; flex-direction: column; }
+.sk-stats span { font-size: 11px; color: var(--mute); letter-spacing: .05em; }
+.sk-stats b { font: 600 14px var(--mono); color: var(--text); }
+.sk-stats .warn b { color: var(--amber); } .sk-stats .bad b { color: var(--red); } .sk-stats .good b { color: var(--good); }
+
+/* ---------------------------------------------------------------- operator */
+.sk-mw { display: flex; align-items: baseline; gap: 6px; margin: 4px 0 8px; }
+.sk-mw b { font: 800 34px var(--display); color: #fff; } .sk-mw span { color: var(--dim); }
+.sk-brk { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; } .sk-brk > span { flex: 1; min-width: 150px; }
+.sk-brk b.good { color: var(--good); } .sk-brk b.bad { color: var(--red); }
+.sk-estop { display: flex; align-items: center; gap: 14px; margin-top: 12px; }
+.sk-ebtn { all: unset; cursor: pointer; width: 84px; height: 84px; border-radius: 50%; display: grid; place-items: center; font: 900 14px var(--display); color: #fff; letter-spacing: .05em;
+  background: radial-gradient(circle at 35% 30%, #ff6b85, #c4122f 60%, #7a0a1d); border: 5px solid #ffcf3a; box-shadow: 0 0 0 3px #1a1a1a, 0 6px 14px rgba(0, 0, 0, .5); transition: transform .08s; }
+.sk-ebtn:active { transform: scale(.94); } .sk-ebtn:focus-visible { outline: 3px solid var(--cyan); outline-offset: 3px; }
+.sk-ctltrack { padding: 12px 16px; }
+.sk-trk b { font-size: 15px; }
+.sk-steps { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.sk-steps span { padding: 5px 10px; border-radius: 8px; border: 1px solid var(--line2); color: var(--mute); font: 700 13px var(--ui); }
+.sk-steps .now { color: var(--cyan); border-color: var(--cyan); } .sk-steps .ok { color: var(--good); border-color: rgba(57, 255, 136, .5); } .sk-steps .bad { color: var(--red); border-color: var(--red); }
+.sk-why { margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--cyan); background: rgba(0, 229, 255, .06); border-radius: 0 8px 8px 0; font-size: 14px; }
+.sk-explain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 340px; overflow: auto; }
+.sk-explain li { padding: 6px 10px; border-radius: 8px; background: var(--bg2); border: 1px solid var(--line); font-size: 14px; }
+.sk-explain li.lost { border-color: rgba(255, 59, 92, .4); }
+.sk-explain .sk-t { font: 600 11px var(--mono); color: var(--mute); margin-right: 8px; }
+.sk-explain .bad, .sk-pkts .bad { color: var(--red); }
+
+/* ---------------------------------------------------------------- inspector, points, sequence, challenges */
+.sk-pkts tr.lost td { color: #ff8da1; }
+.sk-pkts td.warn { color: var(--amber); }
+.sk-pkts tr.sk-open > td { background: rgba(0, 229, 255, .04); padding: 10px; }
+.sk-q { font: 700 11px var(--ui); letter-spacing: .08em; padding: 1px 6px; border-radius: 4px; }
+.sk-q.ONLINE { color: var(--good); border: 1px solid rgba(57, 255, 136, .4); }
+.sk-q.COMMLOST { color: var(--amber); border: 1px solid var(--amber); }
+.sk-q.NODATA { color: var(--mute); border: 1px solid var(--line2); }
+.dv-seq { width: 100%; max-width: 760px; height: auto; display: block; }
+.dv-seq text { font: 600 11.5px var(--ui); fill: var(--dim); }
+.dv-seq .hd { fill: #cfe0ff; font: 800 12px var(--display); letter-spacing: .08em; }
+.dv-seq .life { stroke: var(--line2); stroke-width: 2; stroke-dasharray: 4 4; fill: none; }
+.dv-seq .tm { font: 600 10.5px var(--mono); fill: var(--mute); }
+.dv-seq g path { fill: none; stroke-width: 2.2; }
+.dv-seq .dn path { stroke: var(--cyan); } .dv-seq .dn path.hd { fill: var(--cyan); stroke: none; }
+.dv-seq .up path { stroke: var(--lime); } .dv-seq .up path.hd { fill: var(--lime); stroke: none; }
+.dv-seq .lost path { stroke: var(--red); stroke-dasharray: 5 4; } .dv-seq .x { fill: var(--red); font: 800 15px var(--ui); }
+.dv-seq .lb { fill: var(--text); }
+.sk-chal { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.sk-ch { background: var(--bg2); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.sk-ch.run { border-color: var(--cyan); box-shadow: 0 0 14px rgba(0, 229, 255, .2); }
+.sk-ch h3 { margin: 0 0 6px; font: 800 16px var(--display); }
+.sk-ch p { font-size: 14px; }
+.sk-run { font: 700 15px var(--mono); color: var(--cyan); }
+.sk-res.good { color: var(--good); } .sk-res.bad { color: var(--red); }
+.sk-form { display: flex; flex-direction: column; gap: 8px; }
+.sk-form .fld.inline input, .sk-form select { width: 110px; }

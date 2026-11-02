@@ -1,0 +1,55 @@
+{
+ "note": "Real MeshCore packets heard by a RAK4631 companion on 2026-10-24, PUSH LOG_RX_DATA raw bytes. Public broadcasts only: repeater adverts, the public #test channel (key = sha256('#test')[0:16]), channel 81 (not ours, stays encrypted), and two encrypted flood REQs from address 16 to VK4XXX Rpt (fb) sent with 1-byte path hashes -- a real wrong-size station.",
+ "packets": [
+  {
+   "snr": 12.0,
+   "rssi": -55,
+   "hex": "1544a3209976c55dfbaed90b978fe1a96e5c14915e82eda92736454a0a212715bf7e2930e985f274bba4a65530"
+  },
+  {
+   "snr": 13.25,
+   "rssi": -54,
+   "hex": "154419881342c55dfbaed93f1704639d78e1d3c7e2b9b334b8de3a0ee6ad1c13016e6f3d362b9f37a9367f7ba250e4a014ae78ddc7ed745b4dae2be91cd6fb303ff5939c7df83a441618090a2a5db6b00521a916535b484409ce01809694cff6a2db4e8831a47c97a6f18036ecd2f2de8298488be5bcba6ae0bea9766da34055131690652281857c1521b4d517"
+  },
+  {
+   "snr": 13.0,
+   "rssi": -54,
+   "hex": "15491c589aec330855ab452144451daf1b30fbae81c678a23e56e0306e4334d070b84eded96a2fe48696288fe357d9774995afeab0833c"
+  },
+  {
+   "snr": 11.75,
+   "rssi": -56,
+   "hex": "114455abc0ffbc40fbae3308007f84f0ae8cccb87c701b06c2acedd52331463aa5ab4f88fc268b3aeb1e3e51dd6a862366d77f6919ae699c33c3f4d7ff57a1d627216568309da3db17268b05c0769339644b8cf76b8b2ae034e49899aed769e4ca79cf8d859ced6e52b744dc3d0b921ed55efed45a1d09343033372045482031572052707472"
+  },
+  {
+   "snr": 11.5,
+   "rssi": -56,
+   "hex": "154544451dafc55dbc40fbae8168f89ad3861d91c53b4b6986ceed56460c07dc18023d7290e1c760e9253fa5d906fa"
+  },
+  {
+   "snr": 13.5,
+   "rssi": -54,
+   "hex": "15434445c55dfbae814081debcd7fa258febcd5dc1402938189b4a6bc1e52a2b439239b65377d168bba3ff"
+  },
+  {
+   "snr": 13.75,
+   "rssi": -54,
+   "hex": "0104dbbde2fbfb16f81188284a0eed94d0346dae79e26247f2b5"
+  },
+  {
+   "snr": -9.0,
+   "rssi": -117,
+   "hex": "0105dbbde29f67fb16f81188284a0eed94d0346dae79e26247f2b5"
+  },
+  {
+   "snr": -9.25,
+   "rssi": -117,
+   "hex": "11434da8444567907d2a0c0deedd3fd72cadd5bc9717819eff46b05a5d6955b98373c1e7dcbb29d294c8db6aa2e40e4b713173bfd3b6ec2a8c65e7e8ee3030e297758715cc2de3978194edcdf1689fd614b896b1ae8ce9556d9e55583dd44c85513f41066685d4706b4dd20a92516667fe352c1e094d6f6f6c6f6f6c6168204d44436f696c732d35"
+  },
+  {
+   "snr": 13.0,
+   "rssi": -54,
+   "hex": "11444da844456790fbae7d2a0c0deedd3fd72cadd5bc9717819eff46b05a5d6955b98373c1e7dcbb29d294c8db6aa2e40e4b713173bfd3b6ec2a8c65e7e8ee3030e297758715cc2de3978194edcdf1689fd614b896b1ae8ce9556d9e55583dd44c85513f41066685d4706b4dd20a92516667fe352c1e094d6f6f6c6f6f6c6168204d44436f696c732d35"
+  }
+ ]
+}

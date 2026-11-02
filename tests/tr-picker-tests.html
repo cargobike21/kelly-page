@@ -1,0 +1,212 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>tr-picker tests</title>
+<link rel="stylesheet" href="../vendor/leaflet-1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="../css/kelly.css">
+<link rel="stylesheet" href="../css/tr.css">
+<link rel="stylesheet" href="../css/tr-picker.css">
+<script src="../vendor/leaflet-1.9.4/leaflet.min.js"></script>
+<script src="../js/mcdecode.js"></script>
+<script src="../js/pj-core.js"></script>
+<script src="../js/tr-core.js"></script>
+<script src="../js/tr-picker.js"></script>
+</head><body style="width:1000px">
+<!-- the picker's map needs a real box; a fake Demo button for the empty-list suggestion -->
+<button id="tr-demo-btn">🎲 Demo</button>
+<div class="tr"><div class="card tr-pick"><div id="m1"></div></div><div class="card tr-pick"><div id="m2"></div></div></div>
+<pre id="out">running…</pre>
+<script>
+(async function () {
+  const out = [], ok = (cond, name) => out.push((cond ? 'PASS ' : 'FAIL ') + name);
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const warns = []; const cw = console.warn; console.warn = (...a) => { warns.push(a.join(' ')); cw.apply(console, a); };
+  try {
+    const PJ = KellyPJ, TR = KellyTR, now = Date.now();
+    const qrShown = []; window.KellyMeshQR = { ui: () => ({ show: o => { qrShown.push(o); } }) };   // stand-in for js/meshqr.js
+    const key = (b, x) => (b + x.toString(16).padStart(2, '0')).repeat(16).slice(0, 64);
+    const N = (o) => Object.assign({ num: 0, key: null, name: '', role: null, roleId: 0, lat: null, lon: null, lastHeard: null, snr: null, rssi: null, hops: null,
+      outPath: null, inbound: null, fav: false, km: null, canTrace: false, canDiscover: false, why: null }, o);
+    const world = [
+      N({ id: key('a1', 1), key: key('a1', 1), num: 1, name: 'Mt Coot-tha Rpt', role: 'repeater', roleId: 2, lat: -27.47, lon: 152.95, lastHeard: now - 60e3, snr: 7.5, hops: 1, km: 18.2, canTrace: true, canDiscover: true }),
+      N({ id: key('b2', 2), key: key('b2', 2), num: 2, name: 'Ipswich Room', role: 'room', roleId: 3, lat: -27.61, lon: 152.76, lastHeard: now - 5e3, snr: -3, hops: 0, km: 1.4, canTrace: true, canDiscover: true }),
+      N({ id: key('c3', 3), key: key('c3', 3), num: 3, name: 'Kim Phone', role: 'companion', roleId: 1, lastHeard: now - 2e3, snr: 2, hops: 2, canDiscover: true, why: 'not a repeater or room server: path discovery only (it must allow telemetry to you)' }),
+      N({ id: 'num:99', num: 99, name: 'Name Only', role: null, lastHeard: null, why: 'only heard by name -- Kelly needs its advert' }),
+      N({ id: key('d4', 4), key: key('d4', 4), num: 4, name: 'Toowoomba <Rpt>', role: 'repeater', lat: -27.56, lon: 151.95, lastHeard: now - 3600e3, snr: -9, hops: 3, km: 80, canTrace: true, canDiscover: true }),
+    ];
+    function ctx(nodesArr, opts = {}) {
+      const bus = PJ.createBus(), mem = opts.mem || {};
+      let vis = true, cur = null, lim = { ok: true, reason: null, nextAt: null, perTarget: {}, used: { tenMin: 1, hour: 2, flood10: 0 }, caps: { tenMin: 10, hour: 30, flood10: 3, targetGapMs: 60000, discoverGapMs: 300000 } };
+      const calls = { trace: [], cancel: 0 }, refuse = {};
+      const c = { bus, PJ, TR, esc: s => String(s ?? '').replace(/[&<>"']/g, ch => '&#' + ch.charCodeAt(0) + ';'),
+        store: { get: (k, d) => k in mem ? JSON.parse(mem[k]) : d, set: (k, v) => { mem[k] = JSON.stringify(v); } },
+        fmtAgo: ts => ts ? Math.round((Date.now() - ts) / 60000) + 'm ago' : 'never',
+        fx: () => true, reduced: () => false, visible: () => vis, setVis(v) { vis = v; bus.emit('visible', v); },
+        makeMap: opts.noMap ? (() => null) : (el => L.map(el).setView([-27.55, 152.85], 9)),
+        myPos: () => ({ lat: -27.6210, lon: 152.7646 }),
+        nodes: () => nodesArr.slice(), node: id => nodesArr.find(n => n.id === id), selected: () => null,
+        link: () => opts.offline ? { online: false, via: 'none', why: 'connect a MeshCore companion node (LoRa Mesh > Mesh tab), or turn on Demo' } : { online: true, via: 'live', why: null },
+        demo: () => false,
+        trace: (id, o) => { calls.trace.push([id, o]); if (refuse[id]) return { ok: false, reason: refuse[id] }; return { ok: true, id: 'tr-1' }; },
+        cancel: () => { calls.cancel++; cur = null; },
+        canTrace: (id, o) => { const n = nodesArr.find(x => x.id === id); if (!n) return 'unknown station'; if (cur) return 'a trace is running';
+          if (lim.perTarget[id] > Date.now()) return 'traced a moment ago: wait a minute between traces to one station';
+          if (o.method === 'trace' && !n.canTrace) return n.why || 'cannot trace'; if (!n.canDiscover) return n.why; return null; },
+        limits: () => lim, current: () => cur,
+        _set: (k, v) => { if (k === 'cur') cur = v; else if (k === 'lim') lim = v; }, calls, refuse, mem };
+      return c;
+    }
+
+    // ---- render
+    const c = ctx(world), m1 = document.getElementById('m1');
+    const sels = []; c.bus.on('select', s => sels.push(s));
+    const P = KellyTRPicker(m1, c);
+    ok(!!P && typeof P.destroy === 'function', 'factory returns { destroy }');
+    const rows = () => [...m1.querySelectorAll('.tr-pk-row')];
+    ok(rows().length === 5, 'renders every station: ' + rows().length);
+    ok(!!m1.querySelector('.leaflet-container'), 'Leaflet map made');
+    ok(P._state().markers === 3, 'markers only for GPS stations: ' + P._state().markers);
+    const first = rows()[0].dataset.id, order = rows().map(r => r.querySelector('.tr-pk-name').textContent);
+    ok(order[0] === 'Ipswich Room' && order[1] === 'Mt Coot-tha Rpt' && order[2] === 'Toowoomba <Rpt>', 'traceable first, then by last heard: ' + order.join(' | '));
+    ok(order.indexOf('Kim Phone') < order.indexOf('Name Only'), 'untraceable by last heard');
+    ok(m1.innerHTML.includes('Toowoomba &lt;Rpt&gt;'), 'names escaped');
+    const r0 = rows()[0];
+    ok(/1m ago|0m ago/.test(r0.textContent) && /direct/.test(r0.textContent) && /1\.4 km/.test(r0.textContent), 'row: last heard, hops (direct), km: ' + r0.querySelector('.tr-pk-meta').textContent);
+    const bar = r0.querySelector('.tr-pk-bar > i');
+    ok(bar && bar.style.background && getComputedStyle(bar).backgroundColor === 'rgb(255, 176, 32)', 'SNR bar coloured by TR.snrColor (-3 dB = amber): ' + (bar && getComputedStyle(bar).backgroundColor));
+    ok(/-3\.0 dB/.test(r0.textContent), 'SNR text');
+    ok(rows().find(r => /Kim Phone/.test(r.textContent)).querySelector('.tr-pk-can').textContent === 'discover only', 'companion = discover only');
+    ok(rows().find(r => /Kim Phone/.test(r.textContent)).querySelector('.tr-pk-can').title.includes('path discovery only'), 'discover-only says why');
+    ok(r0.querySelector('.tr-pk-can').textContent === 'trace', 'repeater/room = trace');
+    ok(rows().every(r => r.querySelector('button.tr-pk-pick') && r.querySelector('button.tr-pk-star')), 'rows use real buttons');
+    ok(/Pick a station/.test(m1.querySelector('.tr-pk-act').textContent), 'no selection: hint');
+
+    // ---- search
+    const qEl = m1.querySelector('.tr-pk-q');
+    const search = async s => { qEl.value = s; qEl.dispatchEvent(new Event('input')); await wait(180); };
+    await search('coot'); ok(rows().length === 1 && /Coot-tha/.test(rows()[0].textContent), 'search by name');
+    await search('c303'); ok(rows().length === 1 && /Kim Phone/.test(rows()[0].textContent), 'search by key prefix');
+    await search('repeater'); ok(rows().length === 2, 'search by role: ' + rows().length);
+    await search('room'); ok(rows().length === 1, 'search by role word "room"');
+    await search('zzz'); ok(rows().length === 0 && /No station matches/.test(m1.textContent), 'no match message');
+    await search('');  ok(rows().length === 5, 'search cleared');
+
+    // ---- select emission + highlight
+    const coot = world[0].id;
+    m1.querySelector(`.tr-pk-pick[data-id="${coot}"]`).click();
+    ok(sels.length === 1 && sels[0].node === coot && sels[0].from === 'picker', 'click emits select from picker');
+    ok(m1.querySelector('.tr-pk-row.tr-on').dataset.id === coot, 'row highlighted');
+    ok(/Mt Coot-tha Rpt/.test(m1.querySelector('.tr-pk-sel').textContent), 'action panel shows selection');
+    // ▦ the target's contact QR: full key + type from roleId
+    const qrBtn = () => m1.querySelector('.tr-pk-sel .tr-pk-qr');
+    ok(!!qrBtn(), '▦ for a target with a full key');
+    qrBtn().click();
+    ok(qrShown.length === 1 && qrShown[0].contact.key === world[0].key && qrShown[0].contact.type === 2 && qrShown[0].contact.name === 'Mt Coot-tha Rpt', '▦ shows key + type 2 (repeater) + name: ' + JSON.stringify(qrShown[0] && qrShown[0].contact));
+    m1.querySelector(`.tr-pk-pick[data-id="${world[1].id}"]`).click();
+    qrBtn().click(); ok(qrShown.length === 2 && qrShown[1].contact.type === 3, '▦ room = type 3');
+    m1.querySelector(`.tr-pk-pick[data-id="num:99"]`).click();
+    ok(!qrBtn(), 'no ▦ without a key (name only)');
+    m1.querySelector(`.tr-pk-pick[data-id="${world[4].id}"]`).click();
+    ok(!qrBtn(), 'no ▦ when the type is unknown (roleId 0)');
+    m1.querySelector(`.tr-pk-pick[data-id="${coot}"]`).click(); sels.length = 1;
+    const goBtn = () => m1.querySelector('.tr-pk-go');
+    ok(goBtn() && !goBtn().disabled, 'Trace enabled for a repeater');
+    c.bus.emit('select', { node: world[1].id, from: 'viz' });
+    ok(m1.querySelector('.tr-pk-row.tr-on').dataset.id === world[1].id && sels.length === 2, 'follows select from others (no re-emit)');
+    // map click
+    const mk = [...document.querySelectorAll('#m1 .tr-pk-mk')];
+    ok(mk.length === 3, 'map marker DOM: ' + mk.length);
+    mk[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    ok(sels.length === 3 && sels[2].from === 'map', 'map click emits select from map');
+
+    // ---- disabled reason
+    const phone = world[2].id;
+    m1.querySelector(`.tr-pk-pick[data-id="${phone}"]`).click();
+    m1.querySelector('.tr-pk-m[data-m="trace"]').click();
+    ok(goBtn().disabled && /path discovery only/.test(m1.querySelector('.tr-pk-why').textContent), 'Trace disabled with canTrace reason: ' + m1.querySelector('.tr-pk-why').textContent);
+    m1.querySelector('.tr-pk-m[data-m="discover"]').click();
+    ok(!goBtn().disabled && /Discover/.test(goBtn().textContent), 'Discover enabled for a companion');
+    goBtn().click();
+    ok(c.calls.trace.length === 1 && c.calls.trace[0][0] === phone && c.calls.trace[0][1].method === 'discover', 'button calls c.trace(id, {method})');
+    c.refuse[phone] = 'too many floods: 3 per 10 minutes';
+    goBtn().click();
+    ok(/too many floods/.test(m1.querySelector('.tr-pk-why').textContent), 'refused trace shows its reason');
+
+    // ---- pending / cancel
+    const t = Date.now();
+    c._set('cur', TR.runOf({ id: 'tr-2', target: coot, targetName: 'Mt Coot-tha Rpt', method: 'trace', status: 'pending', phase: 'outbound', attempt: 2, tries: 2, sentAt: t, timeoutMs: 20000 }));
+    c.bus.emit('run', c.current());
+    const act = () => m1.querySelector('.tr-pk-act').textContent;
+    ok(/Tracing Mt Coot-tha Rpt/.test(act()) && /on the way out/.test(act()) && /try 2 of 2/.test(act()), 'pending: target, phase, attempt: ' + act());
+    ok(/gives up in (20|19) s/.test(act()), 'pending countdown to sentAt + timeoutMs');
+    ok(P._state().ticking, 'countdown ticker running while pending + visible');
+    ok(goBtn().disabled, 'Trace disabled while pending');
+    m1.querySelector('.tr-pk-cancel').click();
+    ok(c.calls.cancel === 1 && !m1.querySelector('.tr-pk-cancel'), 'Cancel calls c.cancel() and the progress goes');
+
+    // ---- done -> recent (persisted)
+    c.bus.emit('done', TR.runOf({ id: 'tr-2', target: coot, targetName: 'Mt Coot-tha Rpt', status: 'success', endedAt: Date.now() }));
+    c.bus.emit('done', TR.runOf({ id: 'tr-3', target: world[1].id, targetName: 'Ipswich Room', status: 'timeout', endedAt: Date.now() }));
+    c.bus.emit('done', TR.runOf({ id: 'tr-4', target: coot, status: 'success' }));
+    const rec = JSON.parse(c.mem.trRecent);
+    ok(rec.length === 2 && rec[0].id === coot && rec[1].id === world[1].id, 'recent from done, newest first, deduped');
+    m1.querySelector('.tr-pk-chip[data-tab="recent"]').click();
+    ok(rows().length === 2 && rows()[0].dataset.id === coot, 'Recent chip lists recent stations in order');
+
+    // ---- favourites persistence
+    m1.querySelector('.tr-pk-chip[data-tab="all"]').click();
+    m1.querySelector(`[data-star="${phone}"]`).click();
+    ok(JSON.parse(c.mem.trFav).includes(phone), 'star saved to trFav');
+    ok(rows()[0].dataset.id === phone, 'favourite sorts first');
+    ok(m1.querySelector(`[data-star="${phone}"]`).getAttribute('aria-pressed') === 'true', 'star aria-pressed');
+    m1.querySelector('.tr-pk-chip[data-tab="fav"]').click();
+    ok(rows().length === 1 && rows()[0].dataset.id === phone, 'Favourites chip');
+    m1.querySelector('.tr-pk-chip[data-tab="all"]').click();
+
+    // ---- limit display
+    c._set('lim', { ok: false, reason: '10 traces in 10 minutes: shared airtime', nextAt: Date.now() + 42000, perTarget: { [coot]: Date.now() + 30000 }, used: { tenMin: 10, hour: 12, flood10: 1 }, caps: { tenMin: 10, hour: 30, flood10: 3 } });
+    c.bus.emit('limit', c.limits());
+    ok(/Next trace in (42|41) s/.test(act()) && /shared airtime/.test(act()) && /10\/10 in 10 min/.test(act()), 'limit: next trace in 42 s + reason + used: ' + act());
+    ok(P._state().ticking, 'ticker runs while a limit counts down');
+    c.setVis(false);
+    ok(!P._state().ticking, 'ticker stops when hidden');
+    c.setVis(true);
+    ok(P._state().ticking, 'ticker resumes when visible');
+    c._set('lim', { ok: true, reason: null, nextAt: null, perTarget: {}, used: {}, caps: {} }); m1.querySelector('.tr-pk-m[data-m="auto"]').click();   /* clears the refused-trace note (it counts down too) */ c.bus.emit('limit', c.limits());
+    ok(!P._state().ticking, 'ticker stops when nothing counts down');
+
+    // ---- persistence across a new picker; throttled re-render on nodes
+    const c2 = ctx(world, { mem: c.mem });
+    const m2 = document.getElementById('m2'), P2 = KellyTRPicker(m2, c2);
+    ok(P2._state().favs.includes(phone) && P2._state().recent.length === 2, 'favourites + recent persist (store)');
+    world.push(N({ id: key('e5', 5), key: key('e5', 5), num: 5, name: 'New Rpt', role: 'repeater', lastHeard: Date.now(), canTrace: true, canDiscover: true }));
+    c2.bus.emit('nodes'); c2.bus.emit('nodes'); c2.bus.emit('nodes');
+    const n0 = m2.querySelectorAll('.tr-pk-row').length;
+    await wait(1100);
+    ok(n0 === 5 && m2.querySelectorAll('.tr-pk-row').length === 6, `nodes re-render throttled to 1/s (${n0} -> ${m2.querySelectorAll('.tr-pk-row').length})`);
+    P2.destroy(); ok(m2.innerHTML === '', 'destroy empties the mount');
+    c2.bus.emit('nodes'); c2.bus.emit('run', null); c2.bus.emit('select', null);
+
+    // ---- cap 150, no map, empty list, null-tolerance
+    const many = []; for (let i = 0; i < 200; i++) many.push(N({ id: 'k' + i, key: null, name: 'S' + i, role: i % 2 ? 'repeater' : null, lastHeard: now - i * 1000, lat: i % 3 ? null : -27 - i / 1000, lon: 152 }));
+    const c3 = ctx(many, { noMap: true }); const P3 = KellyTRPicker(m2, c3);
+    ok(m2.querySelectorAll('.tr-pk-row').length === 150 && /\+50 more/.test(m2.textContent), 'list capped at 150 rows');
+    ok(m2.querySelector('.tr-pk-mapwrap').hidden, 'no map (makeMap null) -> map hidden');
+    P3.destroy();
+    const c4 = ctx([], { offline: true }); const P4 = KellyTRPicker(m2, c4);
+    ok(/connect a MeshCore companion/.test(m2.textContent) && !!m2.querySelector('.tr-pk-demo'), 'empty: link().why + Demo suggestion');
+    let demoClicks = 0; document.getElementById('tr-demo-btn').onclick = () => demoClicks++;
+    m2.querySelector('.tr-pk-demo').click(); ok(demoClicks === 1, 'Demo suggestion presses the shell Demo button');
+    P4.destroy();
+    const c5 = ctx([N({ id: 'x' })], { noMap: true });
+    Object.assign(c5, { limits: () => null, current: () => { throw new Error('boom'); }, canTrace: () => { throw new Error('boom'); }, link: () => null });
+    let threw = false; let P5;
+    try { P5 = KellyTRPicker(m2, c5); c5.bus.emit('select', { node: 'x', from: 'viz' }); c5.bus.emit('run', {}); c5.bus.emit('limit', null); c5.bus.emit('done', null); } catch (e) { threw = e; }
+    ok(!threw && m2.querySelectorAll('.tr-pk-row').length === 1, 'tolerates null fields and throwing context: ' + threw);
+    P5 && P5.destroy();
+    ok(!warns.some(w => /tr-picker/.test(w)), 'no tr-picker warnings: ' + warns.filter(w => /tr-picker/.test(w)).join(' / '));
+    P.destroy();
+  } catch (e) { out.push('FAIL exception ' + (e && e.stack || e)); }
+  const fails = out.filter(l => l.startsWith('FAIL'));
+  document.getElementById('out').textContent = out.join('\n') + '\n' + (fails.length ? `RESULT: ${fails.length} FAILED` : 'RESULT: ALL PASS');
+})();
+</script>
+</body></html>

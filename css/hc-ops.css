@@ -1,0 +1,44 @@
+/* Kelly Page -- Ham Contacts > 📡 Heard operators (js/hc-ops.js, 2026-10-25). One row per public key; a table on wide
+ * screens, stacked cards under 900 px. Uses the Ham Contacts tokens from css/hc.css. Nothing animates. */
+#hc-ops { min-width: 0; }
+.hc-ops .card-h { flex-wrap: wrap; }
+.hc-ops-grow { flex: 1; }
+.hc-ops-why { margin: 6px 0 10px; max-width: 110ch; }
+.hc-ops-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 10px; }
+.hc-ops-bar input[type=search] { flex: 1; min-width: 180px; padding: 6px 10px; border-radius: 9px; border: 1px solid var(--line2); background: #0b1020; color: var(--text); font: 13px var(--ui); }
+.hc-ops-bar select { padding: 5px 8px; border-radius: 9px; border: 1px solid var(--line2); background: #0b1020; color: var(--text); font: 13px var(--ui); }
+.hc-ops-sort { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--dim); }
+.hc-ops-res { font: 600 12px var(--mono); color: var(--dim); } .hc-ops-res.ok { color: var(--hc-ok); } .hc-ops-res.bad { color: var(--hc-bad); }
+
+.hc-ops-table { border: 1px solid var(--line); border-radius: 12px; overflow-x: auto; }   /* a narrow card scrolls the table, never the page */
+.hc-ops-table [data-r="rows"] { max-height: 520px; overflow-y: auto; }
+.hc-ops-row { display: grid; grid-template-columns: minmax(150px, 1.5fr) minmax(100px, .9fr) 80px 76px minmax(105px, 1.1fr) minmax(92px, .9fr) minmax(100px, 1fr) minmax(130px, 1.2fr); min-width: 900px;
+  gap: 8px; align-items: center; padding: 7px 10px; border-top: 1px solid var(--line); font-size: 13px; }
+.hc-ops-row > span { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.hc-ops-row small { color: var(--mute); font: 11px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hc-ops-head { border-top: 0; background: var(--raised); font: 700 11px var(--display); letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
+.hc-ops-row.is-new { background: rgba(255, 176, 32, .05); }
+.hc-ops-name { display: flex !important; flex-direction: row !important; align-items: center; gap: 6px; flex-wrap: wrap; }
+.hc-ops-name b { color: var(--hc-call); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.hc-ops-call { font: 700 12px var(--mono); padding: 1px 6px; border-radius: 6px; background: rgba(255, 217, 160, .12); color: var(--hc-card); border: 1px solid rgba(255, 217, 160, .35); }
+.hc-ops-pen { background: none; border: 0; cursor: pointer; padding: 0 2px; opacity: .55; font-size: 12px; } .hc-ops-pen:hover, .hc-ops-pen:focus { opacity: 1; }
+.hc-ops-callin { width: 90px; padding: 3px 6px; border-radius: 7px; border: 1px solid var(--line2); background: #0b1020; color: var(--text); font: 12px var(--mono); text-transform: uppercase; }
+.hc-ops-key { cursor: help; }
+.hc-ops-snr { font: 700 13px var(--mono); }
+.hc-ops-snr.great { color: var(--hc-great); } .hc-ops-snr.good { color: var(--hc-good); } .hc-ops-snr.fair { color: var(--hc-fair); } .hc-ops-snr.poor { color: var(--hc-poor); }
+.hc-ops-direct { color: var(--hc-ok); }
+.hc-ops-tr.ok { color: var(--hc-ok); } .hc-ops-tr.bad { color: var(--hc-warn); }
+.c-stat { flex-direction: row !important; flex-wrap: wrap; gap: 4px !important; }
+.hc-ops-b { font: 700 10px var(--mono); text-transform: uppercase; letter-spacing: .04em; padding: 2px 6px; border-radius: 999px; border: 1px solid var(--line2); white-space: nowrap; }
+.hc-ops-b.new { color: var(--hc-warn); border-color: rgba(255, 176, 32, .5); }
+.hc-ops-b.book { color: var(--cyan); border-color: rgba(0, 229, 255, .45); }
+.hc-ops-b.direct { color: var(--hc-ok); border-color: rgba(57, 255, 136, .45); }
+.c-acts { flex-direction: row !important; flex-wrap: wrap; gap: 4px !important; }
+.hc-ops-rowres { grid-column: 1 / -1; margin: 0; font: 600 12px var(--mono); } .hc-ops-rowres.ok { color: var(--hc-ok); } .hc-ops-rowres.bad { color: var(--hc-bad); }
+.hc-ops-empty { padding: 14px; margin: 0; }
+
+@media (max-width: 900px) {
+  .hc-ops-head { display: none; }
+  .hc-ops-row { grid-template-columns: 1fr 1fr; min-width: 0; }
+  .hc-ops-row .c-name, .hc-ops-row .c-acts, .hc-ops-row .c-stat { grid-column: 1 / -1; }
+}

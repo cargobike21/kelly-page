@@ -1,0 +1,137 @@
+/* Kelly Page -- BLE Presence page (js/bleui.js). Every animation runs once (or 3 times at most) -- nothing loops
+   (2026-10-17) -- and .ble-still (Effects off, BLE animations off, reduce-motion) stops them all. */
+.ble-hero .ble-lede { margin: 6px 0 10px; max-width: 70ch; }
+.ble-st-ok { color: var(--good); border-color: rgba(57, 255, 136, .5); } .ble-st-warn { color: var(--amber); } .ble-st-bad { color: var(--red); border-color: rgba(255, 59, 92, .5); }
+#ble-dry { color: var(--amber); border-color: rgba(255, 176, 32, .6); }
+#ble-root .good { color: var(--good); } #ble-root .bad { color: var(--red); } #ble-root .nowrap { white-space: nowrap; }
+.ble-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin: 10px 0; }
+.ble-stats > div { background: var(--raised); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; display: flex; flex-direction: column; }
+.ble-stats b { font: 800 20px var(--display); color: var(--cyan); } .ble-stats small { color: var(--dim); text-transform: uppercase; letter-spacing: .06em; font-size: 11px; }
+.ble-scroll { max-height: 460px; overflow: auto; }
+#ble-root .tabs { margin-bottom: -4px; }
+
+/* the path strip: lights up once per alert sent */
+.ble-path { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 20px; }
+.ble-path span { display: flex; flex-direction: column; align-items: center; } .ble-path small { font: 600 10.5px var(--ui); color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
+.ble-path i { flex: 1 1 24px; min-width: 18px; height: 2px; background: var(--line2); position: relative; overflow: hidden; }
+.ble-path.tx i::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, var(--cyan), transparent); animation: ble-run .7s ease-in-out 1 both; }
+.ble-path.tx i:nth-of-type(2)::after { animation-delay: .35s; } .ble-path.tx i:nth-of-type(3)::after { animation-delay: .7s; } .ble-path.tx i:nth-of-type(4)::after { animation-delay: 1.05s; }
+@keyframes ble-run { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+
+/* radar */
+.ble-radar-grid { grid-template-columns: minmax(260px, 380px) 1fr; }
+.ble-radar { width: 100%; max-width: 380px; display: block; margin: 0 auto; overflow: visible; }
+.ble-radar .ring { fill: none; stroke: var(--line2); stroke-width: 1; } .ble-radar .ring-l { fill: var(--mute); font: 9px var(--mono); }
+.ble-radar .me { fill: var(--cyan); }
+.ble-radar .b-anon circle { fill: var(--mute); } .ble-radar .b-near circle { fill: var(--violet); }
+.ble-radar .b-reg circle { fill: var(--lime); stroke: #fff; stroke-width: 1; filter: drop-shadow(0 0 4px var(--lime)); }
+.ble-radar .b-reg.t-sensor circle { fill: var(--amber); filter: drop-shadow(0 0 4px var(--amber)); }
+.ble-radar .b-reg.t-gobox circle, .ble-radar .b-reg.t-asset circle { fill: var(--magenta); filter: drop-shadow(0 0 4px var(--magenta)); }
+.ble-radar text { fill: var(--text); font: 600 10px var(--ui); paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
+.ble-radar .ble-sweep { transform-origin: 150px 150px; animation: ble-sweep 2.2s linear 1 both; }
+.ble-radar .ble-sweep path { fill: rgba(0, 229, 255, .16); }
+@keyframes ble-sweep { from { transform: rotate(0deg); opacity: 1; } 90% { opacity: 1; } to { transform: rotate(360deg); opacity: 0; } }
+
+/* presence board */
+.ble-board { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+.ble-card { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; }
+.ble-card .ble-ic { font-size: 30px; line-height: 1; } .ble-card .ble-cb { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ble-card .ble-cn { font: 700 16px var(--ui); } .ble-card .ble-cs b { font: 800 14px var(--display); letter-spacing: .08em; }
+.ble-card.st-present { border-color: rgba(57, 255, 136, .55); } .ble-card.st-present .ble-cs b { color: var(--good); }
+.ble-card.st-away .ble-cs b { color: var(--amber); } .ble-card.st-away { opacity: .8; }
+.ble-card.st-unknown .ble-cs b, .ble-card.st-off .ble-cs b { color: var(--mute); }
+.ble-bar { height: 5px; border-radius: 3px; background: var(--raised); overflow: hidden; } .ble-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--violet), var(--cyan)); transition: width .6s; }
+.ble-flash { animation: ble-flash 1.1s ease-out 1; }
+@keyframes ble-flash { 0% { box-shadow: 0 0 0 0 rgba(0, 229, 255, .8); transform: scale(1.03); } 100% { box-shadow: 0 0 0 18px rgba(0, 229, 255, 0); transform: scale(1); } }
+tr.ble-flash td { animation: rowflash 1.2s 1; }
+
+/* forms, rules, alerts */
+.ble-form { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); align-items: end; margin: 10px 0; }
+.ble-form .grow { grid-column: span 2; } .ble-form .ble-tpl { grid-column: 1 / -1; } .ble-form textarea { width: 100%; font-family: var(--mono); }
+.ble-preview { padding: 8px 10px; border-radius: 10px; background: #081022; border: 1px solid var(--line2); display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.ble-preview .bad { color: var(--red); }
+.ble-pr { font: 700 11px var(--mono); padding: 2px 8px; border-radius: 7px; border: 1px solid var(--line2); text-transform: uppercase; }
+.ble-pr.pr-alarm { color: #fff; background: rgba(255, 59, 92, .35); border-color: var(--red); } .ble-pr.pr-presence { color: var(--cyan); } .ble-pr.pr-routine { color: var(--dim); }
+#ble-root td.st-sent { color: var(--good); } #ble-root td.st-failed { color: var(--red); } #ble-root td.st-dry { color: var(--amber); } #ble-root td.st-queued { color: var(--cyan); }
+.ble-fix { margin: 4px 0 0 18px; padding: 0; color: var(--amber); }
+.ble-token pre { white-space: pre-wrap; word-break: break-all; background: #081022; border: 1px solid var(--line2); border-radius: 8px; padding: 8px; color: var(--cyan); }
+.ble-find { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.ble-heat { font: 800 16px var(--display); color: hsl(calc(220 - var(--h) * 220), 100%, 60%); }
+
+#ble-root.ble-still *, #ble-root.ble-still *::after { animation: none !important; transition: none !important; }
+@media (prefers-reduced-motion: reduce) { #ble-root * , #ble-root *::after { animation: none !important; } }
+@media (max-width: 900px) { .ble-radar-grid { grid-template-columns: 1fr; } .ble-form .grow { grid-column: auto; } }
+#ble-root { display: flex; flex-direction: column; gap: 16px; }
+.ble-hex { white-space: pre-wrap; word-break: break-all; background: #081022; border: 1px solid var(--line2); border-radius: 8px; padding: 8px; color: var(--cyan); font-size: 12px; }
+.ble-pr.pr-telem { color: var(--lime); }
+
+/* Phase 4: Inspector + Learn (js/bleinspect.js) */
+.bi-grid { grid-template-columns: minmax(300px, 420px) 1fr; align-items: start; }
+.bi-list-card .ble-scroll { max-height: 640px; }
+.bi-bm { cursor: pointer; color: var(--amber); }
+.bi-hex { display: flex; flex-wrap: wrap; gap: 3px; font: 600 13px var(--mono); margin: 8px 0; }
+.bi-hex span { padding: 2px 4px; border-radius: 4px; border: 1px solid transparent; background: var(--raised); }
+.bi-hex span.recon { border-style: dashed; border-color: var(--line2); }
+.bi-hex span.clk { cursor: pointer; }
+.bi-hex span.l-hci { color: #9aa8c7; } .bi-hex span.l-rep { color: var(--cyan); } .bi-hex span.l-ad { color: var(--amber); } .bi-hex span.l-dec { color: var(--lime); }
+.bi-hex span.on, .bi-hex span.hov { background: rgba(124, 92, 255, .45); color: #fff; }
+.bi-legend { display: flex; gap: 12px; } .bi-legend span::before { content: '■ '; } .bi-legend .l-hci { color: #9aa8c7; } .bi-legend .l-rep { color: var(--cyan); } .bi-legend .l-ad { color: var(--amber); } .bi-legend .l-dec { color: var(--lime); }
+.bi-info { margin: 8px 0; padding: 8px 10px; border-radius: 10px; background: #081022; border: 1px solid var(--line2); min-height: 44px; }
+.bi-tree, .bi-tree ul { list-style: none; margin: 0; padding-left: 14px; } .bi-tree { padding-left: 0; font-size: 13.5px; }
+.bi-n { cursor: pointer; padding: 1px 4px; border-radius: 5px; } .bi-n:hover { background: rgba(0, 229, 255, .08); } .bi-n.on { background: rgba(124, 92, 255, .3); }
+.bi-n.l-hci b { color: #9aa8c7; } .bi-n.l-rep b { color: var(--cyan); } .bi-n.l-ad b { color: var(--amber); } .bi-n.l-dec b { color: var(--lime); }
+.bi-n span { color: var(--dim); font-family: var(--mono); font-size: 12.5px; }
+.bi-diff, .bi-map { margin-top: 12px; } .bi-diff h4, .bi-map h4 { margin: 4px 0; font-size: 14px; }
+.bi-diffrow { display: flex; flex-wrap: wrap; gap: 3px; font: 600 12.5px var(--mono); align-items: center; } .bi-diffrow > .dim { width: 52px; }
+.bi-diffrow span:not(.dim) { padding: 1px 3px; border-radius: 3px; background: var(--raised); } .bi-diffrow .chg { background: rgba(255, 176, 32, .35); color: #fff; }
+.bi-up { color: var(--lime); }
+/* Phase 5: Games (js/blegames.js) */
+.bg-foxpick { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 8px 0; }
+.bg-fox { padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); margin: 8px 0; background: var(--raised); }
+.bg-fox.live { border-color: rgba(255, 176, 32, .6); } .bg-fox.found { border-color: rgba(57, 255, 136, .6); opacity: .85; } .bg-fox.asleep { opacity: .55; }
+.bg-fn { font: 700 16px var(--ui); }
+.bg-meter { height: 14px; border-radius: 7px; background: #081022; overflow: hidden; margin: 6px 0; }
+.bg-meter i { display: block; height: 100%; background: hsl(calc(220 - var(--h) * 220), 100%, 55%); transition: width .5s; }
+.bg-celebrate { font: 800 22px var(--display); color: var(--lime); text-align: center; padding: 10px; animation: ble-flash 1.2s ease-out 1; }
+.bg-badges { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 8px 0 14px; }
+.bg-badge { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 2px; padding: 10px; border-radius: 12px; background: var(--raised); border: 1px solid var(--line); opacity: .45; }
+.bg-badge span { font-size: 26px; } .bg-badge small { color: var(--dim); font-size: 11px; }
+.bg-badge.got { opacity: 1; border-color: rgba(57, 255, 136, .5); } .bg-badge.new { animation: ble-flash 1.2s ease-out 3; }
+.bg-dex { display: flex; flex-wrap: wrap; gap: 6px; } .bg-dex .tag { text-transform: none; }
+.ble-pr.pr-game { color: var(--magenta); }
+@media (max-width: 900px) { .bi-grid { grid-template-columns: 1fr; } }
+
+/* Phase 13: your phone as a beacon (bleui.js phoneCard) */
+.ble-ph-why { margin: 6px 0 12px; font-weight: 600; }
+.ble-ph-id { display: grid; gap: 8px; margin: 0 0 12px; }
+.ble-ph-id > div { display: grid; grid-template-columns: 64px 1fr auto; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 12px; background: #081022; border: 1px solid var(--line2); }
+.ble-ph-id small { color: var(--dim); text-transform: uppercase; letter-spacing: .08em; font-size: 11px; }
+.ble-ph-id b { font-size: 20px; color: var(--cyan); word-break: break-all; user-select: all; }
+.ble-ph-steps { margin: 0 0 12px; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; max-width: 75ch; }
+.ble-ph-st { margin-top: 12px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line2); color: var(--dim); }
+.ble-ph-st.ok { color: var(--good); border-color: rgba(57, 255, 136, .55); background: rgba(57, 255, 136, .07); }
+
+/* Phase 13: phones (<= 600 px) -- one column, the tab strip scrolls sideways, tables become stacked rows, 44 px targets */
+@media (max-width: 600px) {
+  #ble-root { gap: 12px; }
+  #ble-root .card { padding: 12px; }
+  #ble-root .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  #ble-root .tabs button { flex: none; min-height: 44px; display: inline-flex; align-items: center; }
+  #ble-root .btn, #ble-root select, #ble-root input:not([type=checkbox]):not([type=radio]) { min-height: 44px; }
+  #ble-root .btn.small { min-height: 40px; padding: 6px 12px; }
+  #ble-root input[type=checkbox] { width: 22px; height: 22px; }
+  #ble-root .fld.inline { min-height: 44px; align-items: center; }
+  .ble-stats { grid-template-columns: repeat(3, 1fr); } .ble-stats b { font-size: 17px; }
+  .ble-path { font-size: 16px; }
+  .ble-form { grid-template-columns: 1fr; } .ble-form .grow { grid-column: auto; }
+  .ble-form input, .ble-form select { width: 100%; }
+  .ble-board { grid-template-columns: 1fr; }
+  .ble-scroll { max-height: none; }
+  #ble-devs, #ble-nearby { font-size: 15px; }
+  #ble-devs thead, #ble-nearby thead { display: none; }
+  #ble-devs tr, #ble-nearby tr { display: block; padding: 10px 0; border-top: 1px solid var(--line); }
+  #ble-devs td, #ble-nearby td { display: block; border: 0; padding: 2px 4px; }
+  #ble-devs td.nowrap, #ble-nearby td:last-child { white-space: normal; display: flex; gap: 8px; flex-wrap: wrap; padding-top: 8px; }
+  .ble-ph-id > div { grid-template-columns: 1fr auto; } .ble-ph-id small { grid-column: 1 / -1; }
+  .ble-ph-id b { font-size: 17px; }
+}

@@ -1,0 +1,392 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>MeshCore tests</title>
+<style>body{font:13px Consolas,monospace;background:#0b0f14;color:#dde}.ok{color:#3d8}.bad{color:#f55}</style>
+</head><body>
+<h3>Kelly Page -- MeshCore codec + driver against the simulated node</h3>
+<pre id="out">running…</pre>
+<script src="../vendor/tweetnacl-1.0.3/nacl-fast.min.js"></script>
+<script src="../js/gold-token.js"></script>
+<script src="../js/meshcore.js"></script>
+<script src="../js/meshcoresim.js"></script>
+<script>
+// js/meshcore.js (Framer, parseContact, parseMsg, decodeRaw, readPath, and the Session that mesh.js drives) run
+// against js/meshcoresim.js, a simulated companion node answering frame by frame. Repeater management (login /
+// status / telemetry / neighbours / remote CLI / GET_STATS) is checked twice: the parsers against frames captured
+// from a real SenseCAP Solar repeater + RAK4631 companion (fw 1.18.0, 2026-10-21), and the Session against the sim.
+// Headless: chrome --headless=new --allow-file-access-from-files --virtual-time-budget=30000 --dump-dom tests/meshcore-tests.html
+// -> RESULT: ALL PASS (without the budget the DOM is dumped before the async checks finish)
+const MC = window.KellyMeshCore, SIM = window.KellyMeshCoreSim, out = [], fails = [];
+const KEYOF_VECTOR = '3e08c379461c3bfd';   // keyOf('VK4XXX Veranda Rptr'), first 8 bytes -- also asserted in bridge/test_kelly_mesh.py
+const hex = u => Array.from(u, b => b.toString(16).padStart(2, '0')).join('');
+const u32 = (b, o) => (b[o] | b[o + 1] << 8 | b[o + 2] << 16 | b[o + 3] << 24) >>> 0;
+const tick = (ms = 0) => new Promise(r => setTimeout(r, ms));
+const until = async (fn, ms = 2000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = fn(); if (v) return v; await tick(5); } return fn(); };
+function eq(name, got, want) {
+  if (String(got) === String(want)) out.push(`<span class="ok">PASS ${name}</span>`);
+  else { out.push(`<span class="bad">FAIL ${name}: got ${got} want ${want}</span>`); fails.push(name); }
+}
+// the sim's delays compressed 50x so a test run takes a second or two
+const fast = (fn, ms) => { const t = setTimeout(fn, Math.ceil(ms / 50)); return () => clearTimeout(t); };
+const W = SIM.WORLD, idx = name => W.findIndex(w => w.name === name);
+const VERANDA = idx('VK4XXX Veranda Rptr'), BRAVO = idx('VK4ZB Bravo Heltec'), COOT = idx('Mt Coot-tha Rptr'), ROMEO = idx('VK4ZR Romeo'),
+  TWB = idx('Toowoomba Rptr'), SENSOR = idx('Bremer Creek Sensor'), BOB = idx('Brisbane Bob');
+
+// A Session wired to a sim through the real '<' / '>' framing, recording everything the page would see
+function rig(simOpts = {}) {
+  const sim = SIM.create(Object.assign({ sched: fast, seed: 7 }, simOpts));
+  const ev = { nodes: new Map(), newAdverts: [], self: null, texts: [], acks: [], channels: null, status: [], logs: [], stats: {}, routes: [], gone: [] };
+  let session;
+  const framer = new MC.Framer(f => session.onFrame(f), l => ev.logs.push(`junk: ${l}`));
+  // node -> app: '>' len u16 frame, as the USB byte stream carries it
+  sim.onFrame(f => { const b = new Uint8Array(3 + f.length); b[0] = 0x3e; b[1] = f.length & 255; b[2] = f.length >> 8; b.set(f, 3); framer.push(b); });
+  sim.onJunk(b => framer.push(b));
+  const io = {
+    send: async b => { const w = MC.DRIVER.wrap(b, 'usb'); if (w[0] !== 0x3c || (w[1] | w[2] << 8) !== b.length) throw new Error('bad wrap'); sim.write(w.subarray(3)); },
+    node: (n, isNew) => { ev.nodes.set(n.num, n); if (isNew) ev.newAdverts.push(n); },
+    self: n => { ev.self = n; }, text: m => ev.texts.push(m), ack: (ref, state, err) => ev.acks.push({ ref, state, err }),
+    channels: l => { ev.channels = l; }, status: s => ev.status.push(s), log: l => ev.logs.push(l), stat: (k, v) => { ev.stats[k] = v; },
+    route: e => ev.routes.push(e), gone: num => ev.gone.push(num),
+  };
+  session = MC.DRIVER.Session(io);
+  return { sim, session, ev };
+}
+// raw: send one command straight to a sim, collect the frames it sends back within ms
+async function raw(sim, payload, ms = 80) {
+  const got = []; sim.onFrame(f => got.push(f)); sim.write(Uint8Array.from(payload)); await tick(ms); return got;
+}
+const numOf = i => u32(SIM.keyOf(W[i].name), 0);
+
+(async () => {
+  try {
+    // ---- codec
+    const fr = MC.frame(Uint8Array.of(22, 3));
+    eq('frame: < len u16 payload', hex(fr), '3c02001603');
+    const got = []; const junk = [];
+    const F = new MC.Framer(f => got.push(hex(f)), l => junk.push(l));
+    F.push(new TextEncoder().encode('boot ok\r\n')); F.push(Uint8Array.of(0x3e, 3, 0, 1)); F.push(Uint8Array.of(2, 3, 0x3e, 1, 0, 9));
+    eq('Framer: frames split across chunks', got.join(','), '010203,09');
+    eq('Framer: boot text before a frame reported as junk', junk.join('|'), 'boot ok');
+    got.length = 0; F.push(Uint8Array.of(0x3e, 0xff, 0x7f, 0x3e, 1, 0, 7));
+    eq('Framer: an oversize length is skipped, the next frame still found', got.join(','), '07');
+    eq('readPath: 2-byte hashes (path_len top bits = 1)', JSON.stringify(MC.readPath(Uint8Array.of(0xa3, 0x01, 0x5f, 0x02), 0, 0x42).h), '["a301","5f02"]');
+    eq('readPath: 0xff = no path', MC.readPath(new Uint8Array(4), 0, 0xff), null);
+    eq('readPath: past the end = null', MC.readPath(Uint8Array.of(1), 0, 3), null);
+    eq('keyOf: same vector as bridge/kelly_mesh_sim.py', hex(SIM.keyOf('VK4XXX Veranda Rptr')).slice(0, 16), KEYOF_VECTOR);
+
+    // ---- a Session against the sim: start-up
+    let R = rig();
+    await R.session.start();
+    eq('start: status config -> on', R.ev.status.slice(-1)[0], 'on');
+    eq('start: self name', R.ev.self && R.ev.self.longName, 'VK4XXX Kelly Sim');
+    eq('start: radio settings from SELF_INFO', R.ev.self && R.ev.self.radio, '923.125 MHz · BW 62.5 kHz · SF8 · CR4/5 · 22 dBm');
+    eq('start: firmware + model from DEVICE_INFO', R.ev.stats.fw, 'v1.18.0-sim · Kelly MeshCore simulator');
+    eq('start: every contact loaded', R.ev.nodes.size, W.length);
+    eq('start: channels Public + P25X (empty slots 2-7 skipped)', R.ev.channels.map(c => c.name).join(','), 'Public,P25X');
+    // ---- channel slots + CMD_SET_CHANNEL 32 [idx][name 32][secret 16] (same behaviour in bridge/kelly_mesh_sim.py)
+    {
+      const slots = R.session.channelSlots();
+      eq('channelSlots: 8 slots, Public + P25X, Public has the well-known secret', `${slots.max} ${slots.list.map(c => c.index + c.name).join(',')} ${slots.list[0].secretHex}`, '8 0Public,1P25X 8b3387e9c5cdea6ac9e5edbaa115cd72');
+      const s2 = SIM.create({ sched: fast, seed: 7 }), nm = new TextEncoder().encode('#test'), sec = Array.from({ length: 16 }, (_, i) => 0xa0 + i);
+      const setf = (i, name, secret) => { const b = new Uint8Array(50); b[0] = 32; b[1] = i; b.set(name, 2); b.set(secret, 34); return Array.from(b); };
+      eq('sim SET_CHANNEL: OK', hex((await raw(s2, setf(2, nm, sec)))[0] || []), '00');
+      const g = (await raw(s2, [31, 2]))[0] || new Uint8Array(0);
+      eq('sim GET_CHANNEL after SET: name + secret stored', `${g[0]} ${g[1]} ${new TextDecoder().decode(g.subarray(2, 7))} ${g[7]} ${hex(g.subarray(34, 50))}`, `18 2 #test 0 ${hex(sec)}`);
+      eq('sim SET_CHANNEL: idx 8 (past the 8 slots) -> ERR 2', hex((await raw(s2, setf(8, nm, sec)))[0] || []), '0102');
+      eq('sim GET_CHANNEL: idx 8 -> ERR 2; empty slot 5 -> no name, zero secret', `${hex((await raw(s2, [31, 8]))[0] || [])} ${hex(((await raw(s2, [31, 5]))[0] || []).subarray(2))}`, `0102 ${'00'.repeat(48)}`);
+      eq('sim SET_CHANNEL: short frame -> ERR 1', hex((await raw(s2, [32, 2, 0x41]))[0] || []), '0101');
+      eq('sim state: channel names', s2.state().channels.slice(0, 3).join(','), 'Public,P25X,#test');
+      s2.stop();
+      // the Session: setChannel writes, re-reads, refuses an occupied slot unless replace
+      const r1 = await R.session.setChannel(2, '#test', hex(sec));
+      eq('setChannel: slot 2 written and re-read', `${r1.index} ${r1.name} ${R.ev.channels.map(c => c.name).join(',')}`, '2 #test Public,P25X,#test');
+      eq('setChannel: the new secret is in channelSlots (memory only)', R.session.channelSlots().list.find(c => c.index === 2).secretHex, hex(sec));
+      let e1 = ''; try { await R.session.setChannel(1, '#other', hex(sec)); } catch (e) { e1 = e.message; }
+      eq('setChannel: an occupied slot refused without replace', /slot 1 already holds P25X/.test(e1), true);
+      let e2 = ''; try { await R.session.setChannel(8, '#x', hex(sec)); } catch (e) { e2 = e.message; }
+      eq('setChannel: slot out of range refused before sending', /slots 0 to 7/.test(e2), true);
+      await R.session.setChannel(2, '#test2', hex(sec), { replace: true });
+      eq('setChannel: replace on purpose', R.ev.channels.map(c => c.name).join(','), 'Public,P25X,#test2');
+    }
+    eq('start: battery from GET_BATT_AND_STORAGE', R.ev.stats.battery, 4.012);
+    const romeo = R.ev.nodes.get(numOf(ROMEO));
+    eq('contact: name, type, hops, position', romeo && `${romeo.longName} ${romeo.hwLabel} ${romeo.lat} ${romeo.lon} ${romeo.licensed}`, 'VK4ZR Romeo Companion -27.556 152.687 true');
+    eq('contact: no learned route yet', romeo && romeo.outPath, null);
+    const vr = R.ev.nodes.get(numOf(VERANDA));
+    eq('repeater contact typed as Repeater', vr && vr.hwLabel, 'Repeater');
+
+    // ---- DM with ACK, path-return and the bot's answer
+    const ref = { id: 'm1' };
+    eq('DM: sendText resolves "sent"', await R.session.sendText({ dm: romeo }, 'Hello Romeo', ref), 'sent');
+    const sentEv = R.ev.routes.find(e => e.kind === 'sent');
+    eq('DM: flood send (no route known), with an ACK to wait for', sentEv && `${sentEv.flood} ${sentEv.ack.length}`, 'true 8');
+    await until(() => R.ev.acks.length);
+    eq('DM: SEND_CONFIRMED -> delivered', R.ev.acks[0] && `${R.ev.acks[0].ref.id} ${R.ev.acks[0].state}`, 'm1 delivered');
+    const ackEv = R.ev.routes.find(e => e.kind === 'ack');
+    eq('DM: round trip carried on the ack route event', ackEv && ackEv.rtt > 1000, true);
+    await until(() => R.ev.routes.some(e => e.kind === 'path-updated'));
+    eq('DM: PATH_UPDATED after a flood (proves two-way)', R.ev.routes.some(e => e.kind === 'path-updated' && e.num === numOf(ROMEO)), true);
+    await until(() => (R.ev.nodes.get(numOf(ROMEO)) || {}).outPath);
+    const viaHash = i => hex(SIM.keyOf(W[i].name).subarray(0, 1));
+    eq('DM: the contact is re-read with its route (us -> veranda -> Coot-tha)', JSON.stringify(R.ev.nodes.get(numOf(ROMEO)).outPath.h), JSON.stringify([viaHash(VERANDA), viaHash(COOT)]));
+    await until(() => R.ev.texts.length);
+    const reply = R.ev.texts[0];
+    eq('DM: the bot answers, synced after MSG_WAITING', reply && `${reply.dm} ${reply.num === numOf(ROMEO)} ${reply.hops} ${reply.text}`, 'true true 2 Copy, Hello Romeo');
+    eq('DM: V3 frame carries SNR', reply && reply.snr, 5);
+    // a second DM now goes direct on the learned route
+    R.ev.routes.length = 0;
+    await R.session.sendText({ dm: R.ev.nodes.get(numOf(ROMEO)) }, 'again', { id: 'm2' });
+    eq('DM: second send is direct', R.ev.routes.find(e => e.kind === 'sent').flood, false);
+    // a sensor never answers: no ACK inside its window
+    R.ev.acks.length = 0;
+    await R.session.sendText({ dm: R.ev.nodes.get(numOf(SENSOR)) }, 'level?', { id: 'm3' });
+    await tick(300);
+    eq('DM to a sensor: never delivered (Session fails it after its own timeout)', R.ev.acks.filter(a => a.ref.id === 'm3' && a.state === 'delivered').length, 0);
+    let threw = '';
+    try { await R.session.sendText({ dm: { num: 1 } }, 'x', {}); } catch (e) { threw = e.message; }
+    eq('DM to a name-only node refused', /no MeshCore key/.test(threw), true);
+
+    // ---- channel traffic
+    eq('channel send: "sent" only', await R.session.sendText({ ch: 1 }, 'P25X net 8pm', {}), 'sent');
+    R.ev.texts.length = 0; R.ev.routes.length = 0;
+    R.sim.inject.channel(BOB, 'Morning all', 0);
+    await until(() => R.ev.texts.length);
+    const ct = R.ev.texts[0];
+    eq('channel text: sender split from "Name: text", channel 0, hops 2', ct && `${ct.dm} ${ct.sender}|${ct.text} ${ct.ch} ${ct.hops}`, 'false Brisbane Bob|Morning all 0 2');
+    const rx = R.ev.routes.find(e => e.kind === 'rx');
+    eq('channel text: LOG_RX_DATA decoded as group text with its path', rx && `${rx.pkt.type} ${rx.pkt.route} ${rx.pkt.path.h.join('')}`, `5 flood ${viaHash(COOT)}${viaHash(VERANDA)}`);
+    eq('LOG_RX: SNR and RSSI', rx && `${rx.snr} ${rx.rssi}`, '2 -99');
+    eq('maxText: a channel post leaves room for "name: "', R.session.maxText({ ch: 0 }), 160 - 2 - 'VK4XXX Kelly Sim'.length);
+
+    // ---- adverts
+    R.ev.routes.length = 0;
+    R.sim.inject.advert(TWB);
+    await until(() => R.ev.routes.some(e => e.kind === 'rx' && e.pkt.advert));
+    const ad = R.ev.routes.find(e => e.kind === 'rx' && e.pkt.advert);
+    eq('advert: raw packet decoded (name, position, type)', ad && `${ad.pkt.advert.name} ${ad.pkt.advert.lat} ${ad.pkt.advert.type}`, 'Toowoomba Rptr -27.564 2');
+    eq('advert: num = first 4 key bytes', ad && ad.pkt.advert.num, numOf(TWB));
+    eq('advert: PUSH 0x80 from a known contact -> advert route', R.ev.routes.some(e => e.kind === 'advert' && e.num === numOf(TWB)), true);
+    R.sim.inject.forget(SENSOR); R.ev.newAdverts.length = 0;
+    R.sim.inject.advert(SENSOR);
+    await until(() => R.ev.newAdverts.length);
+    eq('advert from a new station -> NEW_ADVERT', R.ev.newAdverts[0] && R.ev.newAdverts[0].longName, 'Bremer Creek Sensor');
+
+    // ---- routes
+    const ap = await R.session.advertPath(SIM.keyOf(W[ROMEO].name).reduce((s, b) => s + b.toString(16).padStart(2, '0'), ''));
+    eq('advertPath: hops the advert took (Coot-tha, then veranda)', ap && ap.path.h.join(','), `${viaHash(COOT)},${viaHash(VERANDA)}`);
+    R.ev.routes.length = 0;
+    const tw = R.ev.nodes.get(numOf(TWB));
+    const disc = await R.session.discover(tw);
+    eq('discover: a flood request', disc.flood, true);
+    await until(() => R.ev.routes.some(e => e.kind === 'discovery'));
+    const de = R.ev.routes.find(e => e.kind === 'discovery');
+    eq('discover: PUSH 0x8D with both routes + round trip', de && `${de.num === numOf(TWB)} ${de.out.h.join('')} ${de.back.h.join('')} ${de.rtt >= 0}`, `true ${viaHash(VERANDA)} ${viaHash(VERANDA)} true`);
+    const bob = R.ev.nodes.get(numOf(BOB));
+    await R.session.setPath(bob, { sz: 1, h: [viaHash(VERANDA), viaHash(COOT)] });
+    await until(() => (R.ev.nodes.get(numOf(BOB)) || {}).outPath);
+    eq('setPath: written back and re-read', R.ev.nodes.get(numOf(BOB)).outPath.h.join(','), `${viaHash(VERANDA)},${viaHash(COOT)}`);
+    await R.session.setPath(R.ev.nodes.get(numOf(BOB)), null);
+    eq('setPath(null): RESET_PATH forgets it', R.sim.world[BOB].outPath, null);
+    eq('heartbeat answers', (await R.session.heartbeat())[0], 12);
+    R.sim.stop();
+
+    // ---- real frames, captured on the bench 2026-10-21 (RAK4631 companion <-> SenseCAP Solar repeater, fw 1.18.0)
+    const U = h => Uint8Array.from(h.match(/../g).map(x => parseInt(x, 16)));
+    const lg = MC.parseLogin(U('8501fbae7aed4a0bb176d86a0302'));
+    eq('real LOGIN_SUCCESS: admin, acl 3, fw level 2, their clock', `${lg.prefix} ${lg.admin} ${lg.perms} ${lg.fwLevel} ${lg.clock}`, 'fbae7aed4a0b true 3 2 1792571057');
+    const rs = MC.parseRepeaterStats(U('8700fbae7aed4a0bd10f000094ffe3ff0c0000000d000000080000006b0100000a000000030000000b000000010000000000330000000100060000000400000000000000').subarray(8));
+    eq('real STATUS (60 B): batt, noise, rssi, uptime, floods, snr, dups, recv errors',
+      `${rs.battV} ${rs.noise} ${rs.rssi} ${rs.uptimeS} ${rs.sentFlood}/${rs.recvFlood} ${rs.snr} ${rs.dupFlood} ${rs.recvErrors}`, '4.049 -108 -29 363 10/11 12.75 1 4');
+    eq('real TELEMETRY: LPP voltage + temperature, padding ignored, no GPS',
+      JSON.stringify(MC.parseLpp(U('8b00fbae7aed4a0b017401920167012400000000').subarray(8)).map(x => [x.name, x.value, x.unit])), '[["voltage",4.02,"V"],["temperature",29.2,"°C"]]');
+    eq('LPP: GPS, humidity, negative temperature', JSON.stringify(MC.parseLpp(U('0188fbc8de174f6f0004b00267ffd00368960000')).map(x => x.name === 'gps' ? [x.lat, x.lon, x.alt] : [x.name, x.value])),
+      '[[-27.6258,152.7663,12],["temperature",-4.8],["humidity",75]]');
+    eq('real NEIGHBOURS: none heard directly', JSON.stringify(MC.parseNeighbours(U('8c00b476d86a000000000000000000000000').subarray(6))), '{"total":0,"list":[]}');
+    eq('NEIGHBOURS: entries (prefix 6, secs ago, snr/4)', JSON.stringify(MC.parseNeighbours(U('020001001122334455662c0100000e').subarray(0))), '{"total":2,"list":[{"prefix":"112233445566","ago":300,"snr":3.5}]}');
+    const sc = MC.parseStats(U('18001710a6000000000001')), sr2 = MC.parseStats(U('180192ffe0380100000006000000')), sp = MC.parseStats(U('180209000000050000000200000003000000070000000200000000000000'));
+    eq('real GET_STATS core / radio / packets', `${sc.battV} ${sc.uptimeS} ${sc.queue} | ${sr2.noise} ${sr2.rssi} ${sr2.snr} ${sr2.rxAirS} | ${sp.recv} ${sp.sent} ${sp.recvFlood}`, '4.119 166 1 | -110 -32 14 6 | 9 5 7');
+    const cv3 = MC.parseMsg(U('10300000fbae7aed4a0bff01b676d86a30383a3234202d2032312f31302f3230323620555443'));
+    eq('real CLI answer (V3 contact msg, type 1)', `${cv3.type} ${cv3.prefix} ${cv3.snr} ${cv3.text}`, '1 fbae7aed4a0b 12 08:24 - 21/10/2026 UTC');
+    const cv1 = MC.parseMsg(U('07fbae7aed4a0bff014076d86a76312e31382e302d383164'));
+    eq('real CLI answer (old frame 7, before DEVICE_QUERY)', `${cv1.type} ${cv1.text}`, '1 v1.18.0-81d');
+
+    // ---- the sim's repeater, raw: it must answer the way the real one did
+    const S = SIM.create({ sched: fast, seed: 3 }), vkey = [...SIM.keyOf(W[VERANDA].name)];
+    const cliCmd = (key, text) => [2, 1, 0, ...[0, 0, 0, 0], ...key.slice(0, 6), ...new TextEncoder().encode(text)];
+    let f = await raw(S, cliCmd(vkey, 'ver'));
+    eq('sim CLI before login: SENT, then silence', f.map(x => x[0]).join(','), '6');
+    f = await raw(S, [26, ...vkey, ...new TextEncoder().encode('wrong')]);
+    eq('sim login, wrong password: SENT, then silence (as the real repeater)', f.map(x => x[0].toString(16)).join(','), '6');
+    eq('sim login SENT tag = the repeater key\'s first 4 bytes', f[0] && hex(f[0].subarray(2, 6)), hex(vkey.slice(0, 4)));
+    f = await raw(S, [26, ...vkey, ...new TextEncoder().encode('password')]);
+    const lk = f.find(x => x[0] === 0x85);
+    eq('sim LOGIN_SUCCESS: 14 bytes, admin, prefix, May-2024 clock, acl 3, fw 2', lk && `${lk.length} ${lk[1]} ${hex(lk.subarray(2, 8)) === hex(vkey.slice(0, 6))} ${new Date(u32(lk, 8) * 1000).getUTCFullYear()} ${lk[12]} ${lk[13]}`, '14 1 true 2024 3 2');
+    eq('sim login teaches the route (PATH_UPDATED)', f.some(x => x[0] === 0x81), true);
+    f = await raw(S, [27, ...vkey]);
+    const st2 = f.find(x => x[0] === 0x87);
+    eq('sim STATUS: 60 bytes of stats after the prefix', st2 && st2.length - 8, 60);
+    eq('sim STATUS parsed: battery, noise floor, airtime', st2 && (r => `${r.battV} ${r.noise} ${r.txAirS}`)(MC.parseRepeaterStats(st2.subarray(8))), '4.105 -118 1873');
+    f = await raw(S, [39, 0, 0, 0, ...vkey]);
+    const tl = f.find(x => x[0] === 0x8b);
+    eq('sim TELEMETRY: 20 bytes, voltage + temperature, no GPS', tl && `${tl.length} ${MC.parseLpp(tl.subarray(8)).map(x => x.name).join('+')}`, '20 voltage+temperature');
+    f = await raw(S, [27, ...SIM.keyOf(W[BRAVO].name)]);
+    eq('status from a companion: SENT, then nothing', f.map(x => x[0]).join(','), '6');
+    f = await raw(S, [26, ...SIM.keyOf(W[BRAVO].name), 0x70]);
+    eq('login to a companion refused (ERR bad value)', f.map(x => x[0] + ':' + x[1]).join(','), '1:6');
+    for (const [t2, len] of [[0, 11], [1, 14], [2, 30]]) { f = await raw(S, [56, t2]); eq(`GET_STATS ${t2}: RESP 24, ${len} bytes`, f[0] && `${f[0][0]} ${f[0][1]} ${f[0].length}`, `24 ${t2} ${len}`); }
+    f = await raw(S, [99]);
+    eq('unknown command -> ERR not supported', f[0] && `${f[0][0]} ${f[0][1]}`, '1 1');
+    S.stop();
+
+    // ---- Kelly's repeater management (Session) against the sim
+    R = rig();
+    await R.session.start();
+    const rp = R.ev.nodes.get(numOf(VERANDA)), coot = R.ev.nodes.get(numOf(COOT));
+    const li = await R.session.login(rp, 'password');
+    eq('login(): admin, fw level 2', `${li.admin} ${li.fwLevel}`, 'true 2');
+    eq('login(): the slow (May 2024) clock is set straight away', /^OK - clock set/.test(li.clockSet || ''), true);
+    eq('login(): the sim clock now agrees with ours', Math.abs(R.sim.state().clocks[0] - Math.floor(Date.now() / 1000)) <= 2, true);
+    const stx = await R.session.status(rp);
+    eq('status(): parsed RepeaterStats', `${stx.battV} ${stx.noise} ${stx.dupFlood} ${stx.recvErrors}`, '4.105 -118 1192 52');
+    const tm = await R.session.telemetry(rp);
+    eq('telemetry(): voltage and temperature', tm.map(x => x.name).join(','), 'voltage,temperature');
+    const nb = await R.session.neighbours(rp);
+    eq('neighbours(): the two repeaters one hop out, strongest first', `${nb.total} ${nb.list.map(x => x.prefix === hex(SIM.keyOf(W[COOT].name).subarray(0, 6)) ? 'coot' : x.prefix === hex(SIM.keyOf(W[TWB].name).subarray(0, 6)) ? 'twb' : '?').join(',')} ${nb.list[0].snr}`, '2 coot,twb 3.5');
+    eq('cli(): ver', await R.session.cli(rp, 'ver'), 'v1.18.0-sim (Build: 15-Oct-2026)');
+    eq('cli(): get name', await R.session.cli(rp, 'get name'), '> VK4XXX Veranda Rptr');
+    eq('cli(): unknown command', await R.session.cli(rp, 'frobnicate'), 'Unknown command');
+    const [a1, a2] = await Promise.all([R.session.cli(rp, 'get radio'), R.session.status(coot)]);
+    eq('two calls at once run in turn (the companion tracks one request)', `${a1} ${a2.snr}`, '> 923.125,62.5,8,5 3.5');
+    const own = await R.session.ownStats();
+    eq('ownStats(): GET_STATS core + radio + packets merged', `${own.battV} ${own.noise} ${typeof own.recv}`, '4.012 -117 number');
+    // trace path: straight to the veranda, then to Mt Coot-tha along a route through it
+    const t1 = await R.session.trace(rp);
+    eq('trace(): straight to a repeater and back, SNR at it and at us', `${t1.out.length} ${t1.back.length} ${t1.snrTowards.join(',')} ${t1.snrBack.join(',')}`, '0 0 11.5 11.5');
+    const cootN = Object.assign({}, coot, { outPath: { sz: 1, h: [hex(SIM.keyOf(W[VERANDA].name).subarray(0, 1))] } });
+    const t2 = await R.session.trace(cootN);
+    eq('trace(): via the veranda to Coot-tha and back (veranda, Coot-tha, veranda)', `${t2.out.join('')}|${t2.back.join('')} ${t2.snrTowards.join(',')} ${t2.snrBack.join(',')}`,
+      `${hex(SIM.keyOf(W[VERANDA].name).subarray(0, 1))}|${hex(SIM.keyOf(W[VERANDA].name).subarray(0, 1))} 11.5,3.5 3.5,11.5`);
+    let trThrew = '';
+    try { await R.session.trace(R.ev.nodes.get(numOf(BRAVO))); } catch (e) { trThrew = e.message; }
+    eq('trace(): a companion refused (only repeaters pass a trace on)', /through repeaters/.test(trThrew), true);
+    eq('real TRACE_DATA (RAK4631 -> a repeater and back, bench 2026-10-21): 13.25 dB there, 12 back', JSON.stringify(MC.parseTrace(U('890001003352d0d800000000fb3530'))), '{"tag":"3352d0d8","hashes":["fb"],"snrs":[13.25],"final":12}');
+    eq('TRACE_DATA parsed (1 hop, SNR 12.25 there, 11.5 back)', JSON.stringify(MC.parseTrace(U('89000100aabbccdd00000000fb312e'))), '{"tag":"aabbccdd","hashes":["fb"],"snrs":[12.25],"final":11.5}');
+    // contact management
+    const link = await R.session.exportContact(R.ev.nodes.get(numOf(BOB)));
+    eq('exportContact(): a meshcore:// link holding their signed advert', `${link.startsWith('meshcore://')} ${MC.decodeRaw(Uint8Array.from(link.slice(11).match(/../g).map(x => parseInt(x, 16)))).advert.name}`, 'true Brisbane Bob');
+    const mine = await R.session.exportContact(null);
+    // the node signs with its own identity (Golden Packet hand-offs): the sim's key is a real Ed25519 key with TweetNaCl
+    {
+      const GT = window.GoldToken, ed = GT.naclEd(window.nacl), myKey = R.session.selfKey();
+      eq('selfKey: the 32-byte key of this node, from SELF_INFO', /^[0-9a-f]{64}$/.test(myKey || ''), true);
+      const body = GT.handoffBody({ id: 5, seq: 1, from: myKey, to: 'aabbccddeeff', ts: 1792600000 });
+      const sig = await R.session.sign(body);
+      eq('sign: 64 bytes from the node, verifying against its own key', [sig.length, ed.verify(sig, body, GT.unhex(myKey))], [64, true]);
+      const p = GT.parse(GT.toText(GT.join(body, sig)));
+      eq('... a hand-off text the ledger would accept as signed by this node', [p && p.from, GT.check(p, myKey, ed)], [myKey.slice(0, 12), true]);
+      const big = new Uint8Array(500).map((_, i) => i & 255), sig2 = await R.session.sign(big);
+      eq('sign: 500 bytes go in several SIGN_DATA frames and still verify', ed.verify(sig2, big, GT.unhex(myKey)), true);
+      let e = ''; try { await R.session.sign(new Uint8Array(0)); } catch (x) { e = x.message; }
+      eq('sign: nothing to sign is refused before the radio is asked', /1 to 8192/.test(e), true);
+    }
+    eq('exportContact(null): this node itself', MC.decodeRaw(Uint8Array.from(mine.slice(11).match(/../g).map(x => parseInt(x, 16)))).advert.name, 'VK4XXX Kelly Sim');
+    await R.session.removeContact(R.ev.nodes.get(numOf(BOB)));
+    eq('removeContact(): gone from the node and from the page', `${R.sim.world[BOB].known} ${R.ev.gone.includes(numOf(BOB))}`, 'false true');
+    eq('importContact(): the link brings it back', JSON.stringify(await R.session.importContact(link)), JSON.stringify({ name: 'Brisbane Bob', key: hex(SIM.keyOf(W[BOB].name)) }));
+    await until(() => R.sim.world[BOB].known && R.ev.nodes.get(numOf(BOB)));
+    eq('importContact(): on the node again, re-read into the page', `${R.sim.world[BOB].known} ${!!R.ev.nodes.get(numOf(BOB))}`, 'true true');
+    let ithrew = ''; try { await R.session.importContact('meshcore://nonsense'); } catch (e) { ithrew = e.message; }
+    eq('importContact(): junk refused before it reaches the node', /not a MeshCore contact link/.test(ithrew), true);
+    await R.session.shareContact(R.ev.nodes.get(numOf(BOB)));
+    eq('shareContact(): OK', true, true);
+    await R.session.setName('VK4XXX Home');
+    eq('setName(): SELF_INFO read again with the new name', R.ev.self.longName, 'VK4XXX Home');
+    let lthrew = '';
+    try { await R.session.login(rp, 'x'.repeat(16)); } catch (e) { lthrew = e.message; }
+    eq('login(): a 16-character password refused before sending', /at most 15/.test(lthrew), true);
+    R.sim.stop();
+
+    // ---- faults
+    const H = SIM.create({ sched: fast, faults: { hangAfter: 1 } });
+    await tick(5);
+    f = await raw(H, [20]);
+    eq('fault hang: a stuck node answers nothing', f.length, 0);
+    H.stop();
+    R = rig({ faults: { garble: 1 } });
+    await R.session.start();
+    eq('fault garble: boot junk before every frame, session still comes up', `${R.ev.status.slice(-1)[0]} ${R.ev.logs.some(l => /^junk: ets /.test(l))}`, 'on true');
+    R.sim.stop();
+    R = rig({ faults: { ackLoss: 1 } });
+    await R.session.start();
+    await R.session.sendText({ dm: R.ev.nodes.get(numOf(ROMEO)) }, 'lost', { id: 'x' });
+    await tick(300);
+    eq('fault ackLoss: no SEND_CONFIRMED', R.ev.acks.filter(a => a.ref.id === 'x' && a.state === 'delivered').length, 0);
+    R.sim.stop();
+    // DM retries: the first two ACKs lost -> try 2 on the same route, then the route is forgotten and try 3 floods
+    R = rig({ faults: { ackLossFirst: 2 } });
+    await R.session.start();
+    const royR = R.ev.nodes.get(numOf(ROMEO));
+    await R.session.sendText({ dm: royR }, 'first', { id: 'w1' });                 // flood (no route yet): ACK lost
+    await until(() => R.ev.acks.some(a => a.ref.id === 'w1' && a.state === 'retry'), 30000);
+    eq('DM retry: no ACK -> "retry", try 2', (R.ev.acks.find(a => a.ref.id === 'w1' && a.state === 'retry') || {}).err, 'no ACK yet: try 2 of 3');
+    await until(() => R.ev.acks.some(a => a.ref.id === 'w1' && a.state === 'delivered'), 40000);
+    const sw = R.ev.routes.filter(e => e.kind === 'sent' && e.ref.id === 'w1');
+    eq('DM retry: delivered on try 3, attempt byte 0,1,2', `${R.ev.acks.filter(a => a.ref.id === 'w1').map(a => a.state).join(',')} ${sw.map(e => e.attempt).join('')}`, 'retry,retry,delivered 012');
+    eq('DM retry: a flood first time has no route to forget', R.ev.routes.some(e => e.kind === 'path-reset'), false);
+    R.sim.stop();
+    // a learned (direct) route that stops working: two misses, then the route is forgotten and the last try floods
+    R = rig({ faults: { ackLossFirst: 3 } });
+    await R.session.start();
+    const royD = R.ev.nodes.get(numOf(ROMEO));
+    R.sim.world[ROMEO].outPath = [SIM.keyOf(W[VERANDA].name)[0], SIM.keyOf(W[COOT].name)[0]];   // a learned route the node holds
+    await R.session.sendText({ dm: royD }, 'by the route', { id: 'w3' });
+    await until(() => R.ev.acks.some(a => a.ref.id === 'w3' && a.state === 'failed'), 60000);
+    const s3 = R.ev.routes.filter(e => e.kind === 'sent' && e.ref.id === 'w3');
+    eq('DM retry: two misses on a learned route -> route forgotten (RESET_PATH), try 3 floods', `${s3.map(e => e.flood ? 'F' : 'D').join('')} ${R.ev.routes.some(e => e.kind === 'path-reset')} ${R.sim.world[ROMEO].outPath}`, 'DDF true null');
+    eq('DM retry: all three lost -> failed, "no ACK after 3 tries"', (R.ev.acks.find(a => a.ref.id === 'w3' && a.state === 'failed') || {}).err, 'no ACK after 3 tries');
+    R.sim.stop();
+    // a LATE ACK (long SEQ routes: 18.7 s seen, 2026-10-24): try 1's ACK after Kelly's wait still counts -> delivered,
+    // and the retry already sent stops waiting (its own ACK, when it comes, changes nothing)
+    R = rig({ faults: { ackLateFirst: 1, ackLateMs: 1000000, ackLossFirst: 2 } });   // 1000 s sim = 20 s real (sched /50): after try 1 times out, before try 2 does
+    await R.session.start();
+    await R.session.sendText({ dm: R.ev.nodes.get(numOf(ROMEO)) }, 'slow route', { id: 'w5' });
+    await until(() => R.ev.acks.some(a => a.ref.id === 'w5' && a.state === 'delivered'), 40000);
+    await tick(4000);
+    eq('DM late ACK: retry, then delivered once', R.ev.acks.filter(a => a.ref.id === 'w5').map(a => a.state).join(','), 'retry,delivered');
+    eq('DM late ACK: the ack event says late', (R.ev.routes.find(e => e.kind === 'ack' && e.ref.id === 'w5') || {}).late, true);
+    eq('DM late ACK: logged', R.ev.logs.some(l => /ACK came late/.test(l)), true);
+    R.sim.stop();
+    R = rig({ faults: { ackLossFirst: 1 } });
+    await R.session.start();
+    await R.session.sendText({ dm: R.ev.nodes.get(numOf(ROMEO)) }, 'golden try', { id: 'w4' }, { tries: 1 });
+    await until(() => R.ev.acks.some(a => a.ref.id === 'w4'), 30000);
+    eq('DM { tries: 1 } (golden packet): one go, no retry', R.ev.acks.filter(a => a.ref.id === 'w4').map(a => a.state).join(','), 'failed');
+    // a retried DM that reaches us twice (same sender, timestamp, text) is shown once
+    R.ev.texts.length = 0;
+    R.sim.inject.dm(BRAVO, 'are you there?'); R.sim.inject.dm(BRAVO, 'are you there?');
+    await until(() => R.ev.texts.length); await tick(100);
+    eq('a DM repeated by the sender (same ts + text) is shown once', R.ev.texts.filter(m => m.text === 'are you there?').length, 1);
+    R.sim.stop();
+    R = rig({ faults: { full: true } });
+    await R.session.start();
+    R.sim.inject.forget(SENSOR); R.ev.gone.length = 0;
+    R.sim.inject.advert(SENSOR);
+    await until(() => R.ev.gone.length);
+    eq('fault full: a new contact evicts the oldest (PUSH 0x8F -> io.gone)', R.ev.gone.length === 1 && R.ev.gone[0] !== numOf(SENSOR), true);
+    R.sim.stop();
+    R = rig({ faults: { loginFail: true } });
+    f = await raw(R.sim, [26, ...vkey, ...new TextEncoder().encode('password')]);
+    eq('fault loginFail: even the right password gets no answer', f.map(x => x[0].toString(16)).join(','), '6');
+    R.sim.stop();
+
+    // ---- demo mode: background traffic arrives on its own
+    const A = SIM.create({ auto: true, seed: 11, sched: (fn, ms) => { const t = setTimeout(fn, Math.ceil(ms / 1000)); return () => clearTimeout(t); } });
+    const seen = []; A.onFrame(fr2 => seen.push(fr2[0]));
+    await tick(400);
+    eq('auto: traffic without being asked (LOG_RX / adverts / MSG_WAITING)', seen.some(c => c === 0x88), true);
+    A.stop();
+  } catch (e) { out.push(`<span class="bad">ERROR ${e.stack}</span>`); fails.push('exception'); }
+  out.push(`RESULT: ${fails.length ? 'FAIL ' + fails.join(', ') : 'ALL PASS'}`);
+  document.getElementById('out').innerHTML = out.join('\n');
+})();
+</script>
+</body></html>

@@ -1,0 +1,17 @@
+/* Kelly Page -- LoRa Mesh > 📻 Channels card (js/meshchannels.js, 2026-10-24) */
+.mch-list { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 4px; }
+.mch-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--raised); }
+.mch-slot { flex: none; width: 22px; text-align: center; font: 600 12px var(--mono); color: var(--dim); }
+.mch-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.mch-kind { flex: none; font-size: 12px; color: var(--dim); white-space: nowrap; }
+.mch-kind.k-public, .mch-kind.k-hashtag { color: var(--cyan); }
+.mch-kind.k-private { color: var(--amber); }
+.mch-in { margin-top: 8px; }
+.mch-in input { min-width: 0; }
+#mch-hash { width: 150px; }
+.mch-pv { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line2); border-left: 3px solid var(--cyan); border-radius: 10px; background: var(--panel-solid); }
+.mch-pv-h { font-size: 15px; margin-bottom: 4px; display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.mch-pv p { margin: 4px 0; }
+.mch-pv-act { margin-top: 8px; align-items: flex-end; }
+.mch-warn { color: var(--amber); }
+@media (max-width: 520px) { .mch-row { flex-wrap: wrap; } .mch-kind { order: 3; width: 100%; padding-left: 32px; } #mch-hash { width: 100%; } }

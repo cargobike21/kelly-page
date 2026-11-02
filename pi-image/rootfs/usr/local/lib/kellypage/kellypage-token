@@ -1,0 +1,13 @@
+#!/bin/sh
+# kelly-bridge.service ExecStartPre (root): this Pi's own bridge token, made the first time the bridge starts.
+# It keeps strangers on your network from keying your radio. Same alphabet and length as bridge/install-pi.sh.
+F=/etc/kelly-bridge.env
+grep -q '^KELLY_BRIDGE_TOKEN=..' "$F" && exit 0
+T="$(tr -dc 'abcdefghjkmnpqrstuvwxyz23456789' </dev/urandom | head -c 10)"
+if grep -q '^KELLY_BRIDGE_TOKEN=' "$F"; then
+  sed -i "s/^KELLY_BRIDGE_TOKEN=.*/KELLY_BRIDGE_TOKEN=$T/" "$F"
+else
+  echo "KELLY_BRIDGE_TOKEN=$T" >> "$F"
+fi
+chown root:kellypage "$F"
+chmod 0640 "$F"

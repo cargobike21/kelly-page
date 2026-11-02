@@ -1,0 +1,314 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>BLE tests</title>
+<style>body{font:13px Consolas,monospace;background:#0b0f14;color:#dde}.ok{color:#3d8}.bad{color:#f55}</style>
+</head><body>
+<h3>Kelly Page -- BLE presence + alerts tests</h3>
+<pre id="out">running…</pre>
+<script src="../js/ccdi.js"></script>
+<script src="../js/ble.js"></script>
+<script src="../js/bledissect.js"></script>
+<script>
+// js/ble.js: decoders (worked examples from bthome.io, Apple's iBeacon spec, Eddystone spec, pvvx README),
+// presence hysteresis / debounce / zones / remote clocks, rules, templates, airtime queue, simulator.
+// Headless: chrome --headless=new --allow-file-access-from-files --dump-dom tests/ble-tests.html
+const B = window.KellyBle, out = [], fails = [];
+function eq(name, got, want) {
+  const g = typeof got === 'object' ? JSON.stringify(got) : String(got), w = typeof want === 'object' ? JSON.stringify(want) : String(want);
+  if (g === w) out.push(`<span class="ok">PASS ${name}</span>`);
+  else { out.push(`<span class="bad">FAIL ${name}: got ${g} want ${w}</span>`); fails.push(name); }
+}
+const ok = (name, c) => eq(name, !!c, true);
+const MON8 = new Date(2026, 9, 19, 8, 0).getTime();   // Monday 19 Oct 2026, 08:00 local
+const rec = o => Object.assign({ n: 'local', z: 'Home', ad: 'hci0', ts: MON8, a: 'C1:22:33:44:55:66', at: 'random', r: -60, tx: null, nm: null, m: {}, s: {}, u: [] }, o);
+
+try {
+  // ---- address kinds
+  eq('addr public', B.addrKind('00:11:22:33:44:55', 'public'), 'public');
+  eq('addr static (top bits 11)', B.addrKind('C1:22:33:44:55:66', 'random'), 'static');
+  eq('addr rpa (01)', B.addrKind('4A:22:33:44:55:66', 'random'), 'rpa');
+  eq('addr nrpa (00)', B.addrKind('1A:22:33:44:55:66', 'random'), 'nrpa');
+  eq('uuidShort', B.uuidShort('0000FEAA-0000-1000-8000-00805F9B34FB'), 'feaa');
+
+  // ---- iBeacon: 4C 00 | 02 15 | uuid | major 0064 | minor 0001 | C5 (-59 dBm at 1 m)
+  const U = 'f7826da64fa24e988024bc5b71e0893e';
+  let d = B.decode(rec({ m: { 76: `0215${U}00640001c5` } }));
+  eq('ibeacon kind', d.kind, 'ibeacon');
+  eq('ibeacon fields', d.ib, { uuid: 'f7826da6-4fa2-4e98-8024-bc5b71e0893e', major: 100, minor: 1, tx: -59 });
+  eq('company Apple', d.company, 'Apple');
+  eq('not an ibeacon (Apple other)', B.decode(rec({ m: { 76: '1005031c' } })).kind, 'other');
+
+  // ---- Eddystone
+  d = B.decode(rec({ s: { feaa: '00e8' + '0102030405060708090a' + 'aabbccddeeff' } }));
+  eq('eddystone uid', d.ed, { frame: 'uid', tx: -24, ns: '0102030405060708090a', inst: 'aabbccddeeff' });
+  d = B.decode(rec({ s: { feaa: '10f6' + '01' + '6b656c6c79' + '07' } }));
+  eq('eddystone url', d.ed.url, 'https://www.kelly.com');
+  d = B.decode(rec({ s: { feaa: '2000' + '0bb8' + '1880' + '00000064' + '00000a28' } }));
+  eq('eddystone tlm', [d.val.battMv, d.val.temp, d.ed.advCnt, d.ed.secCnt], [3000, 24.5, 100, 260]);
+
+  // ---- BTHome v2 (bthome.io example: 40 02 CA 09 03 BF 13 = 25.06 °C, 50.55 %)
+  d = B.decode(rec({ s: { fcd2: '4002ca0903bf13' } }));
+  eq('bthome temp/hum', [d.kind, d.val.temp, d.val.hum], ['bthome', 25.06, 50.55]);
+  d = B.decode(rec({ s: { fcd2: '40000901550c7e0b1101' } }));
+  eq('bthome pid/batt/volt/opening', [d.val.pid, d.val.batt, d.val.volt, d.val.opening], [9, 85, 2.942, 1]);
+  d = B.decode(rec({ s: { fcd2: '4002f6ff' } }));
+  eq('bthome negative temp', d.val.temp, -0.1);
+  eq('bthome encrypted', B.decode(rec({ s: { fcd2: '41aabbcc' } })).bth.encrypted, true);
+  d = B.decode(rec({ s: { fcd2: '4001557701' } }));
+  eq('bthome unknown object stops the parse', d.val, { batt: 85 });
+
+  // ---- Xiaomi custom firmware
+  d = B.decode(rec({ s: { '181a': 'a4c1385e2201' + '00f5' + '37' + '5a' + '0b86' + '07' } }));
+  eq('atc1441', [d.kind, d.val.temp, d.val.hum, d.val.batt, d.val.battMv], ['atc', 24.5, 55, 90, 2950]);
+  d = B.decode(rec({ s: { '181a': '01225e38c1a4' + 'b409' + '9a15' + '860b' + '5a' + '07' + '04' } }));
+  eq('pvvx', [d.kind, d.val.temp, d.val.hum, d.val.battMv, d.val.batt], ['pvvx', 24.84, 55.3, 2950, 90]);
+
+  // ---- identity + registry
+  const devs = { keys: { name: 'Keys', call: 'VK4XXX', match: `ib:F7826DA6-4FA2-4E98-8024-BC5B71E0893E:100:1` },
+    thermo: { name: 'Thermo', match: 'mac:a4:c1:38:5e:22:01' }, off: { name: 'Off', match: 'name:gobox', en: false } };
+  const reg = B.Registry(devs);
+  const ib = rec({ a: '4A:11:22:33:44:55', m: { 76: `0215${U}00640001c5` } });
+  eq('registry ibeacon on a rotating address', reg.lookup(ib, B.decode(ib)), 'keys');
+  const th = rec({ a: 'A4:C1:38:5E:22:01', at: 'public' });
+  eq('registry mac (case-insensitive)', reg.lookup(th, B.decode(th)), 'thermo');
+  const rp = rec({ a: '4A:C1:38:5E:22:01' });
+  eq('rpa never matches a mac key', B.idKeys(rp, B.decode(rp)).some(k => k.startsWith('mac:')), false);
+  const gb = rec({ nm: 'GoBox' });
+  eq('disabled device not matched', reg.lookup(gb, B.decode(gb)), null);
+  eq('bestKey ibeacon', B.bestKey(ib, B.decode(ib)), `ib:f7826da6-4fa2-4e98-8024-bc5b71e0893e:100:1`);
+  eq('normKey bad mac', B.normKey('mac:zz'), '');
+
+  // ---- presence: debounce, hysteresis, absence, start-up, zones, remote clocks
+  const S = 1000, T0 = MON8;
+  let P = B.Presence(() => ({}), T0 - 3600 * S);   // started an hour ago: past start-up
+  let ev = P.feed({ id: 'k', zone: 'Home', rssi: -60, t: T0 }, T0);
+  eq('one hit is not an arrival', ev.length, 0);
+  ev = P.feed({ id: 'k', zone: 'Home', rssi: -62, t: T0 + 2 * S }, T0 + 2 * S);
+  eq('two hits in 30 s = arrive', ev.map(e => e.type + (e.quiet ? '-quiet' : '')), ['arrive']);
+  let P2 = B.Presence(() => ({}), T0 - 3600 * S);
+  P2.feed({ id: 'w', zone: 'Home', rssi: -85, t: T0 }, T0);
+  eq('weak signal (-85 < arrive -80) never arrives', P2.feed({ id: 'w', zone: 'Home', rssi: -85, t: T0 + S }, T0 + S).length, 0);
+  P2.feed({ id: 'w2', zone: 'Home', rssi: -60, t: T0 }, T0);
+  eq('hits spread past the debounce window', P2.feed({ id: 'w2', zone: 'Home', rssi: -60, t: T0 + 40 * S }, T0 + 40 * S).length, 0);
+  // between thresholds (-85): still present, and counts as a strong sighting
+  for (let i = 1; i <= 20; i++) P.feed({ id: 'k', zone: 'Home', rssi: -85, t: T0 + (2 + i * 10) * S }, T0 + (2 + i * 10) * S);
+  eq('hysteresis: -85 keeps it present', P.get('k').st, 'present');
+  let tLast = T0 + 202 * S;
+  eq('no depart before the absence time', P.tick(tLast + 299 * S, null, ['k']).length, 0);
+  eq('depart after 300 s without a strong sighting', P.tick(tLast + 301 * S, null, ['k']).map(e => e.type), ['depart']);
+  // fading below the depart threshold counts as absence too
+  let P3 = B.Presence(() => ({}), T0 - 3600 * S);
+  P3.feed({ id: 'f', zone: 'Home', rssi: -60, t: T0 }, T0); P3.feed({ id: 'f', zone: 'Home', rssi: -60, t: T0 + S }, T0 + S);
+  for (let i = 2; i < 400; i++) P3.feed({ id: 'f', zone: 'Home', rssi: -97, t: T0 + i * S }, T0 + i * S);
+  eq('fading below -90 departs though still heard', P3.tick(T0 + 400 * S, null, []).map(e => e.type), ['depart']);
+  // start-up: already here = quiet arrival; never here = quiet away
+  let P4 = B.Presence(() => ({}), T0);
+  P4.feed({ id: 'q', zone: 'Home', rssi: -60, t: T0 + S }, T0 + S);
+  eq('present at start-up arrives quietly', P4.feed({ id: 'q', zone: 'Home', rssi: -60, t: T0 + 2 * S }, T0 + 2 * S)[0].quiet, true);
+  eq('absent at start-up goes away quietly', P4.tick(T0 + 301 * S, null, ['q', 'never']).filter(e => e.id === 'never').map(e => e.quiet), [true]);
+  // zones: 3 dB better does nothing, 8 dB better for 30 s moves
+  let PZ = B.Presence(() => ({}), T0 - 3600 * S);
+  PZ.feed({ id: 'z', zone: 'Shack', rssi: -70, t: T0 }, T0); PZ.feed({ id: 'z', zone: 'Shack', rssi: -70, t: T0 + S }, T0 + S);
+  let moves = [];
+  for (let i = 2; i < 60; i++) { moves.push(...PZ.feed({ id: 'z', zone: 'Shack', rssi: -70, t: T0 + i * S }, T0 + i * S)); moves.push(...PZ.feed({ id: 'z', zone: 'Garage', rssi: -67, t: T0 + i * S }, T0 + i * S)); }
+  eq('zone 3 dB better: no flap', moves.length, 0);
+  for (let i = 60; i < 120; i++) { moves.push(...PZ.feed({ id: 'z', zone: 'Shack', rssi: -78, t: T0 + i * S }, T0 + i * S)); moves.push(...PZ.feed({ id: 'z', zone: 'Garage', rssi: -64, t: T0 + i * S }, T0 + i * S)); }
+  eq('zone clearly better for 30 s: one move', moves.map(e => `${e.type} ${e.from}>${e.zone}`), ['move Shack>Garage']);
+  // a remote zone whose node is behind: no false departure until its data catches up
+  let PR = B.Presence(() => ({}), T0 - 3600 * S);
+  PR.feed({ id: 'r', zone: 'Club', rssi: -60, t: T0 }, T0); PR.feed({ id: 'r', zone: 'Club', rssi: -60, t: T0 + S }, T0 + S);
+  let clubClock = T0 + 60 * S;   // the node's link went down a minute later
+  eq('remote node behind: no depart', PR.tick(T0 + 900 * S, z => clubClock, ['r']).length, 0);
+  clubClock = T0 + 900 * S;      // reconnected, buffer flushed, still no sighting
+  eq('remote node caught up: depart', PR.tick(T0 + 905 * S, z => clubClock, ['r']).map(e => e.type), ['depart']);
+
+  // ---- time windows
+  ok('schedule Mon-Fri 07:00-18:00 at Mon 08:00', B.inSchedule('Mon-Fri 07:00-18:00', MON8));
+  ok('schedule not on Saturday', !B.inSchedule('Mon-Fri 07:00-18:00', MON8 + 5 * 86400000));
+  ok('schedule Sat,Sun list', B.inSchedule('Sat,Sun 07:00-18:00', MON8 + 5 * 86400000));
+  ok('window wraps midnight', B.inWindow('22:00-06:00', new Date(2026, 9, 19, 23, 30).getTime()) && !B.inWindow('22:00-06:00', MON8));
+
+  // ---- templates
+  eq('render', B.render('{callsign} arrived {zone} {time} RSSI {rssi}', { callsign: 'VK4XXX', zone: 'Home', time: '08:00', rssi: -61 }), 'VK4XXX arrived Home 08:00 RSSI -61');
+  const long = B.render('x'.repeat(200));
+  eq('fit to 140 bytes', [B.bytes(long) <= 140, long.endsWith('..')], [true, true]);
+  eq('fit counts UTF-8 bytes', B.bytes(B.fit('°'.repeat(100))) <= 140, true);
+
+  // ---- rules
+  const rules = {
+    r1: { on: 'arrive', dev: 'keys', to: '1050002', tpl: '{callsign} arrived {zone} {time}', prio: 'presence', cool: 10 },
+    r2: { on: 'depart', dev: '*', to: '1050002, 2050002', prio: 'presence', cool: 0, quiet: '22:00-06:00' },
+    r3: { on: 'battery', dev: 'thermo', to: '1050002', value: 20, prio: 'alarm' },
+    r4: { on: 'notseen', dev: 'keys', to: '1050002', hours: 2, prio: 'alarm', esc: 15, escMax: 2 },
+    r5: { on: 'outside', dev: 'keys', to: '1050002', sched: 'Mon-Fri 07:00-18:00', prio: 'presence', cool: 0 },
+  };
+  const R = B.Rules(() => rules, () => devs);
+  let al = R.evaluate({ type: 'arrive', id: 'keys', zone: 'Home', rssi: -61, t: MON8 }, MON8);
+  eq('arrive rule', al.map(a => [a.rule, a.to, a.text]), [['r1', [1050002], 'VK4XXX arrived Home 08:00']]);
+  eq('cooldown', R.evaluate({ type: 'arrive', id: 'keys', zone: 'Home', t: MON8 + 60000 }, MON8 + 60000).length, 0);
+  eq('quiet arrival makes no alert', R.evaluate({ type: 'arrive', id: 'thermo', zone: 'Home', t: MON8, quiet: true }, MON8).length, 0);
+  al = R.evaluate({ type: 'depart', id: 'thermo', zone: 'Home', t: MON8, lastSeen: MON8 - 300000 }, MON8);
+  eq('depart rule, two recipients, default template', al.map(a => [a.to.length, a.text]), [[2, 'Thermo left Home 08:00']]);
+  const night = new Date(2026, 9, 19, 23, 0).getTime();
+  eq('quiet hours hold a presence alert', R.evaluate({ type: 'depart', id: 'thermo', zone: 'Home', t: night }, night).length, 0);
+  eq('outside schedule (Saturday)', R.evaluate({ type: 'arrive', id: 'keys', zone: 'Home', t: MON8 + 5 * 86400000 }, MON8 + 5 * 86400000 + 1).map(a => a.rule), ['r1', 'r5']);
+  al = R.evaluate({ type: 'reading', id: 'thermo', val: { batt: 15 }, t: MON8 }, MON8);
+  eq('battery low fires', al.map(a => a.text), ['Thermo battery low 15%']);
+  eq('battery low latched', R.evaluate({ type: 'reading', id: 'thermo', val: { batt: 14 }, t: MON8 }, MON8 + 3600000).length, 0);
+  R.evaluate({ type: 'reading', id: 'thermo', val: { batt: 26 }, t: MON8 }, MON8 + 7200000);
+  eq('battery re-arms past the band', R.evaluate({ type: 'reading', id: 'thermo', val: { batt: 18 }, t: MON8 }, MON8 + 9000000).length, 1);
+  // not seen + escalation + ack
+  const seen = { keys: { lastSeen: MON8, zone: 'Home' } };
+  eq('not seen: not yet', R.tick(MON8 + 3600000, id => seen[id]).length, 0);
+  al = R.tick(MON8 + 2 * 3600000 + 1000, id => seen[id]);
+  eq('not seen fires', al.map(a => a.text), ['ALERT Keys not seen at Home since 08:00 (2h ago)']);
+  eq('escalation repeats after 15 min', R.tick(MON8 + 2 * 3600000 + 16 * 60000, id => seen[id]).map(a => a.text.slice(0, 9)), ['REPEAT 1:']);
+  eq('ack clears it', [R.ack('keys'), R.escalating().length], [1, 0]);
+  seen.keys.lastSeen = MON8 + 3 * 3600000;
+  R.tick(MON8 + 3 * 3600000 + 1, id => seen[id]);
+  eq('seen again re-arms not-seen', R.tick(MON8 + 5 * 3600000 + 2000, id => seen[id]).length, 1);
+
+  // ---- airtime queue
+  const Q = B.AirQueue();
+  Q.push({ to: [1050002], text: 'A arrived', prio: 'presence' }, T0);
+  Q.push({ to: [1050002], text: 'B arrived', prio: 'presence' }, T0);
+  Q.push({ to: [1050002], text: 'FIRE', prio: 'alarm' }, T0 + 1);
+  eq('coalesced + alarm first', Q.queue().map(x => x.text), ['FIRE', 'A arrived | B arrived']);
+  let x = Q.next(T0 + 2); Q.done(x, true, T0 + 2);
+  eq('presence waits the gap', Q.next(T0 + 60 * S), null);
+  x = Q.next(T0 + 125 * S); eq('then goes', x && x.text, 'A arrived | B arrived');
+  Q.done(x, false, T0 + 125 * S);
+  eq('failed: retried after 30 s', [Q.next(T0 + 130 * S), !!Q.next(T0 + 160 * S)], [null, true]);
+  const Q2 = B.AirQueue({ hourCap: 2, gap: { presence: 0 } });
+  for (let i = 0; i < 3; i++) Q2.push({ to: [i + 1], text: 'p' + i, prio: 'presence' }, T0);
+  for (let i = 0; i < 3; i++) { const y = Q2.next(T0 + i); if (y) Q2.done(y, true, T0 + i); }
+  eq('hour cap', [Q2.stats(T0 + 10).hour, Q2.queue().length], [2, 1]);
+  eq('stale routine dropped', (() => { const q = B.AirQueue(); q.push({ to: [1], text: 'r', prio: 'routine' }, T0); q.next(T0 + 3601 * S); return q.queue().length; })(), 0);
+
+  // ---- simulator end to end: 10 minutes of a house
+  const sim = B.Sim(7, T0), sreg = B.Registry(sim.devices), SP = B.Presence(() => ({}), T0 - 3600 * S);
+  const types = [], reads = {};
+  const SR = B.Rules(() => ({ b: { on: 'battery', dev: 'gobox', to: '1050002', prio: 'alarm' } }), () => sim.devices);
+  let batteryAlerts = 0, anon = new Set();
+  for (let t = T0; t < T0 + 600 * S; t += S) {
+    for (const r of sim.at(t)) {
+      const dd = B.decode(r), id = sreg.lookup(r, dd);
+      if (!id) { anon.add(r.a); continue; }
+      SP.feed({ id, zone: r.z, rssi: r.r, t: r.ts }, t).forEach(e => types.push(`${e.type}:${e.id}`));
+      if (Object.keys(dd.val).length) { reads[id] = dd.val; batteryAlerts += SR.evaluate({ type: 'reading', id, val: dd.val, t }, t).length; }
+    }
+    SP.tick(t, null, Object.keys(sim.devices)).forEach(e => types.push(`${e.type}:${e.id}`));
+  }
+  ok('sim: keyring arrives and departs', types.includes('arrive:keys') && types.includes('depart:keys'));
+  ok('sim: thermometer reads ~24 °C', reads.shack && reads.shack.temp > 20 && reads.shack.temp < 28);
+  eq('sim: go-box battery alert once', batteryAlerts, 1);
+  ok('sim: passers-by stay anonymous', anon.size > 0);
+
+  // ---- telemetry frame (= scripts/p25x_kelly.py self-test "telem" line, byte for byte)
+  const KF = window.CCDI.KellyFrame, strHex = s => [...s].map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join(' ');
+  const titems = [['name', 3, 'sensor', 'Shack thermometer'], ['reading', 3, 'temp', 24.84, 5], ['reading', 3, 'hum', 55.3, 5],
+    ['reading', 3, 'batt', 13, 0], ['reading', 7, 'present', 1, 0], ['reading', 7, 'rssi', -67, 12]];
+  const tf = KF.telem(13, 1792390800, titems);
+  eq('telem vector = Python', strHex(tf), 'a5 4b 0f 4a 01 7d 2d 6a d5 b6 90 02 03 06 11 53 68 61 63 6b 20 74 68 65 72 6d 6f 6d 65 74 65 72 01 03 01 00 05 00 00 09 b4 01 03 02 00 05 00 00 15 9a 01 03 03 00 00 00 00 00 7d 2d 01 07 08 00 00 00 00 00 01 01 07 09 00 0c ff ff ff bd a9 6c 0d');
+  const td = KF.scan([...tf].map(c => c.charCodeAt(0)))[0];
+  eq('telem decode', [td.type, td.clock, td.names[0].name, td.readings.map(r => `${r.sensor}:${r.field}=${r.value}@${r.age}`).join(' ')],
+    ['telem', 1792390800, 'Shack thermometer', '3:temp=24.84@5 3:hum=55.3@5 3:batt=13@0 7:present=1@0 7:rssi=-67@12']);
+  let crFree = true; for (let s = 0; s < 256; s++) if (KF.telem(s, 1792390800 + s, titems.slice(1, 4)).slice(0, -1).includes('\r')) crFree = false;
+  ok('telem: no CR inside any frame', crFree);
+
+  // ---- telemetry reporter: deadbands, heartbeat, names
+  const TM = B.Telemetry({ heartbeatMin: 30 }), M = 60000;
+  TM.setName(3, 'sensor', 'Shack'); TM.observe(3, 'temp', 24.0, T0); TM.observe(3, 'battMv', 2950, T0);
+  let dd = TM.due(T0);
+  eq('first send is a heartbeat with the name', [dd.beat, dd.items[0][0], dd.nReadings, dd.items.find(i => i[2] === 'batt_mv')[3]], [true, 'name', 2, 2950]);
+  TM.sent(dd, T0);
+  TM.observe(3, 'temp', 24.1, T0 + M);
+  eq('inside the deadband: nothing', TM.due(T0 + M), null);
+  TM.observe(3, 'temp', 24.5, T0 + 2 * M);
+  dd = TM.due(T0 + 2 * M);
+  eq('past the deadband: just that reading, no name again', [dd.beat, dd.items.length, dd.items[0].slice(2, 4)], [false, 1, ['temp', 24.5]]);
+  TM.sent(dd, T0 + 2 * M);
+  TM.observe(3, 'rssi', -60, T0 + 3 * M); TM.observe(3, 'rssi', -75, T0 + 4 * M);
+  eq('rssi alone never triggers', TM.due(T0 + 4 * M), null);
+  TM.observe(3, 'present', 0, T0 + 5 * M);
+  eq('presence change goes at once', TM.due(T0 + 5 * M).items.map(i => i[2]), ['present']);
+  eq('heartbeat after 30 min carries everything fresh', TM.due(T0 + 31 * M).items.filter(i => i[0] === 'reading').map(i => i[2]).sort().join(','), 'batt_mv,present,rssi,temp');
+  TM.observe(4, 'nonsense', 1, T0); TM.observe(0, 'temp', 1, T0);
+  eq('unknown fields / sensor 0 ignored', TM.current().length, 4);
+  const QT = B.AirQueue();
+  QT.push({ to: [5059999], text: 'BLE telemetry', prio: 'telem' }, T0); QT.push({ to: [5059999], text: 'BLE telemetry', prio: 'telem' }, T0);
+  eq('one telemetry slot at a time', QT.queue().length, 1);
+  const tx = QT.next(T0); QT.done(tx, true, T0);
+  QT.push({ to: [5059999], text: 'BLE telemetry', prio: 'telem' }, T0 + 1000);
+  eq('telemetry gap 300 s', [QT.next(T0 + 200 * 1000), !!QT.next(T0 + 301 * 1000)], [null, true]);
+  eq('telemetry outside the hourly alert count', QT.stats(T0 + 2000).hour, 0);
+
+  // ---- dissector: a real capture (a Pi's hci0, 2026-10-19: a phone running Beacon Simulator)
+  const X = window.KellyBleDissect;
+  const s23 = X.fromHex('043e27020102017853 7ec046581b1aff4c0002153f46eab9b0154bcdbf9798acba6197870001 0001c4b6'.replace(/ /g, ''));
+  const dz = X.dissect(s23), rpt = dz.reports[0];
+  eq('hci: one legacy report', [dz.real, dz.reports.length, rpt.legacy, rpt.evt], [true, 1, true, 'ADV_SCAN_IND']);
+  eq('hci: address reversed, rotating', [rpt.addr, rpt.addrKind, rpt.rssi], ['58:46:C0:7E:53:78', 'rpa', -74]);
+  const fl = X.flat(dz.tree), by = l => fl.find(n => n.label === l);
+  eq('iBeacon fields + byte ranges', [by('Company ID').start, by('Company ID').len, by('Proximity UUID').value, by('Major').value, by('Minor').value, by('Measured power').value],
+    [16, 2, '3f46eab9-b015-4bcd-bf97-98acba619787', 1, 1, '-60 dBm']);
+  ok('every node inside the packet', fl.every(n => n.start >= 0 && n.start + n.len <= s23.length));
+  eq('categories', X.categories(dz).sort().join(','), 'ad:Manufacturer specific data,addr:rpa,company:Apple,kind:iBeacon,pdu:ADV_SCAN_IND');
+  const mk = X.masked(dz);
+  eq('masked: rotating address zeroed, nothing else', [X.toHex(mk.slice(7, 13), ''), X.toHex(mk.slice(13), '') === X.toHex(s23.slice(13), '')], ['000000000000', true]);
+  eq('masked: a registered device keeps its address', X.toHex(X.masked(dz, () => true).slice(7, 13), ''), '7853 7EC04658'.replace(' ', ''));
+  const pc = X.pcap([{ ts: 1792390800123, bytes: mk }]);
+  eq('pcap: header, linktype 201, one record', [pc.length, pc[20], pc[0], pc[24 + 16 + 3], pc[24 + 16 + 4]], [24 + 16 + 4 + s23.length, 201, 0xD4, 1, 0x04]);
+  // extended advertising on Coded PHY (synthetic): non-connectable, primary Coded, no secondary, 3 bytes of Flags
+  const ext = X.fromHex('043e' + '1d' + '0d01' + '0000' + '01' + '665544332211' + '03' + '00' + 'ff' + '7f' + 'c0' + '0000' + '00' + '000000000000' + '03' + '020106');
+  const dx = X.dissect(ext), cx = X.categories(dx);
+  eq('extended: Coded PHY, flags', [dx.reports[0].ext, dx.reports[0].phy1, dx.reports[0].rssi, cx.includes('phy:LE Coded (long range)'), X.flat(dx.tree).find(n => n.label === 'Flag bits').value],
+    [true, 'LE Coded (long range)', -64, true, 'LE General Discoverable, BR/EDR (Classic) not supported']);
+  // reconstructed from a record: marked so
+  const rr = X.fromRecord({ a: 'A4:C1:38:5E:22:01', at: 'public', r: -70, nm: 'ATC_5E2201', s: { '181a': '01225e38c1a4b4099a15860b5a0704' }, m: {}, u: [] });
+  const rt = X.flat(rr.tree).find(n => n.tf === 'temp');
+  eq('reconstructed: real false, pvvx temp decoded with its telemetry field', [rr.real, rt.real, rt.tv, rr.reports[0].addr], [false, false, 24.84, 'A4:C1:38:5E:22:01']);
+  // custom decoder (no code): Apple data, byte 0 -> "kind"
+  const cdx = X.customDecoder({ name: 'Apple kind', company: 76, fields: [{ n: 'kind', off: 0, type: 'u8' }, { n: 'temp', off: 2, type: 's16le', scale: 0.01, tf: 'temp' }] });
+  eq('custom decoder on a record', cdx.decode({ m: { 76: '0215c409' } }).val, { kind: 2, temp: 25 });
+  X.setCustom([cdx.spec]);
+  ok('custom decoder fields appear in the tree', X.flat(X.dissect(s23).tree).some(n => /your decoder/.test(n.label)));
+  X.setCustom([]);
+  // quiz: every question answerable from the packet
+  let qok = true;
+  for (let k = 0; k < 40; k++) { const q = X.quiz(dz, Math.random); if (!q || (q.kind === 'bytes' ? !(q.answer[0] >= 0) : !(q.answer >= 0 && q.answer < q.choices.length))) qok = false; }
+  ok('quiz questions well formed', qok);
+  eq('levels', [X.level(0), X.level(60), X.level(500)], ['Foundation', 'Standard', 'Advanced']);
+
+  // ---- tracker tags (pet / key finders)
+  const tg = o => B.decode(rec(o));
+  const it = rec({ a: 'FF:FF:12:34:56:78', at: 'public', nm: 'iTAG            ', u: ['1802', 'ffe0'] });
+  eq('iTag: trackable, registers by MAC', [tg(it).tag.kind, tg(it).tag.trackable, B.bestKey(it, B.decode(it))], ['itag', true, 'mac:FF:FF:12:34:56:78']);
+  eq('AirTag (Find My): recognised, not trackable', [tg({ a: '5A:11:22:33:44:55', m: { 76: '1219' + '00'.repeat(25) } }).tag.kind, tg({ a: '5A:11:22:33:44:55', m: { 76: '1219' + '00'.repeat(25) } }).tag.trackable], ['findmy', false]);
+  eq('iBeacon from Apple is not mistaken for Find My', tg({ m: { 76: `0215${U}00640001c5` } }).tag, undefined);
+  eq('SmartTag / Tile / Google FMDN', [tg({ s: { fd5a: '00' } }).tag.kind, tg({ s: { feed: '02' } }).tag.kind, tg({ s: { feaa: '41' + '00'.repeat(20) } }).tag.kind], ['smarttag', 'tile', 'fmdn']);
+  eq('telemetry type pet', window.CCDI.KellyFrame.telemDecode(window.CCDI.KellyFrame.unstuff([...KF.telem(1, 1, [['name', 9, 'pet', 'Rex'], ['reading', 9, 'present', 1, 0]])].map(c => c.charCodeAt(0)).slice(4, -3))).names[0].dtype, 'pet');
+
+  // ---- your phone as a beacon (Phase 13): the made-up ID registers to the key the bridge / decoder make from its advert
+  let seed = 7; const prng = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const pb = B.phoneBeacon(prng);
+  ok('phone beacon: v4-shaped lower-case UUID', /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(pb.uuid));
+  ok('phone beacon: major / minor 1-65534', pb.major >= 1 && pb.major <= 65534 && pb.minor >= 1 && pb.minor <= 65534);
+  ok('phone beacon: default random source differs each time', B.phoneBeacon().uuid !== B.phoneBeacon().uuid);
+  const hx = n => n.toString(16).padStart(4, '0');
+  const padv = rec({ a: '5B:11:22:33:44:55', m: { 76: `0215${pb.uuid.replace(/-/g, '')}${hx(pb.major)}${hx(pb.minor)}c5` } });   // phone: rotating address
+  eq('phone beacon: decodes back to the same ID', (({ uuid, major, minor }) => ({ uuid, major, minor }))(B.decode(padv).ib), pb);
+  eq('phone beacon: ibKey = bestKey of its advert', B.ibKey(pb), B.bestKey(padv, B.decode(padv)));
+  eq('phone beacon: registry matches it on a rotating address', B.Registry({ ph: { match: B.ibKey(pb), type: 'person', phone: true } }).lookup(padv, B.decode(padv)), 'ph');
+  eq('phone beacon: a typed key in capitals still matches', B.Registry({ ph: { match: B.ibKey(pb).toUpperCase().replace('IB:', 'ib:') } }).lookup(padv, B.decode(padv)), 'ph');
+  eq('parseIbKey round trip', B.parseIbKey(B.ibKey(pb)), pb);
+  eq('parseIbKey: uuid-only / mac / junk -> null', [B.parseIbKey(`ib:${pb.uuid}`), B.parseIbKey('mac:AA:BB:CC:DD:EE:FF'), B.parseIbKey('')], [null, null, null]);
+  ok('phone beacon key survives the node filter', B.filterKeys({ ph: { match: B.ibKey(pb) } }).includes(B.ibKey(pb)));
+
+  // ---- Morse
+  eq('morse E', B.morse('E'), [[true, 1]]);
+  eq('morse K units', B.morse('K').reduce((a, x) => a + x[1], 0), 9);
+} catch (e) { out.push(`<span class="bad">EXCEPTION ${e.stack}</span>`); fails.push('exception'); }
+out.push(`RESULT: ${fails.length ? 'FAIL ' + fails.join(', ') : 'ALL PASS'}`);
+document.getElementById('out').innerHTML = out.join('\n');
+</script>
+</body></html>

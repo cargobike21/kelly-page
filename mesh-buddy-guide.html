@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh Buddy -- build your own MeshPRS GPS tracker</title>
+<style>
+  :root { --bg: #0b1020; --card: #121a33; --line: #26315a; --text: #e8ecf8; --dim: #9aa6c8; --cyan: #00e5ff; --lime: #39ff88; --amber: #ffb020; --red: #ff3b5c; }
+  @media print { :root { --bg: #fff; --card: #fff; --line: #bbb; --text: #000; --dim: #444; --cyan: #006b80; --lime: #0a7a2f; --amber: #8a5a00; --red: #a0001c; } .noprint { display: none; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 system-ui, "Segoe UI", sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 28px 20px 70px; }
+  h1 { font-size: 34px; margin: 0 0 4px; } h1 span { color: var(--cyan); }
+  h2 { font-size: 22px; margin: 38px 0 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+  h3 { font-size: 17px; margin: 20px 0 6px; }
+  a { color: var(--cyan); }
+  .lede { color: var(--dim); font-size: 17px; margin: 0 0 18px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; margin: 14px 0; }
+  .warn { border-color: var(--amber); } .warn b:first-child { color: var(--amber); }
+  .stop { border-color: var(--red); } .stop b:first-child { color: var(--red); }
+  .ok { border-color: var(--lime); }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; margin: 10px 0; }
+  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--dim); font-weight: 600; font-size: 13px; }
+  code, .mono { font: 14px ui-monospace, Consolas, monospace; background: rgba(127, 127, 127, .15); padding: 1px 5px; border-radius: 5px; }
+  pre { background: rgba(127, 127, 127, .12); padding: 10px 12px; border-radius: 8px; overflow: auto; font: 13.5px ui-monospace, Consolas, monospace; }
+  ol li, ul li { margin: 5px 0; }
+  .steps > li { margin: 10px 0; }
+  .toc { columns: 2; font-size: 15px; } .toc a { text-decoration: none; }
+  .small { font-size: 13.5px; color: var(--dim); }
+  svg text { font: 13px system-ui, sans-serif; fill: var(--text); }
+</style>
+</head>
+<body><main>
+
+<h1><svg class="mb-collie" viewBox="0 0 64 64" width="52" height="52" role="img" aria-label="Border collie" style="vertical-align:-12px"><g stroke="#8a8f99" stroke-width="1.2" stroke-linejoin="round"><path d="M9 5 L25 17 L13 31 Z" fill="#1b1b1f"/><path d="M55 5 L39 17 L51 31 Z" fill="#1b1b1f"/><path d="M12 20 Q32 4 52 20 Q60 38 48 52 Q32 62 16 52 Q4 38 12 20 Z" fill="#1b1b1f"/></g><path d="M9 5 L14 9 L11 12 Z M55 5 L50 9 L53 12 Z" fill="#f4f1ea"/><path d="M29.5 11 Q32 9.5 34.5 11 L36 33 Q45 39 44.5 48 Q32 60 19.5 48 Q19 39 28 33 Z" fill="#f4f1ea"/><circle cx="22" cy="29" r="3.3" fill="#c98a3a"/><circle cx="22" cy="29" r="1.6" fill="#111"/><circle cx="42" cy="29" r="3.3" fill="#c98a3a"/><circle cx="42" cy="29" r="1.6" fill="#111"/><ellipse cx="32" cy="42" rx="4.6" ry="3.2" fill="#111"/><path d="M32 45 V49 M27.5 49.5 Q32 53 36.5 49.5" stroke="#111" stroke-width="1.4" fill="none" stroke-linecap="round"/><path d="M30 51 Q32 57.5 34 51 Z" fill="#e8768a"/></svg> <span>Mesh Buddy</span></h1>
+<p class="lede">A small GPS tracker that puts you on <b>aprs.fi</b> through the MeshCore LoRa mesh. You build it from three
+off-the-shelf RAKwireless WisBlock parts, then flash and set it up from <b>Kelly Page</b> with one click. Your callsign
+comes from Kelly, so it's set up as you and only you.</p>
+
+<div class="card"><b>How it works.</b> Mesh Buddy sends its position as a <b>MeshPRS</b> frame, the open standard for
+APRS over MeshCore, on the <code>#meshprs</code> channel. MeshCore repeaters carry it across the mesh. A licensed ham
+running a <b>MeshPRS iGate</b>, such as Kelly Page's APRS iGate, hears it and passes it to APRS-IS, and it appears on
+aprs.fi under your callsign. No internet or SIM is needed on the tracker.</div>
+
+<ul class="toc">
+  <li><a href="#who">1. Who can use it</a></li>
+  <li><a href="#parts">2. Parts</a></li>
+  <li><a href="#build">3. Putting it together</a></li>
+  <li><a href="#flash">4. Flash and set up with Kelly</a></li>
+  <li><a href="#igate">5. Getting onto aprs.fi</a></li>
+  <li><a href="#ride">6. On the road</a></li>
+  <li><a href="#tlm">7. Telemetry</a></li>
+  <li><a href="#cli">8. Settings by USB (no Kelly)</a></li>
+  <li><a href="#trouble">9. Troubleshooting</a></li>
+  <li><a href="#credits">10. Credits and licences</a></li>
+</ul>
+
+<h2 id="who">1. Who can use it</h2>
+<ul>
+  <li><b>Licensed amateurs only.</b> Mesh Buddy sends your callsign. Kelly's iGate only gates a station whose node name
+    has a <b>VK or ZL callsign</b> as its first or second word, and Kelly's setup names your tracker
+    <code>&lt;CALLSIGN&gt; Buddy</code> (or whatever word you pick) for exactly that reason.</li>
+  <li><b>The radio side is not amateur radio.</b> MeshCore in Australia runs in the 915-928 MHz band under the
+    <b>LIPD Class Licence 2025</b>, which allows up to 1 W EIRP for digital modulation. Mesh Buddy sends at 22 dBm into
+    the kit's 2 dBi antenna, about 0.25 W EIRP. MeshCore traffic doesn't go out on amateur bands.</li>
+  <li><b>New Zealand:</b> the rules differ. Check your local requirements before you transmit.</li>
+  <li><b>Default radio settings</b> are the SEQ / MBUG settings: 923.125 MHz, 62.5 kHz, SF8, CR 4/5. Elsewhere, Kelly
+    lets you enter your local mesh's settings.</li>
+</ul>
+
+<h2 id="parts">2. Parts</h2>
+<p>Everything comes from <a href="https://core-electronics.com.au" target="_blank" rel="noopener">Core Electronics</a>.
+These are the parts in the first Mesh Buddy. Prices are as listed on 31 October 2026, including GST.</p>
+<table>
+  <tr><th>Part</th><th>Core Electronics SKU</th><th>Price</th><th>Why</th></tr>
+  <tr><td><b>WisBlock Meshtastic Starter Kit, 9xx MHz</b>: RAK4631 core (nRF52840 + LoRa), RAK19003 mini base board, 2 dBi antenna</td>
+    <td class="mono">RW-115093</td><td>$39.30</td><td>The radio and processor. It comes with Meshtastic installed, and flashing replaces it.</td></tr>
+  <tr><td><b>RAK12500 WisBlock GNSS module</b>: u-blox ZOE-M8Q, with a GPS antenna</td>
+    <td class="mono">RW-110016</td><td>$32.05</td><td>The GPS. GPS, GLONASS, BeiDou, QZSS.</td></tr>
+  <tr><td><b>RAK19001 WisBlock Dual IO Base Board</b>: USB-C cable, battery cable and screws included</td>
+    <td class="mono">RW-110081</td><td>$21.80</td><td>The base board: an on/off switch, battery and solar connectors, and room for more modules.</td></tr>
+  <tr><td><b>A 3.7 V single-cell LiPo battery</b></td><td>(your choice)</td><td></td><td>Mesh Buddy runs from it and charges it over USB. Choose a size for how long you ride.</td></tr>
+</table>
+<p class="small">About $93 for the three WisBlock parts. The starter kit's small RAK19003 base board is spare in this build.
+RAKwireless says the GNSS module also works on a base board's Slot C, but the first Mesh Buddy was built on the RAK19001.</p>
+
+<div class="card stop"><b>⚠️ Battery polarity.</b> LiPo batteries are sold with their JST plugs wired both ways round.
+Before you plug a battery in, compare its red and black wires with the + and − markings next to the battery socket
+on the RAK19001. A reversed battery can destroy the board. If it doesn't match, use the battery cable that comes with
+the board, or get a battery that matches.</div>
+
+<h2 id="build">3. Putting it together</h2>
+<svg viewBox="0 0 640 200" width="100%" role="img" aria-label="The stack: the RAK4631 core and RAK12500 GNSS on the RAK19001 base, LoRa and GPS antennas, battery and USB-C">
+  <rect x="20" y="120" width="600" height="60" rx="10" fill="none" stroke="#00e5ff" stroke-width="2"/>
+  <text x="34" y="156">RAK19001 base board -- on/off switch, USB-C, battery, solar</text>
+  <rect x="60" y="40" width="200" height="70" rx="8" fill="none" stroke="#39ff88" stroke-width="2"/>
+  <text x="74" y="72">RAK4631 core</text><text x="74" y="92" style="font-size:12px">core slot</text>
+  <rect x="330" y="40" width="170" height="70" rx="8" fill="none" stroke="#ffb020" stroke-width="2"/>
+  <text x="344" y="72">RAK12500 GNSS</text><text x="344" y="92" style="font-size:12px">Slot A</text>
+  <line x1="160" y1="40" x2="160" y2="12" stroke="#39ff88" stroke-width="2"/><text x="170" y="22">LoRa antenna (2 dBi)</text>
+  <line x1="415" y1="40" x2="415" y2="12" stroke="#ffb020" stroke-width="2"/><text x="425" y="22">GPS antenna (face up)</text>
+</svg>
+<ol class="steps">
+  <li><b>RAK4631 core into the base board's core slot.</b> Line up the connector, press it down evenly until it clicks,
+    and fit the small screws from the board's bag.</li>
+  <li><b>RAK12500 GNSS into Slot A.</b> Same again, with its screw. Slot A is RAKwireless's recommended slot for it.</li>
+  <li><b>Connect both antennas before you power it up.</b> The LoRa antenna goes on the RAK4631's antenna connector,
+    and the GPS antenna on the RAK12500's tiny connector. Press it straight down; it clicks. The GPS antenna's flat
+    ceramic face goes <b>up, towards the sky</b>.
+    <div class="card warn"><b>Never</b> power the tracker without the LoRa antenna connected. Transmitting into nothing
+    can damage the radio.</div></li>
+  <li><b>Battery</b> into the battery socket, after the polarity check above. Leave the switch off for now.</li>
+  <li><b>Case:</b> any case that keeps out rain and lets the GPS see the sky. Mount the LoRa antenna vertically and as
+    high as you can, away from your body. On the first ride every lost packet was lost on the bike's own first hop,
+    so antenna placement is the biggest improvement you can make.</li>
+</ol>
+
+<h2 id="flash">4. Flash and set up with Kelly</h2>
+<p>Kelly Page carries the Mesh Buddy firmware and flashes it over USB from the browser. You don't need any programming
+tools.</p>
+<div class="card"><b>You'll need</b> Kelly Page in <b>Chrome or Edge on a computer</b>, opened securely: through your Kelly
+bridge's <code>https://</code> address, on <code>localhost</code>, or as a file. Browsers only allow USB access on secure
+pages. You'll also need a USB-C cable that carries data; some charge-only cables don't.</div>
+<ol class="steps">
+  <li><b>Set your callsign</b> in Kelly: <b>Admin › My station › Callsign</b>, for example <code>VK4ABC</code>. Mesh Buddy
+    uses this one, and the tracker page has no box for typing a different callsign.</li>
+  <li>Open <b>LoRa Mesh › 🐕 Mesh Buddy</b>. Check the line <i>Goes on air as VK4ABC-12 named "VK4ABC Buddy"</i>.</li>
+  <li>Pick the <b>SSID</b>: -12 is the usual for a tracker, -9 for a vehicle. Then pick the <b>word after your callsign</b>
+    (Bike, Ute ...), the <b>symbol</b>, an optional <b>comment</b> and <b>status line</b>, and the <b>radio</b>: SEQ / MBUG,
+    or your local mesh's settings.</li>
+  <li>Tick <b>Patchy coverage</b> if you'll often be at the edge of the mesh. The tracker then beacons up to every 60 s
+    instead of every 120 s, which fills gaps on aprs.fi but doubles the airtime it uses.</li>
+  <li><b>Plug the tracker into the computer by USB</b>, switch it on, and click <b>⚡ Flash Mesh Buddy and set it up</b>.
+    <ul>
+      <li>Choose the tracker's port. It's usually the only new one.</li>
+      <li>The tracker restarts into its <b>bootloader</b> as a new USB port. If Kelly asks, click <b>🔌 Choose the
+        bootloader port</b> and pick it.</li>
+      <li>Flashing takes <b>about 70 seconds</b>. Don't unplug it.</li>
+      <li>Kelly then sets your callsign, name, symbol, beaconing and radio, and gives the tracker a <b>new random admin
+        password</b>. Write the password down; Kelly also keeps it under <i>My Mesh Buddies</i>.</li>
+    </ul></li>
+  <li>To change settings later, plug it in and use <b>⚙️ Set up only</b>. It doesn't flash again.</li>
+</ol>
+<div class="card"><b>Can't use Kelly?</b> Kelly is how Mesh Buddy is flashed. If you need it some other way, for
+example with <a href="https://github.com/adafruit/Adafruit_nRF52_nrfutil" target="_blank" rel="noopener">adafruit-nrfutil</a>
+on the command line, ask the Kelly Page author for the firmware package, then set it up with the USB commands in
+<a href="#cli">section 8</a>.</div>
+
+<h2 id="igate">5. Getting onto aprs.fi</h2>
+<p>A Mesh Buddy only reaches aprs.fi through a <b>MeshPRS iGate whose operator has listed it</b>. That stops anyone
+else putting stations on aprs.fi in your name.</p>
+<ul>
+  <li><b>If you run Kelly with a MeshCore node at home:</b> after setup, click <b>➕ Add it to my iGate list</b>. Your
+    home node must have heard the tracker's advert, which it sends as it starts, so switch the tracker on near your
+    node. Kelly's iGate then gates it whenever your node hears it, directly or through repeaters.</li>
+  <li><b>If you don't:</b> ask a local MeshPRS iGate operator to list your tracker. Give them its node name and the first
+    8 characters of its node key, both shown when Kelly finishes.</li>
+  <li>Your station: <code>https://aprs.fi/#!call=a/VK4ABC-12</code>, with your own call and SSID.</li>
+</ul>
+
+<h2 id="ride">6. On the road</h2>
+<ul>
+  <li><b>First GPS fix:</b> outdoors, with a clear sky, it takes a minute or two after a cold start. Nothing is sent
+    without a fix.</li>
+  <li><b>Smart beaconing</b> (MeshPRS spec §5.5): a beacon when you've moved 100 m or turned more than 15°, never
+    sooner than 120 s (or 60 s with <i>Patchy coverage</i>), and every 30 min while you're parked.</li>
+  <li><b>Flooded:</b> every MeshCore repeater that hears a beacon passes it on, so the first repeater can be several
+    kilometres away. On the first ride, repeaters 3-5 km away picked it up.</li>
+  <li><b>On aprs.fi:</b> iGates pass one position per station every 2 minutes, or every 30 s once you've moved 500 m.
+    The comment goes out every 10th beacon. Your status line goes out after the first fix (sent twice, 75 s apart, in case the first is lost), again
+    whenever you change it, and otherwise every 12 hours -- aprs.fi keeps showing it in between.</li>
+  <li><b>Coverage:</b> it depends on the repeaters near your route far more than on distance. Losses come in runs in
+    bad spots. A better-placed antenna, or a repeater on your route, helps most.</li>
+</ul>
+
+<h2 id="tlm">7. Telemetry</h2>
+<p>Mesh Buddy also sends APRS telemetry: every 10 min while moving, every 30 min parked, and straight away if the
+battery goes low or the board gets hot. aprs.fi graphs it on your station's <i>telemetry</i> page.</p>
+<table>
+  <tr><th>Channel</th><th>Name</th><th>What it shows</th></tr>
+  <tr><td>A1</td><td>Battery</td><td>Battery voltage, 3.00-4.27 V</td></tr>
+  <tr><td>A2</td><td>EchoSNR</td><td>How strongly the nearest repeater was heard passing on your last packet. A repeater
+    passing it on proves your packet got through the first hop.</td></tr>
+  <tr><td>A3</td><td>Echo%</td><td>How many of your last 10 packets a repeater passed on: your first-hop coverage</td></tr>
+  <tr><td>A4</td><td>Sats</td><td>GPS satellites in use</td></tr>
+  <tr><td>A5</td><td>Temp</td><td>Processor temperature, a little above the air inside the case</td></tr>
+  <tr><td>B1-B8</td><td colspan="2">Charge (USB power), LowBt (under 3.5 V), Fix, Move, Echo, Fld (flooding), Rbt (just restarted), Hot (over 50 °C)</td></tr>
+</table>
+
+<h2 id="cli">8. Settings by USB (no Kelly)</h2>
+<p>Any serial terminal at 115200 baud works. Send each command with Enter, and replies start with <code>-&gt;</code>.
+All of MeshCore's own commands work (<code>get name</code>, <code>gps</code>, <code>get radio</code> ...), plus:</p>
+<table>
+  <tr><th>Command</th><th>Does</th></tr>
+  <tr><td class="mono">mprs</td><td>Status: version, callsign, symbol, route, beaconing, GPS fix, satellites, frames sent</td></tr>
+  <tr><td class="mono">set name VK4ABC Bike</td><td>Node name. Your callsign must be its first or second word, or no iGate will gate it</td></tr>
+  <tr><td class="mono">mprs call VK4ABC-12</td><td>Callsign-SSID it sends as. Until one is set, Mesh Buddy sends nothing</td></tr>
+  <tr><td class="mono">mprs sym /b</td><td>APRS symbol: <code>/b</code> bike, <code>/&gt;</code> car, <code>/[</code> walker ...</td></tr>
+  <tr><td class="mono">mprs comment …</td><td>Comment (23 characters at most)</td></tr>
+  <tr><td class="mono">mprs status …</td><td>Status line (62 at most; empty = none)</td></tr>
+  <tr><td class="mono">mprs min 120</td><td>Shortest gap between beacons, in seconds (60 in patchy coverage; never below 30)</td></tr>
+  <tr><td class="mono">mprs route flood</td><td>Repeaters pass it on (<code>zerohop</code> = heard directly only, for testing)</td></tr>
+  <tr><td class="mono">mprs tlm on</td><td>Telemetry on / off; <code>mprs tlm</code> shows the current values</td></tr>
+  <tr><td class="mono">set radio 923.125,62.5,8,5</td><td>Frequency, bandwidth, spreading factor, coding rate (reboot to apply)</td></tr>
+  <tr><td class="mono">password …</td><td>A new admin password, for logging in to it over the air</td></tr>
+  <tr><td class="mono">reboot</td><td>Restart</td></tr>
+</table>
+
+<h2 id="trouble">9. Troubleshooting</h2>
+<table>
+  <tr><th>Problem</th><th>Try</th></tr>
+  <tr><td>Kelly says USB flashing needs a secure page</td><td>Open Kelly through your bridge's <code>https://</code> address
+    (or <code>localhost</code>), in Chrome or Edge.</td></tr>
+  <tr><td>No port to choose</td><td>Use a data-capable USB-C cable and switch the tracker on. Close anything else using the port:
+    Kelly's own LoRa Mesh USB connection, a terminal, the Meshtastic web client.</td></tr>
+  <tr><td>Kelly never finds the bootloader</td><td>Click <b>🔌 Choose the bootloader port</b> when it appears. If the
+    tracker is stuck, double-press the RAK4631's reset button quickly to start its bootloader, then try again.</td></tr>
+  <tr><td>Flashed, but not on aprs.fi</td><td>Check, in order: a GPS fix (outdoors); your callsign is the first or second word of
+    the node name; the tracker is on an iGate's list; a repeater or iGate is in range.</td></tr>
+  <tr><td>Kelly says "isn't running Mesh Buddy"</td><td>Use <b>⚡ Flash</b>, not <b>⚙️ Set up only</b>.</td></tr>
+  <tr><td>Going back to Meshtastic</td><td>Flash Meshtastic again with its own web flasher. Mesh Buddy changes nothing that
+    stops that.</td></tr>
+</table>
+
+<h2 id="credits">10. Credits and licences</h2>
+<ul>
+  <li><b>MeshCore</b> by Scott Powell / rippleradios.com, MIT licence. Mesh Buddy is MeshCore companion-v1.18.0's sensor
+    firmware with a MeshPRS tracker added. Kelly ships MeshCore's licence beside the firmware.</li>
+  <li><b>MeshPRS</b>, the APRS ↔ MeshCore interface standard:
+    <a href="https://cargobike21.github.io/MeshPRS/MeshPRS-Spec.html" target="_blank" rel="noopener">cargobike21.github.io/MeshPRS</a>.</li>
+  <li><b>Kelly Page</b> is free software for amateurs. The flasher follows Adafruit's
+    <a href="https://github.com/adafruit/Adafruit_nRF52_nrfutil" target="_blank" rel="noopener">adafruit-nrfutil</a>
+    serial DFU byte for byte.</li>
+  <li>WisBlock, RAK4631, RAK12500, RAK19001 and RAK19003 are RAKwireless products. This guide isn't from
+    RAKwireless or Core Electronics.</li>
+</ul>
+<p class="small">Mesh Buddy 1.1 · guide written 31 October 2026.</p>
+</main></body>
+</html>

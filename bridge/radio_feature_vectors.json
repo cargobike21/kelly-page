@@ -1,0 +1,13 @@
+{
+  "_note": "Shared by js/entitlements.js ccdiFeature (tests/entitlements-test.js) and kelly_bridge.radio_feature (bridge/test_kelly_gate.py): [ident, params, feature]. Gateway-ID dependent classes (texts to the gateway) are not here: the bridge does not know the gateway.",
+  "cases": [
+    ["d", "012345", "radio.testtx"], ["d", "1abc", "radio.testtx"],
+    ["d", "63,1234", "build.removed"], ["d", "64,1234", "build.removed"], ["d", "65,1234", "build.removed"], ["d", "63", "build.removed"],
+    ["d", "69,1234", null], ["d", "61,1234", null], ["d", "633,1234", null], ["d", "5101", null], ["d", "4123", null], ["d", "20", null],
+    ["q", "4", null], ["g", "05", null], ["j", "1", null],
+    ["w", "0000ab", "radio.testtx"], ["w", "0001ab", "radio.testtx"], ["w", "0002ab", null],
+    ["T", "4380000", "ccr.tx"], ["B", "915", "ccr.tx"], ["D", "023", "ccr.tx"], ["S", "123", "radio.testtx"],
+    ["U", "A1234567", "ccr.tx"], ["U", "C1", "ccr.tx"], ["U", "E293", "ccr.tx"], ["U", "ZA1", "ccr.tx"], ["U", "ZA0", null],
+    ["U", "ZGabcd", "p25.transparent"], ["U", "ZHabcd", "p25.transparent"], ["U", "ZDabcd", "p25.transparent"], ["U", "ZX", null], ["U", "B1", null]
+  ]
+}

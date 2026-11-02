@@ -1,0 +1,58 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Node info QR tests</title>
+<style>body{font:13px Consolas,monospace;background:#0b0f14;color:#dde}.ok{color:#3d8}.bad{color:#f55}</style>
+</head><body>
+<h3>Kelly Page -- Node info panel ▦ QR (js/meshinfo.js + js/meshqr.js), QR_REVIEW.md opp. 6</h3>
+<pre id="out">running…</pre>
+<div id="mesh-info" hidden></div>
+<script src="../js/meshqr.js"></script>
+<script src="../js/meshinfo.js"></script>
+<script>
+// The real panel with a stub k: a MeshCore repeater / room / companion with whole keys get ▦ QR, typed from the node;
+// a Meshtastic node (no hex key) and a MeshCore node with only a key prefix get none.
+// Headless: msedge --headless=new --allow-file-access-from-files --virtual-time-budget=30000 --dump-dom tests/meshinfo-qr-tests.html
+// -> RESULT: ALL PASS
+const out = [], fails = [];
+const tick = (ms = 0) => new Promise(r => setTimeout(r, ms));
+const until = async (fn, ms = 6000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = fn(); if (v) return v; await tick(20); } return fn(); };
+function eq(name, got, want) {
+  if (String(got) === String(want)) out.push(`<span class="ok">PASS ${name}</span>`);
+  else { out.push(`<span class="bad">FAIL ${name}: got ${got} want ${want}</span>`); fails.push(name); }
+}
+const $ = s => document.querySelector(s), esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const K = c => c.repeat(64);
+const nodes = new Map([
+  [1, { num: 1, key: K('a'), longName: 'VK4XXX Veranda Rptr', hwLabel: 'Repeater', role: 2 }],
+  [2, { num: 2, key: K('b'), longName: 'Ipswich Chat Room', hwLabel: 'Room server' }],              // no role: from hwLabel
+  [3, { num: 3, key: K('c'), longName: 'Bob <b>VK4XYZ</b>', hwLabel: 'Companion', role: 1 }],
+  [4, { num: 4, longName: 'Meshtastic T-Beam', hwLabel: 'TBEAM', role: 2, publicKey: new Uint8Array(32) }],
+  [5, { num: 5, key: 'abcdef012345', longName: 'Prefix only', hwLabel: 'Repeater', role: 2 }],
+]);
+let sel = null;
+const k = { $, esc, fmtAgo: () => 'just now', sel: () => sel, unsel: () => { sel = null; }, node: n => nodes.get(n), myNum: () => 99, myPos: () => null, distKm: () => 0,
+  hw: n => n.hwLabel, id: n => `!${n.num}`, p25: () => null, routes: () => null, canDm: () => true, dm: () => {}, trace: () => {}, canTrace: () => false, centre: () => {}, trends: () => null };
+const info = window.KellyMeshInfo(k);
+(async () => {
+  try {
+    const qrOf = async num => {
+      sel = num; info.render();
+      const b = $('[data-mi="qr"]'); if (!b) return 'no button';
+      b.click();
+      await until(() => $('#mqr') && !$('#mqr').hidden && /^meshcore:/.test(($('#mqr .mqr-link') || {}).value || ''));
+      const q = new URLSearchParams(($('#mqr .mqr-link').value.split('?')[1]) || ''), t = $('#mqr-title').textContent;
+      $('#mqr [data-mqr="close"]').click();
+      return `${q.get('type')} ${q.get('public_key') === nodes.get(num).key} ${q.get('name')} | ${t}`;
+    };
+    eq('a MeshCore repeater: ▦ QR, type 2 from its role', await qrOf(1), '2 true VK4XXX Veranda Rptr | ▦ VK4XXX Veranda Rptr');
+    eq('a room server with no role: type 3 from its hwLabel', await qrOf(2), '3 true Ipswich Chat Room | ▦ Ipswich Chat Room');
+    eq('a companion: type 1; the name is text, not HTML', await qrOf(3), '1 true Bob <b>VK4XYZ</b> | ▦ Bob <b>VK4XYZ</b>');
+    eq('... and escaped in the panel header', $('#mesh-info .mi-h b').innerHTML, 'Bob &lt;b&gt;VK4XYZ&lt;/b&gt;');
+    eq('a Meshtastic node (no hex key): no ▦ QR', await qrOf(4), 'no button');
+    eq('a node with only a key prefix: no ▦ QR', await qrOf(5), 'no button');
+    eq('qrType: unknown type -> 0 (hidden, never a guess)', window.KellyMeshInfo.qrType({ key: K('d'), hwLabel: 'Node', role: 0 }), 0);
+  } catch (e) { out.push(`<span class="bad">ERROR ${e.stack}</span>`); fails.push('exception'); }
+  out.push(`RESULT: ${fails.length ? 'FAIL ' + fails.join(', ') : 'ALL PASS'}`);
+  document.getElementById('out').innerHTML = out.join('\n');
+})();
+</script>
+</body></html>

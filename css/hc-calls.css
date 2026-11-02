@@ -1,0 +1,37 @@
+/* Kelly Page -- Ham Contacts: the Callsigns box (js/hc-calls.js KellyHCCalls, #hc-calls). Prefix hc-cs-. Static: nothing animates. */
+.hc-cs-note { margin: 6px 0 10px; font-size: 13px; color: var(--dim); max-width: 80ch; }
+.hc-cs-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hc-cs-q { flex: 1 1 180px; min-width: 0; }
+.hc-cs-only { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--dim); cursor: pointer; white-space: nowrap; }
+.hc-cs-grow { flex: 1 1 0; }
+.hc-cs-count { white-space: nowrap; }
+.hc-cs-msg { margin: 8px 0 0; min-height: 18px; font: 600 12px var(--mono); color: var(--dim); }
+.hc-cs-msg.ok { color: var(--hc-ok, var(--lime)); } .hc-cs-msg.bad { color: var(--hc-bad, #ff3b5c); }
+.hc-cs-list { margin-top: 8px; max-height: 460px; overflow-y: auto; border-top: 1px solid var(--line); }
+.hc-cs-row { display: grid; grid-template-columns: 26px minmax(0, 1fr) minmax(70px, auto) auto auto; gap: 4px 10px; align-items: center;
+  padding: 8px 4px; border-bottom: 1px solid var(--line); }
+.hc-cs-row:hover { background: var(--raised); }
+.hc-cs-row.editing { grid-template-columns: 26px minmax(0, 1fr) auto; background: var(--raised); border-left: 2px solid var(--hc-card, var(--amber)); }
+.hc-cs-ic { font-size: 18px; text-align: center; }
+.hc-cs-who { display: flex; flex-direction: column; min-width: 0; }
+.hc-cs-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hc-cs-who small { font: 11px var(--mono); color: var(--dim); }
+.hc-cs-call { font: 800 15px var(--mono); letter-spacing: .04em; color: var(--hc-call, #fff3d6); text-shadow: 0 0 8px rgba(255, 217, 160, .25); }
+.hc-cs-call i { font: italic 400 12px var(--mono); color: var(--dim); text-shadow: none; letter-spacing: 0; }
+.hc-cs-src { white-space: nowrap; }
+.hc-cs-src.mine { color: var(--hc-card, var(--amber)); border-color: var(--hc-card, var(--amber)); }
+.hc-cs-src.dir { color: var(--cyan); border-color: var(--cyan); }
+.hc-cs-src.name { color: var(--lime); border-color: rgba(57, 255, 136, .4); }
+.hc-cs-acts, .hc-cs-edit { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.hc-cs-in { width: 9.5em; font: 700 14px var(--mono); text-transform: uppercase; letter-spacing: .04em; }
+.hc-cs-err { grid-column: 2 / -1; font-size: 12px; color: var(--hc-bad, #ff3b5c); }
+.hc-cs-empty, .hc-cs-more { margin: 12px 4px; font-size: 13px; color: var(--dim); }
+@media (max-width: 600px) {
+  .hc-cs-row { grid-template-columns: 26px minmax(0, 1fr) auto; }
+  .hc-cs-src { grid-column: 3; grid-row: 2; justify-self: end; }
+  .hc-cs-acts { grid-column: 1 / -1; justify-content: flex-start; }
+  .hc-cs-row.editing { grid-template-columns: 26px minmax(0, 1fr); }
+  .hc-cs-edit { grid-column: 1 / -1; justify-content: flex-start; }
+  .hc-cs-in { flex: 1 1 8em; }
+  .hc-cs-grow { display: none; }
+}

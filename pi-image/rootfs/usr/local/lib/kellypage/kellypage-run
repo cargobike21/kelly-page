@@ -1,0 +1,19 @@
+#!/bin/sh
+# kelly-bridge.service's ExecStart: Kelly's bridge with whatever is plugged in right now.
+# No radio lead = the page only (it still loads, and Kelly can save its config); udev restarts us on plug / unplug.
+# Settings: /etc/kelly-bridge.env (sudo kellypage-setup writes it).
+set -a
+. /etc/kelly-bridge.env
+set +a
+MESH_DEV=""
+case "${KELLY_MESH:-auto}" in
+  auto) [ -e /dev/kelly-mesh ] && { set -- "$@" --mesh-serial /dev/kelly-mesh; MESH_DEV=/dev/kelly-mesh; } ;;
+  none|"") ;;
+  --mesh-serial\ *) MESH_DEV="${KELLY_MESH#--mesh-serial }"; set -- "$@" $KELLY_MESH ;;
+  *) set -- "$@" $KELLY_MESH ;;                                   # --mesh-ble AA:BB:..., --mesh-tcp host:port
+esac
+# a LoRa node that isn't an nRF52 (a Heltec, say) also gets /dev/kelly-radio: never open the same port twice
+if [ -e /dev/kelly-radio ] && { [ -z "$MESH_DEV" ] || [ "$(readlink -f /dev/kelly-radio)" != "$(readlink -f "$MESH_DEV")" ]; }; then
+  set -- "$@" --serial /dev/kelly-radio --baud "${KELLY_RADIO_BAUD:-19200}"
+fi
+exec /usr/bin/python3 /opt/kelly-page/bridge/kelly_bridge.py "$@" $KELLY_BLE_ARGS $KELLY_EXTRA_ARGS

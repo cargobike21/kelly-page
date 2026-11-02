@@ -1,0 +1,139 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Node setup tests</title>
+<style>body{font:13px Consolas,monospace;background:#0b0f14;color:#dde}.ok{color:#3d8}.bad{color:#f55}</style>
+</head><body>
+<h3>Kelly Page -- Set up a node over USB (js/meshsetup.js) against the simulated USB CLI (js/meshclisim.js)</h3>
+<pre id="out">running…</pre>
+<label><input type="checkbox" id="ms-setup"></label>
+<div class="card" id="msu-card" hidden><span id="msu-tag"></span><div id="msu-body"></div></div>
+<script src="../js/secure.js"></script>
+<script src="../js/meshclisim.js"></script>
+<script src="../js/meshsetup.js"></script>
+<script>
+// The pure part (link, parse, plan, guards, preset) and the real card on a stub Kelly with the Demo node.
+// Headless: msedge --headless=new --allow-file-access-from-files --virtual-time-budget=60000 --dump-dom tests/meshsetup-tests.html
+// -> RESULT: ALL PASS
+const C = window.KellyMeshSetup.core, SIM = window.KellyMeshCliSim, out = [], fails = [];
+const tick = (ms = 0) => new Promise(r => setTimeout(r, ms));
+const until = async (fn, ms = 6000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = fn(); if (v) return v; await tick(10); } return fn(); };
+function eq(name, got, want) {
+  if (String(got) === String(want)) out.push(`<span class="ok">PASS ${name}</span>`);
+  else { out.push(`<span class="bad">FAIL ${name}: got ${got} want ${want}</span>`); fails.push(name); }
+}
+const $ = s => document.querySelector(s), esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+// a sim wired to a CliLink, as the Demo node button does; log = the transcript lines
+function pair(opts) {
+  const sim = SIM.create(Object.assign({ sched: (fn, ms) => { const t = setTimeout(fn, Math.ceil(ms / 10)); return () => clearTimeout(t); } }, opts));
+  const link = C.CliLink(b => sim.write(b)), log = [];
+  sim.onData(b => link.push(b)); link.onLog = (d, t) => log.push(`${d} ${t}`);
+  return { sim, link, log };
+}
+(async () => {
+  try {
+    // ---- the firmware's number formats and answers
+    eq('ftoa: float, 7 digits truncated, zeros trimmed', [SIM.ftoa(923.125), SIM.ftoa(-27.6257), SIM.ftoa(0), SIM.ftoa(152.7666)].join(' '), '923.125 -27.6256999 0.0 152.7666015');
+    eq('ftoa3 for the bandwidth', [SIM.ftoa3(62.5), SIM.ftoa3(125), SIM.ftoa3(41.7)].join(' '), '62.5 125 41.7');
+    eq('parseGet: value, unsupported, not an answer', [C.parseGet('> 47'), C.parseGet('??: path.hash.mode'), C.parseGet('Unknown command'), C.parseGet('> ')].map(String).join('|'), '47|undefined|null|');
+    eq('parseRadio', JSON.stringify(C.parseRadio('923.125,62.5,8,5')), '{"freq":923.125,"bw":62.5,"sf":8,"cr":5}');
+    eq('parseRadio refuses junk', C.parseRadio('923.125,62.5'), null);
+    eq('TX caps per board, conservative default', [C.txCap('Heltec V3').dbm, C.txCap('RAK 4631').dbm, C.txCap('Seeed SenseCap Solar').dbm, C.txCap('Station G2').dbm].join(' '), '22 22 22 17');
+
+    // ---- the link against the sim: echo, "  -> " reply, one at a time, a late answer dropped
+    let p = pair();
+    eq('ver through the echo + "  -> " framing', await p.link.cmd('ver'), 'v1.18.0 (Build: 15 Oct 2026)');
+    eq('get radio as the firmware prints it', await p.link.cmd('get radio'), '> 923.125,62.5,8,5');
+    const both = await Promise.all([p.link.cmd('get name'), p.link.cmd('get tx')]);
+    eq('two commands queued: each gets its own answer', both.join(' | '), '> VK4XXX Veranda Rptr | > 22');
+    eq('a command the firmware hasn\'t got', await p.link.cmd('get nonsense'), '??: nonsense');
+    eq('reboot answers nothing: "" after the echo', await p.link.cmd('reboot', { timeout: 400 }), '');
+    p.sim.stop();
+    p = pair({ faults: { silent: true } });
+    let err = ''; try { await p.link.cmd('ver', { timeout: 300 }); } catch (e) { err = e.message; }
+    eq('a companion node (no text CLI): no echo = an error', err, 'no answer');
+    err = ''; try { await C.read({ cmd: () => Promise.reject(new Error('no answer')) }); } catch (e) { err = e.message; }
+    eq('read() says why in plain words', /companion node has no console/.test(err), true);
+    p.sim.stop();
+
+    // ---- read, plan, guards, write, verify
+    p = pair();
+    const r = await C.read(p.link);
+    eq('read: board, firmware, role', `${r.info.board} | ${r.info.fw} | ${r.info.role}`, 'Seeed SenseCap Solar | v1.18.0 (Build: 15 Oct 2026) | repeater');
+    eq('read: settings', JSON.stringify([r.cur.name, r.cur.freq, r.cur.bw, r.cur.sf, r.cur.cr, r.cur.tx, r.cur.lat, r.cur.lon, r.cur.advert, r.cur.flood, r.cur.hash, r.cur.macks]),
+      '["VK4XXX Veranda Rptr",923.125,62.5,8,5,22,-27.6256999,152.7666015,0,47,0,0]');
+    eq('the guest password is masked in the console', p.log.includes('< > ••••'), true);
+    // ▦ QR (QR_REVIEW.md opp. 5): the PUBLIC key is read; the private key never asked for
+    eq('read: its public key (get public.key) for the QR', r.info.key, '7a3e0c51d2b94f6880a1c6e2f4d9b3a5c8e17f2046b9d3a1e5c7f0b2d4a6c8e0');
+    eq('never sends get prv.key (nor anything with prv)', p.sim.lines().some(l => /prv/i.test(l)), false);
+    eq('QR type from the role: repeater 2, room_server 3, sensor 4', ['repeater', 'room_server', 'sensor', '?'].map(C.qrType).join(), '2,3,4,2');
+    { const sent = [], fake = { cmd: c => { sent.push(c); return Promise.resolve(c === 'ver' ? 'v1.18.0' : c === 'get public.key' ? '??: public.key' : c === 'get role' ? '> repeater' : c === 'board' ? 'Heltec V3' : '??: x'); } };
+      const r2 = await C.read(fake);
+      eq('a firmware without get public.key: key null (no QR offered)', `${r2.info.key} ${sent.includes('get public.key')}`, 'null true'); }
+    const cur = r.cur, base = Object.assign({}, cur, { adminPw: '' });
+    eq('no edits: nothing to write', C.plan(cur, base, 'Seeed SenseCap Solar').rows.length, 0);
+    eq('lat/lon read back as float: no false change', C.plan(cur, Object.assign({}, base, { lat: -27.6257, lon: 152.7666 }), '').rows.length, 0);
+    const mb = C.plan(cur, C.preset(base), 'Seeed SenseCap Solar');
+    eq('MBUG preset on the club radio: only hashes, flood advert, multi-acks', mb.rows.map(x => x.cmd).join(' ; '), 'set flood.advert.interval 83 ; set path.hash.mode 1 ; set multi.acks 1');
+    const eu = C.plan(Object.assign({}, cur, { freq: 869.618 }), C.preset(Object.assign({}, base, { freq: 869.618 })), '');
+    eq('MBUG preset on a fresh node (869.618): the radio row first-class, one command', eu.rows.filter(x => x.key === 'radio').map(x => x.cmd + ' reboot=' + x.reboot).join(), 'set radio 923.125,62.5,8,5 reboot=true');
+    const g = (w, board = 'Seeed SenseCap Solar') => C.plan(cur, Object.assign({}, base, w), board).errors;
+    eq('guard: 915-928 MHz (869 refused)', !!g({ freq: 869.525 }).radio, true);
+    eq('guard: the bandwidth must fit inside the band too', [!!g({ freq: 927.9, bw: 250 }).radio, !!g({ freq: 927.8, bw: 250 }).radio, !!g({ freq: 915.0625, bw: 125 }).radio].join(), 'true,false,false');
+    eq('guard: odd bandwidth, SF and CR', [!!g({ bw: 100 }).radio, !!g({ sf: 13 }).radio, !!g({ cr: 4 }).radio].join(), 'true,true,true');
+    eq('guard: TX power capped for the board', [!!g({ tx: 22 }).tx, !!g({ tx: 23 }).tx, !!g({ tx: 18 }, 'Mystery Board').tx, !!g({ tx: 17 }, 'Mystery Board').tx, !!g({ tx: -10 }).tx].join(), 'false,true,true,false,true');
+    eq('guard: name chars and length', [!!g({ name: 'VK4XXX: Rptr' }).name, !!g({ name: 'x'.repeat(32) }).name, !!g({ name: 'VK4XXX Rptr 2' }).name].join(), 'true,true,false');
+    eq('guard: passwords 15 max, no line breaks', [!!g({ adminPw: 'x'.repeat(16) }).adminPw, !!g({ adminPw: ' pad' }).adminPw, !!g({ guestPw: 'a\nb' }).guestPw, !!g({ adminPw: 'good one' }).adminPw].join(), 'true,true,true,false');
+    eq('guard: advert intervals', [!!g({ advert: 30 }).advert, !!g({ advert: 0 }).advert, !!g({ advert: 120 }).advert, !!g({ flood: 2 }).flood, !!g({ flood: 169 }).flood, !!g({ flood: 83 }).flood].join(), 'true,false,false,true,true,false');
+    eq('guard: lat/lon range, hash mode', [!!g({ lat: 91 }).lat, !!g({ lon: -181 }).lon, !!g({ hash: 3 }).hash].join(), 'true,true,true');
+    const pw = C.plan(cur, Object.assign({}, base, { adminPw: 'n3wSecret', guestPw: 'guest1' }), '');
+    eq('password rows show no password', pw.rows.map(x => `${x.label}: ${x.from} -> ${x.to} (${x.mask})`).join(' ; '), 'Admin password: •••• -> new (password ••••) ; Guest password: (none) -> new (set guest.password ••••)');
+
+    // write the MBUG preset + a name + both passwords, one at a time, then read back
+    const want = Object.assign(C.preset(base), { name: 'VK4XXX Rptr', owner: 'VK4XXX|kelly', adminPw: 'n3wSecret', guestPw: 'guest1' });
+    const pl = C.plan(cur, want, r.info.board), seen = [];
+    eq('the plan has no errors', Object.keys(pl.errors).length, 0);
+    p.log.length = 0;
+    const res = await C.write(p.link, pl.rows, (row, ok, reply) => seen.push(`${row.key}:${ok ? 'ok' : 'bad'}:${reply}`));
+    eq('every command OK', `${res.ok} ${res.done}/${pl.rows.length}`, `true ${pl.rows.length}/${pl.rows.length}`);
+    eq('the admin password checked against its echo, never shown', seen.find(s => s.startsWith('adminPw')), 'adminPw:ok:OK');
+    eq('no password in the console', p.log.some(l => /n3wSecret|guest1/.test(l)), false);
+    eq('the node has them', `${p.sim.prefs.password} ${p.sim.prefs.guest} ${p.sim.prefs.owner.replace('\n', '/')} ${p.sim.prefs.hash} ${p.sim.prefs.flood} ${p.sim.prefs.macks}`, 'n3wSecret guest1 VK4XXX/kelly 1 83 1');
+    const back = await C.read(p.link);
+    eq('read back: all checked', C.verify(pl.rows, want, back.cur).length, 0);
+    // a refusal stops the run: a bad value the guard would catch, sent straight
+    const bad = [{ key: 'flood', label: 'Flood', cmd: 'set flood.advert.interval 2', expect: x => /^OK/.test(x) }, { key: 'macks', label: 'M', cmd: 'set multi.acks 0', expect: x => /^OK/.test(x) }];
+    const seen2 = [], res2 = await C.write(p.link, bad, (row, ok, reply) => seen2.push(reply));
+    eq('a refused command stops the rest', `${res2.ok} ${res2.done} ${seen2.join('|')} ${p.sim.prefs.macks}`, 'false 0 Error: interval range is 3-168 hours 1');
+    eq('verify notices a value that didn\'t stick', C.verify([{ key: 'tx' }], { tx: 20 }, { tx: 22 }).join(), 'tx');
+    p.sim.stop();
+
+    // ---- the card, with the Demo node (real-time sim)
+    const mem = {}, ms = {}, events = [];
+    window.confirm = () => true;
+    const secure = window.KellySecure.make({ isSecureContext: false, location: { protocol: 'http:', host: 'kellypi:8025', hostname: 'kellypi' }, navigator: {} });
+    const ui = window.KellyMeshSetup({ $, esc, ms, save: () => {}, toast: () => {}, addEvent: (c, t) => events.push(t), currentPage: () => 'mesh', secure });
+    ui.init(); ui.render();
+    eq('off by default: card hidden', $('#msu-card').hidden, true);
+    $('#ms-setup').checked = true; $('#ms-setup').dispatchEvent(new Event('change'));
+    eq('switched on: card shown, saved in ms.setup', `${$('#msu-card').hidden} ${ms.setup}`, 'false true');
+    eq('no Web Serial here: Connect greyed out with the reason', `${$('#msu-usb').disabled} ${/https/.test($('#msu-body').textContent)}`, 'true true');
+    $('#msu-demo').click();
+    await until(() => $('#msu-mbug'), 8000);
+    eq('demo node read into the form', `${$('[data-f=name]').value} ${$('[data-f=freq]').value} ${$('[data-f=flood]').value}`, 'VK4XXX Veranda Rptr 923.125 47');
+    eq('no edits: "No changes."', $('#msu-diff').textContent.trim(), 'No changes.');
+    $('#msu-mbug').click();
+    eq('MBUG preset shown as a diff first (3 rows)', $('#msu-diff').querySelectorAll('tr').length - 1, 3);
+    const f = $('[data-f=freq]'); f.value = '869.525'; f.dispatchEvent(new Event('input', { bubbles: true }));
+    eq('an out-of-band frequency: refused, Write greyed out', `${$('#msu-write').disabled} ${/915-928/.test($('[data-e=radio]').textContent)}`, 'true true');
+    f.value = '923.125'; f.dispatchEvent(new Event('input', { bubbles: true }));
+    $('#msu-write').click();
+    await until(() => /all checked/.test($('#msu-body').textContent), 8000);
+    eq('written one at a time and read back', /3 written and read back: all checked/.test($('#msu-body').textContent), true);
+    eq('the event log names what changed', events.some(e => /Node setup: 3 written.*Path hash size/.test(e)), true);
+    $('#msu-off').click(); await tick(50);
+    eq('disconnect: form and values gone', `${!!$('[data-f=name]')} ${ui.state().want}`, 'false null');
+  } catch (e) { out.push(`<span class="bad">ERROR ${e.stack}</span>`); fails.push('exception'); }
+  out.push(`RESULT: ${fails.length ? 'FAIL ' + fails.join(', ') : 'ALL PASS'}`);
+  document.getElementById('out').innerHTML = out.join('\n');
+})();
+</script>
+</body></html>

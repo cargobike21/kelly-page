@@ -1,0 +1,47 @@
+/* Kelly Page -- ISS Tracker & Auto-Tuner (js/iss.js). Kelly's neon tokens. No looping animations: the ISS marker moves
+ * with live data, the waterfall runs only while the user listens, the badge pop plays once. */
+.is-ctl { margin-top: 8px; } .is-top .tabs { margin-top: 10px; }
+.is-phase { font: 800 12px var(--display); letter-spacing: .12em; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--line2); color: var(--dim); }
+.is-phase.armed { color: var(--lime); border-color: rgba(57, 255, 136, .5); } .is-phase.pre { color: var(--amber); border-color: var(--amber); }
+.is-phase.active { color: #001a0a; background: var(--lime); border-color: var(--lime); box-shadow: 0 0 16px rgba(57, 255, 136, .5); }
+.is-phase.tail, .is-phase.restore { color: var(--cyan); border-color: var(--cyan); }
+.is-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr); gap: 16px; }
+.is-grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+@media (max-width: 900px) { .is-grid { grid-template-columns: 1fr; } }
+.is-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.is-mapwrap { position: relative; height: 430px; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); }
+#is-map { position: absolute; inset: 0; background: #0a1124; }
+.is-iss { display: flex; flex-direction: column; align-items: center; } .is-iss b { font-size: 22px; filter: drop-shadow(0 0 8px #00e5ff); }
+.is-iss span { font: 700 10px var(--mono); color: #9fe8ff; background: rgba(5, 9, 18, .85); padding: 0 4px; border-radius: 4px; }
+.is-me b { font-size: 18px; filter: drop-shadow(0 0 6px #ffb020); }
+.is-kvs { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 10px; }
+.is-kv { padding: 8px 12px; border-radius: 10px; background: rgba(0, 0, 0, .22); border: 1px solid var(--line); }
+.is-kv span { display: block; font: 600 10.5px var(--mono); text-transform: uppercase; color: var(--dim); } .is-kv b { font: 800 16px var(--display); color: #fff; }
+.is-kv.up b { color: var(--lime); }
+.is-sky { width: 100%; max-width: 320px; display: block; margin: 0 auto; }
+.is-sky .ring { fill: none; stroke: #1f2d4f; } .is-sky .cd { font: 700 12px var(--display); fill: var(--dim); } .is-sky .el { font: 600 9px var(--mono); fill: var(--mute); }
+.is-sky .trk { fill: none; stroke: #00e5ff; stroke-width: 2.5; filter: drop-shadow(0 0 4px #00e5ff); } .is-sky .aos { fill: var(--lime); } .is-sky .los { fill: var(--red); } .is-sky .now { fill: #fff; filter: drop-shadow(0 0 6px #fff); }
+.is-dop { width: 100%; display: block; } .is-dop .gl { stroke: #1b2740; stroke-dasharray: 3 4; } .is-dop .gz { stroke: #2c3e68; } .is-dop .gt { font: 600 10px var(--mono); fill: var(--dim); }
+.is-dop .curve { fill: none; stroke: var(--amber); stroke-width: 2.5; filter: drop-shadow(0 0 4px var(--amber)); } .is-dop .now { fill: #fff; }
+.is-count { display: flex; align-items: baseline; gap: 12px; } .is-count span { font: 600 12px var(--mono); text-transform: uppercase; color: var(--dim); } .is-count b { font: 900 40px var(--display); color: var(--cyan); text-shadow: 0 0 14px rgba(0, 229, 255, .5); }
+.is-lamps { display: flex; flex-direction: column; gap: 8px; }
+.is-lamp { display: grid; grid-template-columns: 14px 110px 1fr; gap: 10px; align-items: center; } .is-lamp i { width: 12px; height: 12px; border-radius: 50%; background: #2a3550; }
+.is-lamp.ok i { background: var(--lime); box-shadow: 0 0 8px var(--lime); } .is-lamp.warn i { background: var(--amber); box-shadow: 0 0 8px var(--amber); } .is-lamp.bad i { background: var(--red); box-shadow: 0 0 8px var(--red); }
+.is-lamp span { font: 600 12.5px var(--ui); color: var(--dim); } .is-lamp b { font: 700 13px var(--mono); color: #fff; }
+.is-btns { margin: 10px 0 4px; } .fld input[type=number]#is-center { width: 130px; }
+.is-scroll { max-height: 320px; overflow: auto; } .is-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+.is-tbl th { text-align: left; font: 600 11px var(--mono); text-transform: uppercase; color: var(--dim); padding: 4px 6px; position: sticky; top: 0; background: var(--panel-solid); }
+.is-tbl td { padding: 4px 6px; border-bottom: 1px solid var(--line); } .is-tbl tr.good td { color: #9fe8ff; } .is-tbl tr.hi td { color: var(--lime); font-weight: 700; }
+.is-log { list-style: none; margin: 0; padding: 8px; max-height: 300px; overflow: auto; background: #02060d; border-radius: 10px; border: 1px solid var(--line); font: 12px var(--mono); }
+.is-log li { padding: 2px 0; color: #9fe8ff; } .is-log li.err { color: #ff9cb0; } .is-log li.info { color: var(--amber); } .is-log li.dry { color: var(--dim); }
+.is-log time { color: var(--mute); } .is-log em { font-style: normal; color: #ffb3e6; } .is-log code { color: #b8ffcf; border: 0; background: none; padding: 0; }
+.is-wf { width: 100%; height: 220px; display: block; margin-top: 10px; border-radius: 10px; background: #02060d; border: 1px solid var(--line); }
+.is-plog { list-style: none; padding: 0; margin: 0; font-size: 13px; } .is-plog li { padding: 4px 0; border-bottom: 1px solid var(--line); }
+.is-badges { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.is-b { padding: 10px; border-radius: 12px; border: 1px solid var(--line); text-align: center; opacity: .45; filter: grayscale(1); } .is-b.got { opacity: 1; filter: none; border-color: rgba(0, 229, 255, .5); }
+.is-b b { display: block; font-size: 26px; } .is-b span { display: block; font: 700 13px var(--ui); color: #fff; } .is-b small { color: var(--dim); font-size: 11.5px; }
+.is-help p, .is-help li { color: #cfe0ff; font-size: 13.5px; line-height: 1.55; } .is-help ol { padding-left: 20px; }
+.is-pop { position: fixed; right: 24px; bottom: 90px; z-index: 900; }
+.is-badge-pop { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 16px 22px; border-radius: 16px; background: var(--panel-solid); border: 1px solid var(--cyan); box-shadow: 0 0 30px rgba(0, 229, 255, .35); animation: is-pop .5s cubic-bezier(.2, 1.4, .4, 1) 1; }
+.is-badge-pop b { font-size: 40px; } .is-badge-pop span { font: 700 10px var(--mono); letter-spacing: .2em; color: var(--cyan); } .is-badge-pop strong { font: 800 16px var(--display); color: #fff; } .is-badge-pop small { color: var(--dim); }
+@keyframes is-pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }

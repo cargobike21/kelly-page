@@ -1,0 +1,4 @@
+#!/bin/sh
+# The address to open Kelly at (with this Pi's token), as a QR code for your phone.
+if [ "$(id -u)" -ne 0 ]; then exec sudo "$0" "$@"; fi
+exec /usr/bin/python3 /opt/kelly-page/bridge/kelly_bridge.py --connect-qr

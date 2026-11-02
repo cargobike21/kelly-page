@@ -1,0 +1,279 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Ham Contacts: directory tests</title>
+<!-- Ham Contacts > P25X ham directory (js/hc-dir.js) over the demo service, plus a simulated live gateway.
+     Run: msedge --headless=new --allow-file-access-from-files --virtual-time-budget=20000 --dump-dom
+          file:///.../kelly-page/tests/hc-dir-tests.html   -> RESULT: ALL PASS -->
+<link rel="stylesheet" href="../css/hc.css"><link rel="stylesheet" href="../css/hc-dir.css">
+<script src="../vendor/tweetnacl-1.0.3/nacl-fast.min.js"></script>
+<script src="../js/meshqr.js"></script>
+<script src="../js/hc-core.js"></script>
+<script src="../js/hc-service.js"></script>
+<script src="../js/hc-demo.js"></script>
+<script src="../js/websync.js"></script>
+<script src="../js/hc-dir.js"></script>
+</head><body>
+<div class="hc"><div id="hc-dir"></div></div>
+<pre id="out">running…</pre>
+<script>
+(async () => {
+  const out = [], fails = [];
+  const t = (name, ok, extra) => { out.push(`${ok ? 'ok  ' : 'FAIL'} ${name}${ok || extra === undefined ? '' : ' ' + JSON.stringify(extra).slice(0, 300)}`); if (!ok) fails.push(name); };
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const finish = () => { out.push(`RESULT: ${fails.length ? 'FAIL ' + fails.join(', ') : 'ALL PASS'}`); document.getElementById('out').textContent = out.join('\n'); };
+  try {
+    const HC = window.KellyHC, nacl = window.nacl, ed = HC.naclEd(nacl);
+    const mem = new Map(), store = { get: (k, d) => (mem.has(k) ? JSON.parse(mem.get(k)) : d), set: (k, v) => mem.set(k, JSON.stringify(v)) };
+    const bus = HC.createBus(), world = KellyHamDemo({ nacl });
+    const dsvc = KellyHamContactsService({ backend: world.backend, bus, store, ed, myCall: () => 'VK4ZZA', demo: true,
+      myPos: () => ({ lat: world.me.lat, lon: world.me.lon }) });
+    world.start(dsvc);
+    const gw = new Set(), kfSent = [], said = [];
+    let demoOn = true, kfMode = 'ok', roomFake = null;
+    const svc = Object.assign({}, dsvc, { room: n => (roomFake ? roomFake(n) : dsvc.room(n)) });
+    const fromDirCalls = [];
+    window.KellyHamCalls = { callOf: () => null, fromDir: (e, o) => fromDirCalls.push([e.length, !!(o && o.replace)]) };
+    const c = { bus, HC, svc, esc: s => String(s == null ? '' : s).replace(/[&<>"']/g, ch => `&#${ch.charCodeAt(0)};`), store, toast() {}, fmtAgo: ms => `${Math.round((Date.now() - ms) / 60000)} min ago`,
+      root: () => document.querySelector('.hc'), visible: () => true, demo: () => demoOn, setDemo() {}, demoWorld: () => (demoOn ? world : null), ed,
+      myCall: () => 'VK4ZZA', reduced: () => true, openTrace: () => ({ ok: false }), openChat() {},
+      kfRequest: (obj) => { if (demoOn) return null; kfSent.push(obj); return kfMode === 'null' ? null : Promise.resolve(kfMode === 'noradio' ? 0 : 100 + kfSent.length); },
+      onGateway: fn => { gw.add(fn); return () => gw.delete(fn); }, say: r => said.push(r) };
+    const reply = j => { for (const fn of [...gw]) fn(j); };
+    const retry = async fn => { let r; for (let i = 0; i < 6; i++) { r = await fn(); if (r && (r.ok || r.code !== 'timeout')) return r; } return r; };
+    await sleep(100);
+
+    const mount = document.getElementById('hc-dir');
+    const dirEv = [], ops = [], gwCalls = [];
+    bus.on('dir', p => dirEv.push(p)); bus.on('op', e => ops.push(e)); c.setGwCall = call => gwCalls.push(call);
+    const part = KellyHCDir(mount, c), T = part._t;
+    t('mounted', !!mount.querySelector('.hc-dr') && typeof part.destroy === 'function');
+
+    // ---- demo directory: the demo world's hams, signed; the forged one rejected + counted
+    const hams = world.stations.filter(s => HC.callFromName(s.name) && !s.yours);
+    const d = T.list();
+    t('demo lists every ham with a callsign', d.e.length === hams.length && hams.every(s => d.e.some(e => e.k === world.keyOf(s.name) && e.c === HC.callFromName(s.name))), d.e.length);
+    t('demo forged entry rejected and counted', d.bad === 1 && !d.e.some(e => e.c === 'VK4ZZX'), d.bad);
+    t('every shown entry verifies', d.e.every(e => HC.verifyEntry(e, ed).ok));
+    t('your own demo station is not in the directory', world.stations.some(s => s.yours) && !d.e.some(e => world.stations.some(s => s.yours && e.k === s.key)));
+    const di = T.dirInfo();
+    t('demo entries carry demo + a made-up f', d.e.every(e => e.demo === true && e.f > 1.6e9 && e.f <= Date.now() / 1000), d.e[0]);
+    t('demo dir info: firstOf per callsign, never mineListed', di.demo === true && di.mineListed === false && Object.keys(di.firstOf).length === d.e.length && d.e.every(e => di.firstOf[e.c] === e.f), di);
+    t('demo has some new hams (Welcome Wagon window) and some old', d.e.some(e => Date.now() / 1000 - e.f < 14 * 86400) && d.e.some(e => Date.now() / 1000 - e.f > 30 * 86400));
+    reply({ app: 'hdir', notify: 1, v: 0, you: 'VK4ZZA' });
+    t('demo: you in a reply is ignored', gwCalls.length === 0, gwCalls);
+    T.render();
+    const onKeys = new Set(dsvc.contacts().map(r => r.key));
+    const rows = [...mount.querySelectorAll('.hc-dr-row')];
+    t('rows rendered with badges', rows.length === d.e.length && rows.every(r => r.querySelector('.hc-dr-badge').textContent === (onKeys.has(r.dataset.k) ? 'on my radio' : 'not yet')), rows.length);
+    t('callsign is its own bold element', rows.every(r => /^VK4ZZ[A-Z]$/.test(r.querySelector('b.hc-dr-call').textContent)));
+    t('fed to KellyHamCalls.fromDir', fromDirCalls.some(([n]) => n === d.e.length));
+    t('demo makes no gateway request', kfSent.length === 0);
+    t('dropped count shown', /1 entry dropped/.test(mount.querySelector('[data-r="foot"]').textContent));
+
+    // search keeps the box and filters
+    const q = mount.querySelector('[data-a="q"]'); q.value = 'zzf'; q.dispatchEvent(new Event('input', { bubbles: true }));
+    t('search filters', mount.querySelectorAll('.hc-dr-row').length === 1 && q.isConnected && mount.querySelector('[data-a="q"]') === q);
+    q.value = ''; q.dispatchEvent(new Event('input', { bubbles: true }));
+
+    // ▦ per live row: that entry's contact/add QR in the shared dialog (key, name, type as signed), "from the P25X directory"
+    {
+      const rowQ = [...mount.querySelectorAll('.hc-dr-row')];
+      t('every live row has a ▦ QR button', rowQ.length && rowQ.every(r => r.querySelector('[data-a="qr"]')));
+      const e0 = d.e[0], btn = mount.querySelector(`.hc-dr-row[data-k="${e0.k}"] [data-a="qr"]`);
+      btn.click();
+      const dlg = document.getElementById('mqr');
+      await (async () => { for (let i = 0; i < 60 && !(dlg && dlg.querySelector('.mqr-link') && dlg.querySelector('.mqr-link').value); i++) await sleep(50); })();
+      const link = dlg && dlg.querySelector('.mqr-link') ? dlg.querySelector('.mqr-link').value : '';
+      t('dir QR: dialog open, titled with the call', dlg && !dlg.hidden && dlg.querySelector('#mqr-title').textContent.includes(e0.c), dlg && dlg.querySelector('#mqr-title').textContent);
+      t('dir QR: the official contact/add of that entry (its own type)', link === KellyMeshQR.contactLink({ key: e0.k, type: e0.t, name: e0.n }), link);
+      t('dir QR: says where it came from', /from the P25X directory/.test(dlg.textContent));
+      t('dir QR: no signed-advert tab (the directory has no advert)', !dlg.querySelector('[data-fmt="advert"]'));
+      const rp = d.e.find(e => e.t === 2);
+      if (rp) { T.showQr(rp.k); await sleep(200); t('dir QR: a repeater entry stays type 2', /type=2/.test(dlg.querySelector('.mqr-link').value), dlg.querySelector('.mqr-link').value); }
+      dlg.querySelector('[data-mqr="close"]').click();
+      t('dir QR: closes', dlg.hidden);
+      T.showQr('00'.repeat(32));
+      t('dir QR: an unknown key opens nothing', dlg.hidden);
+    }
+
+    // ---- List me (demo): the node signs, the entry verifies, listed locally
+    let r = await retry(() => T.publish(false));
+    const me = world.me.key, mine = T.list().e.find(e => e.k === me);
+    t('list me (demo) ok', r.ok && !!mine, r);
+    t('my entry is signed by my node and verifies', mine && mine.c === 'VK4ZZA' && mine.n === world.me.name && mine.t === 1 && mine.x === 0 && HC.verifyEntry(mine, ed).ok);
+    t('demo list-me sends nothing', kfSent.length === 0);
+    T.render();
+    t('my row shows "you"', [...mount.querySelectorAll('.hc-dr-row')].some(x => x.dataset.k === me && /you/.test(x.querySelector('.hc-dr-badge').textContent)));
+    // a callsign is required
+    const oldCall = c.myCall; c.myCall = () => '';
+    const s0 = dsvc.state; svc.state = () => ({ ...s0(), me: { ...s0().me, call: null, name: 'No call node' } });
+    r = await T.publish(false);
+    t('list me refused without a callsign', !r.ok && /callsign/.test(r.error), r);
+    svc.state = s0; c.myCall = oldCall;
+
+    // ---- Add one
+    const notYet = () => T.list().e.filter(e => e.k !== me && !new Set(dsvc.contacts().map(x => x.key)).has(e.k));
+    const n0 = notYet().length, first = notYet()[0];
+    r = await retry(() => T.addOne(first.k));
+    t('add one', r.ok && dsvc.contacts().some(x => x.key === first.k) && notYet().length === n0 - 1, r);
+    r = await T.addOne(first.k);
+    t('add one again = already', r.ok && r.value.already, r);
+    t('directory add: op events carry from dir + key', ops.some(e => e.op === 'add' && e.key === first.k && e.phase === 'start' && e.from === 'dir') && ops.some(e => e.op === 'add' && e.key === first.k && e.phase === 'done' && e.from === 'dir' && e.result.ok), ops.slice(-2));
+    { const n = ops.length; await dsvc.add({ key: world.keyOf('VK4ZZK Beaudesert'), type: 1, name: 'VK4ZZK Beaudesert' }); t('an add from elsewhere has no from', ops.slice(n).every(e => !('from' in e)) && ops.length > n, ops.slice(n)); }
+
+    // ---- Add all: room checked first
+    roomFake = () => ({ ok: false, free: 0, warn: 'Your node holds at most 32 contacts and has 32 -- room for 0 more. Remove some first.' });
+    t('no room: nothing started', T.planAdd(notYet(), 'x') === null && T.msg().kind === 'bad' && !T.bulk());
+    roomFake = n => ({ ok: true, free: 30, warn: `That brings your node to ${n + 28} of its 32 contacts.` });
+    t('past 90 %: asks first', T.planAdd(notYet(), 'x') === 'ask' && T.ask().list.length === notYet().length && !T.bulk());
+    T.render();
+    t('ask shown with a cancel', !!mount.querySelector('[data-a="askyes"]') && !!mount.querySelector('[data-a="askno"]'));
+    mount.querySelector('[data-a="askno"]').click();
+    t('cancel clears the ask', !T.ask() && !T.bulk());
+    roomFake = () => ({ ok: false, free: 2, warn: 'Room for 2 more.' });
+    const before = dsvc.contacts().length, toAdd = notYet().length;
+    t('won\'t fit: offers only as many as fit', T.planAdd(notYet(), 'x') === 'ask' && T.ask().list.length === 2 && toAdd > 2, toAdd);
+    const ask = T.ask();
+    const b = await T.runBulk(ask.list, ask.already);
+    t('bulk added at most what fits', b && b.done && b.added.length + b.failed.length + b.already === 2 && dsvc.contacts().length === before + b.added.length, b);
+    t('bulk failures carry reasons', b.failed.every(f => f.c && f.why));
+    t('bulk adds: op events carry from dir', ask.list.every(e => ops.some(o => o.op === 'add' && o.key === e.k && o.phase === 'done' && o.from === 'dir')));
+    t('bulk summary said', /Added \d+, already on your radio \d+, failed \d+/.test(T.msg().text), T.msg());
+    T.render();
+    t('summary box shown', !!mount.querySelector('.hc-dr-sum'));
+    // Stop: a bulk run stopped after its first add
+    roomFake = null;
+    const list2 = notYet().slice(0, 3);
+    const p2 = T.runBulk(list2, 0);
+    T.bulk().stop = true;
+    const b2 = await p2;
+    t('stop ends the run', b2.done && b2.added.length + b2.failed.filter(f => f.why !== 'stopped').length <= 1 && b2.failed.some(f => f.why === 'stopped'), b2);
+    // already-on-radio entries are skipped
+    const on1 = T.list().e.find(e => new Set(dsvc.contacts().map(x => x.key)).has(e.k));
+    T.planAdd([on1], 'those');
+    t('already-there skipped', /already on your radio/.test(T.msg().text) && !T.ask());
+
+    // ---- simulated LIVE gateway
+    demoOn = false; bus.emit('demo', false);
+    t('live: empty until fetched', T.list().e.length === 0 && T.list().v === 0);
+    T.fetchDir('manual');
+    t('live: opt-in off = nothing sent', kfSent.length === 0);
+    const opt = mount.querySelector('[data-a="opt"]'); opt.checked = true; opt.dispatchEvent(new Event('change', { bubbles: true }));
+    await sleep(20);
+    t('opt-in stored', store.get('hcDirOptIn') === true);
+    t('opt-in asks the gateway', kfSent.length === 1 && kfSent[0].op === 'hdir' && kfSent[0].have === 0, kfSent);
+    const mk = (name, call, at, x = 0, signer) => { const e = { k: world.keyOf(name), c: call, n: name, t: 1, at, x }; return { ...e, s: HC.b64u(world.sign(signer || name, HC.dirBytes(e))) }; };
+    const now = Math.floor(Date.now() / 1000);
+    const good = [{ ...mk('VK4ZZF Redbank', 'VK4ZZF', now - 100), f: now - 3 * 86400 }, mk('VK4ZZG Gold Coast', 'VK4ZZG', now - 200), mk('VK4ZZQ Elsewhere', 'VK4ZZQ', now - 300)];
+    const forged = mk('VK4ZZR Faker', 'VK4ZZR', now - 50, 0, 'VK4ZZF Redbank');
+    let nd = dirEv.length;
+    reply({ app: 'hdir', v: 3, e: [...good, forged, { k: 'nope' }], you: 'vk4zza' });
+    t('live: list taken, bad ones dropped + counted', T.list().v === 3 && T.list().e.length === 3 && T.list().bad === 2, T.list());
+    t('live: f kept outside the signature', T.list().e.find(e => e.c === 'VK4ZZF').f === now - 3 * 86400 && HC.verifyEntry(T.list().e.find(e => e.c === 'VK4ZZF'), ed).ok);
+    t('live: dir event with firstOf, not listed yet', dirEv.length > nd && !dirEv[dirEv.length - 1].demo && dirEv[dirEv.length - 1].mineListed === false && dirEv[dirEv.length - 1].firstOf.VK4ZZF === now - 3 * 86400 && !('VK4ZZG' in dirEv[dirEv.length - 1].firstOf), dirEv[dirEv.length - 1]);
+    t('live: you -> setGwCall', gwCalls[gwCalls.length - 1] === 'vk4zza', gwCalls);
+    reply({ app: 'hdir', v: 3, cur: 1, you: null });
+    t('live: you null -> setGwCall(null)', gwCalls.length === 2 && gwCalls[1] === null, gwCalls);
+    reply({ app: 'hdir', v: 3, cur: 1 });
+    t('live: no you -> setGwCall not called', gwCalls.length === 2, gwCalls);
+    t('live: stored', (store.get('hcDir') || {}).v === 3 && store.get('hcDir').e.length === 3);
+    t('live: fed with replace', fromDirCalls.some(([n, rep]) => n === 3 && rep));
+    reply({ app: 'hdir', v: 3, cur: 1 });
+    t('live: current', /up to date/.test(T.msg().text), T.msg());
+    reply({ app: 'hdir', error: 'the ham directory is not on this gateway yet' });
+    t('live: gateway error shown plainly', /gateway says: the ham directory is not on this gateway yet/.test(T.msg().text) && T.list().e.length === 3);
+    reply({ app: 'hdir', notify: 1, v: 4 });
+    await sleep(20);
+    t('live: notify asks for the newer list', kfSent.length === 2 && kfSent[1].op === 'hdir' && kfSent[1].have === 3, kfSent);
+    reply({ app: 'hdir', v: 3, cur: 1 });   // answer that ask (clears it)
+    // list me (live): signed entry sent as hdirput; the put answer lists it
+    r = await retry(() => T.publish(false));
+    const put = kfSent[kfSent.length - 1];
+    t('live: list me sends a signed hdirput', r.ok && put.op === 'hdirput' && put.e.k === me && HC.verifyEntry(put.e, ed).ok && T.pub() === 'put', put);
+    reply({ app: 'hdir', put: 1, ok: true, v: 4 });
+    t('live: put accepted -> listed, version follows', T.list().e.some(e => e.k === me) && T.list().v === 4 && !T.pub(), T.list().v);
+    t('live: dir event says mineListed', dirEv[dirEv.length - 1].mineListed === true && dirEv[dirEv.length - 1].firstOf.VK4ZZF === now - 3 * 86400, dirEv[dirEv.length - 1]);
+    // withdraw: signed x: 1
+    r = await retry(() => T.publish(true));
+    const wd = kfSent[kfSent.length - 1];
+    t('live: withdraw sends a signed x:1', r.ok && wd.op === 'hdirput' && wd.e.x === 1 && HC.verifyEntry(wd.e, ed).ok && wd.e.at > put.e.at, wd);
+    reply({ app: 'hdir', put: 1, ok: false, v: 5, error: 'the directory has a newer entry for that node' });
+    t('live: put refused shown', /refused it: the directory has a newer entry/.test(T.msg().text) && !T.pub(), T.msg());
+    // a whole list with a withdrawn entry removes that key
+    reply({ app: 'hdir', v: 6, e: [good[0], mk('VK4ZZG Gold Coast', 'VK4ZZG', now - 10, 1)] });
+    t('live: x:1 in a list removes the key', T.list().e.length === 1 && T.list().e[0].c === 'VK4ZZF', T.list().e);
+    t('live: a list without me -> mineListed false', dirEv[dirEv.length - 1].mineListed === false, dirEv[dirEv.length - 1]);
+    // no radio
+    kfMode = 'null'; await T.fetchDir('manual');
+    t('live: no radio said', /No radio/.test(T.msg().text), T.msg());
+    kfMode = 'noradio'; await T.fetchDir('manual');
+    t('live: not sent said', /Not sent/.test(T.msg().text), T.msg());
+    kfMode = 'ok';
+    // reload from the store: re-verified
+    const raw = store.get('hcDir'); raw.e.push({ ...good[1], n: 'tampered' }); store.set('hcDir', raw);
+    const m2 = document.createElement('div'); document.body.appendChild(m2);
+    const p2b = KellyHCDir(m2, c);
+    t('reload: stored list re-verified', p2b._t.list().e.length === 1 && p2b._t.list().v === 6, p2b._t.list().e.length);
+    p2b.destroy(); m2.remove();
+
+    // ---- HTTPS source (kellypage.app): a KPD1 envelope + each entry's own node signature; mocked fetch
+    {
+      const licKp = nacl.sign.keyPair.fromSeed(new Uint8Array(32).fill(7)), otherKp = nacl.sign.keyPair.fromSeed(new Uint8Array(32).fill(8));
+      const seg64 = o => HC.b64u(new TextEncoder().encode(JSON.stringify(o)));
+      const kpd1 = (o, kp = licKp) => { const sg = seg64(o); return `KPD1.${sg}.${HC.b64u(nacl.sign.detached(new TextEncoder().encode('KPD1.' + sg), kp.secretKey))}`; };
+      const t0 = Math.floor(Date.now() / 1000);
+      const mkE = (s, over) => { const e = { k: world.keyOf(s.name), c: HC.callFromName(s.name), n: s.name, t: 1, at: t0 - 60, x: 0, ...over }; return { ...e, s: HC.b64u(world.sign(s.name, HC.dirBytes(e))) }; };
+      const forgedW = (() => { const e = { k: world.keyOf('VK4ZZX Forged'), c: 'VK4ZZX', n: 'VK4ZZX Forged', t: 1, at: t0 - 30, x: 0 }; return { ...e, s: HC.b64u(world.sign(hams[0].name, HC.dirBytes(e))) }; })();
+      const KPT = `${seg64({ v: 1, kid: 'kp-test', jti: '0123456789abcdef', sub: 'VK4XYZ', dev: 'x', feat: [], exp: 2e9 })}.sig`, signedMsgs = [];
+      let envText = kpd1({ v: 1, at: 5000, e: [mkE(hams[0]), mkE(hams[1]), forgedW] }), fetched = [], webUp = true, tokenW = KPT, putAnswer = { ok: true, n: 1 }, putSeen = [];
+      const fakeFetch = async (u, o) => { fetched.push(u); if (o && o.method === 'POST') { putSeen.push(JSON.parse(o.body)); return { ok: putAnswer.ok !== false, status: putAnswer.ok === false ? 403 : 200, json: async () => putAnswer }; } return { ok: true, status: 200, text: async () => envText }; };
+      const mem2 = new Map([['hcDirOptIn', JSON.stringify(true)]]), store2 = { get: (k, d) => (mem2.has(k) ? JSON.parse(mem2.get(k)) : d), set: (k, v) => mem2.set(k, JSON.stringify(v)) };
+      const c2 = { ...c, store: store2, demo: () => false, demoWorld: () => null, websync: KellyWebSync, fetch: fakeFetch, web: () => webUp, licenceKeys: () => [HC.hex(licKp.publicKey)], regToken: () => tokenW,
+        identSign: async m => { signedMsgs.push(m); return new Uint8Array(64).fill(7); }, kfRequest: () => null, onGateway: fn => () => {} };
+      const mH = document.createElement('div'); document.body.appendChild(mH);
+      const pH = KellyHCDir(mH, c2), TH = pH._t;
+      t('https: auto resolves to https when online', TH.effSrc() === 'https');
+      await TH.fetchDir('manual');
+      t('https: GET /api/hamdir', fetched.length >= 1 && fetched.every(u => /\/api\/hamdir$/.test(u)), fetched);
+      t('https: verified entries kept, the forged one dropped + counted', TH.live().e.length === 2 && TH.live().bad === 1 && !TH.live().e.some(e => e.c === 'VK4ZZX'), TH.live());
+      t('https: envelope time kept (h), P25 version untouched', TH.live().h === 5000 && TH.live().v === 0);
+      t('https: stored for next time', store2.get('hcDir').h === 5000);
+      envText = kpd1({ v: 1, at: 4000, e: [] }); await TH.fetchHttps('manual');
+      t('https: an older envelope is ignored', TH.live().e.length === 2 && TH.live().h === 5000 && /older/.test(TH.msg().text), TH.msg());
+      envText = kpd1({ v: 1, at: 6000, e: [mkE(hams[0])] }, otherKp); await TH.fetchHttps('manual');
+      t('https: an envelope signed by another key is refused, the last good list stays', TH.live().e.length === 2 && /licence key/.test(TH.msg().text), TH.msg());
+      envText = kpd1({ v: 1, at: 7000, e: [mkE(hams[0], { at: t0, x: 1 }), mkE(hams[1])] }); await TH.fetchHttps('manual');
+      t('https: a withdrawal (x: 1) in the envelope removes that ham', TH.live().e.length === 1 && TH.live().h === 7000 && !TH.live().e.some(e => e.c === HC.callFromName(hams[0].name)), TH.live().e.length);
+      // putHttps: the registration token + the already-signed entry
+      const mine = mkE(hams[2]);
+      let res = await TH.putHttps(mine);
+      t('https put: sends {entry, token, t, sig_dev} and lists me locally', res.ok && putSeen.length === 1 && putSeen[0].token === KPT && putSeen[0].entry.k === mine.k && Number.isInteger(putSeen[0].t) && typeof putSeen[0].sig_dev === 'string' && TH.live().e.some(e => e.k === mine.k), [res, putSeen.length]);
+      t('https put: the device key (KellyIdent) signs P25X-POP|hdput|<jti>|<dirBytes>|<t>', signedMsgs[0] === KellyWebSync.hdPutMessage('0123456789abcdef', mine, putSeen[0].t), signedMsgs[0]);
+      putAnswer = { ok: false, error: 'token expired' }; res = await TH.putHttps(mkE(hams[3]));
+      t('https put: a refusal is reported, nothing listed', !res.ok && /token expired/.test(res.error) && !TH.live().e.some(e => e.c === HC.callFromName(hams[3].name)), res);
+      tokenW = ''; res = await TH.putHttps(mkE(hams[3]));
+      t('https put: no registration token = refused before sending', !res.ok && /registered/.test(res.error) && putSeen.length === 2, res);
+      // offline / file://: auto falls back to P25 and never touches fetch
+      webUp = false; fetched.length = 0;
+      t('https: auto resolves to p25 when not online / on file://', TH.effSrc() === 'p25');
+      await TH.fetchDir('manual');
+      t('https: no fetch when web is not available', fetched.length === 0);
+      store2.set('hcDirSource', 'both'); pH.destroy(); mH.innerHTML = '';
+      const pB = KellyHCDir(mH, { ...c2, web: () => true }), TB = pB._t;
+      t('both: source from the store', TB.effSrc() === 'both');
+      envText = kpd1({ v: 1, at: 8000, e: [mkE(hams[4])] }); await TB.fetchHttps('manual');
+      t('both: https entries are merged into the list', TB.live().e.some(e => e.k === world.keyOf(hams[4].name)) && TB.live().e.length >= 2, TB.live().e.length);
+      pB.destroy(); mH.remove();
+    }
+
+    // ---- destroy unsubscribes
+    const gwBefore = gw.size;
+    part.destroy();
+    t('destroy drops the gateway handler', gw.size === gwBefore - 1);
+    let threw = false; try { bus.emit('contacts', []); bus.emit('demo', true); reply({ app: 'hdir', v: 9, e: [] }); } catch { threw = true; }
+    t('nothing throws after destroy', !threw);
+    world.stop();
+  } catch (e) { t('no exception', false, String(e && e.stack || e)); }
+  finish();
+})();
+</script>
+</body></html>

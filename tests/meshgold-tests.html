@@ -1,0 +1,174 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Golden Packet token tests</title>
+<style>body{font:13px Consolas,monospace;background:#0b0f14;color:#dde}.ok{color:#3d8}.bad{color:#f55}</style>
+</head><body>
+<h3>Kelly Page -- Golden Packet token (js/meshgold.js) against the simulated node and the real ledger rules</h3>
+<pre id="out">running…</pre>
+<div class="card" id="mg-card" hidden><span id="mg-tag"></span><input type="checkbox" id="mg-on"><input type="checkbox" id="mg-rep"><div id="mg-body"></div></div>
+<script src="../vendor/tweetnacl-1.0.3/nacl-fast.min.js"></script>
+<script>try { localStorage.removeItem("kelly.hcCalls"); localStorage.removeItem("kelly.hcSticky"); } catch (e) { /* */ }</script>
+<script src="../js/meshqr.js"></script>
+<script src="../js/hc-core.js"></script>
+<script src="../js/hc-calls.js"></script>
+<script src="../js/award-engine.js"></script>
+<script src="../js/gold-token.js"></script>
+<script src="../js/meshcore.js"></script>
+<script src="../js/meshcoresim.js"></script>
+<script src="../js/meshgold.js"></script>
+<script>
+// The real module, a stub Kelly (k), a real meshcore.js Session on the sim as THIS node (it signs with a real Ed25519
+// key), TweetNaCl keys for the other stations, and gold-token.js's Ledger as the gateway.
+// Headless: msedge --headless=new --allow-file-access-from-files --virtual-time-budget=60000 --dump-dom tests/meshgold-tests.html
+// -> RESULT: ALL PASS
+const MC = window.KellyMeshCore, SIM = window.KellyMeshCoreSim, G = window.GoldToken, ED = G.naclEd(nacl), out = [], fails = [];
+const tick = (ms = 0) => new Promise(r => setTimeout(r, ms));
+function eq(name, got, want) {
+  if (JSON.stringify(got) === JSON.stringify(want)) out.push(`<span class="ok">PASS ${name}</span>`);
+  else { out.push(`<span class="bad">FAIL ${name}: got ${JSON.stringify(got)} want ${JSON.stringify(want)}</span>`); fails.push(name); }
+}
+const $ = s => document.querySelector(s), esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const mem = {}, store = { get: (key, d) => key in mem ? JSON.parse(mem[key]) : d, set: (key, v) => { mem[key] = JSON.stringify(v); } };
+const toasts = [], F = [], kf = [], dms = [];
+const station = (name, num, lat, lon) => { const kp = nacl.sign.keyPair.fromSeed(nacl.hash(new TextEncoder().encode(name)).subarray(0, 32)); return { kp, n: { num, key: G.hex(kp.publicKey), longName: name, role: 1, hops: 1, lat, lon } }; };
+const hand = (from, toKey, id, seq) => { const body = G.handoffBody({ id, seq, from: from.n.key, to: toKey, ts: Math.floor(Date.now() / 1000) }); return G.toText(G.join(body, nacl.sign.detached(body, from.kp.secretKey))); };
+window.confirm = () => true;
+(async () => {
+  try {
+    const sim = SIM.create({ seed: 5, sched: (fn, ms) => { const t = setTimeout(fn, Math.ceil(ms / 50)); return () => clearTimeout(t); } });
+    let session;
+    const framer = new MC.Framer(f => session.onFrame(f));
+    sim.onFrame(f => { const b = new Uint8Array(3 + f.length); b[0] = 0x3e; b[1] = f.length & 255; b[2] = f.length >> 8; b.set(f, 3); framer.push(b); });
+    session = MC.DRIVER.Session({ send: async b => sim.write(b), node: () => {}, self: () => {}, text: () => {}, ack: () => {}, channels: () => {}, status: () => {}, log: () => {}, stat: () => {} });
+    await session.start();
+    const ME = session.selfKey();
+    const B = station('Bravo VK4ZB', 0xb0b0, -27.30, 152.76), C = station('Charlie', 0xc0c0, -27.61, 153.10), Dl = station('Delta VK4DM', 0xd0d0, -27.70, 152.70);
+    const E = station('Echo VK4EE', 0xe0e0, -27.4, 152.9);   // in the P25X ham directory only, not a contact
+    const nodes = new Map([[B.n.num, B.n], [C.n.num, C.n], [Dl.n.num, Dl.n]]);
+    const HCALLS = window.KellyHamCalls;
+    HCALLS.hooks({ me: () => ({ call: 'VK4XXX', keys: [ME] }) });
+    HCALLS.fromDir([{ k: E.n.key, c: 'VK4EE', n: 'Echo VK4EE', t: 1, at: 1760000000 }]);
+    // the classic book (store 'meshGold', before the 2026-10-24 rules): one token still held, one passed on
+    const classicBook = { [ME.slice(0, 12)]: { tokens: { 3: { id: 3, seq: 2, from: 'aa', fromName: 'Old Timer', at: 5, text: 'GOLD x' }, 4: { id: 4, seq: 1, fromName: 'Older', at: 4, gave: { toName: 'Someone' } } }, log: [{ t: 1, text: 'classic log line' }] } };
+    store.set('meshGold', classicBook); const classicJson = mem.meshGold;
+    const ms = {}; let xid = 0, demo = false;
+    const k = { $, esc, store, ms, toast: (...a) => toasts.push(a), addEvent: () => {}, dirty: () => {}, save: () => {}, fmtAgo: () => 'just now', currentPage: () => 'mesh',
+      session: () => session, caps: () => ({ contacts: true }), nodes: () => nodes.values(), node: n => nodes.get(n >>> 0), nodeName: n => (nodes.get(n) || {}).longName || '?',
+      myNum: () => 1, myPos: () => ({ lat: -27.61, lon: 152.76 }), myCall: () => 'VK4XXX', online: () => true, isDemo: () => false, awardsDemo: () => demo,
+      hamOf: n => HCALLS.hamOf(n), isSelf: key => String(key || '').toLowerCase() === ME.toLowerCase(),
+      distKm: (a, b) => { const r = Math.PI / 180, h = Math.sin((b.lat - a.lat) * r / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin((b.lon - a.lon) * r / 2) ** 2; return 12742 * Math.asin(Math.sqrt(h)); },
+      sendDm: async (num, text) => { const m = { to: num, text, state: 'sent' }; dms.push(m); return m; },
+      kfRequest: async (req) => { kf.push(req); return ++xid; }, sfx: () => {}, F: (fn, ...a) => F.push([fn, ...a]) };
+    const g = window.KellyMeshGold(k); g.init();
+    const Fs = fn => F.filter(x => x[0] === fn);
+    eq('classic: a token still held in meshGold moves across (already scored), a passed one does not', [g.data().tokens[3] && g.data().tokens[3].credited, !!g.data().tokens[4]], ['classic', false]);
+
+    // the gateway: mint token 1 to Bravo
+    const issuer = ED.signer(nacl.randomBytes(32)), L = G.Ledger(null, { ed: ED });
+    L.mint(B.n.key, { holderName: 'Bravo' }, issuer);
+    const t1 = hand(B, ME, 1, 1);
+
+    eq('off by default: a GOLD DM is just a text', [ms.gold.on, g.text({ from: B.n.num, text: t1 })], [false, false]);
+    ms.gold.on = true;
+    eq('on: Bravo hands token 1 to this node -> kept', g.text({ from: B.n.num, text: `here you go ${t1}`, snr: 6.5, hops: 1 }), true);
+    await tick(10);
+    const tok = g.data().tokens[1];
+    eq('... checked against the giver key, km from positions', [tok.seq, tok.verified, tok.fromName, tok.km], [1, 'node key', 'Bravo VK4ZB', 34.5]);
+    eq('... NO Holder XP yet: it waits for the ledger', Fs('token').length, 0);
+    eq('... reported to the gateway over P25: op gold, the text, the giver key', [kf[0].op, kf[0].t === G.toText(G.join(G.parse(t1).body, G.parse(t1).sig)), kf[0].k, kf[0].km, kf[0].call], ['gold', true, B.n.key, 34.5, 'VK4XXX']);
+    eq('... and the ledger takes that report', L.handoff(kf[0].t, kf[0].k, { toName: kf[0].tn, km: kf[0].km }).ok, true);
+    g.gatewayReply({ app: 'gold', ok: true, trophies: true, token: L.summary(L.token(1)) });
+    eq('the ledger says OK -> Holder XP once, with the giver key, owner, a NEW giver', Fs('token').map(x => [x[1].id, x[1].seq, x[1].km, x[1].key, x[1].owner, x[1].newGiver, x[1].givers]), [[1, 1, 34.5, B.n.key, 'VK4ZB', true, 1]]);
+    eq('... on the ledger', [g.data().tokens[1].reported.ok, !!g.data().tokens[1].credited], [true, true]);
+    eq('the same DM again: no second celebration', [g.text({ from: B.n.num, text: t1 }), Fs('token').length], [true, 1]);
+
+    const forged = (() => { const body = G.handoffBody({ id: 1, seq: 2, from: B.n.key, to: ME, ts: Math.floor(Date.now() / 1000) }); return G.toText(G.join(body, nacl.sign.detached(body, C.kp.secretKey))); })();
+    eq('a forged hand-off (claims Bravo, signed by Charlie): refused', [g.text({ from: B.n.num, text: forged }), g.data().tokens[1].seq], [false, 1]);
+    eq('a hand-off meant for someone else: ignored', g.text({ from: C.n.num, text: hand(C, Dl.n.key, 9, 1) }), false);
+    const stranger = station('Stranger', 0xeeee, -27, 152);
+    eq('from a node with no key in the contacts or the directory: refused, says why', [g.text({ from: stranger.n.num, text: hand(stranger, ME, 5, 1) }), /unknown node/.test(toasts[toasts.length - 1][1])], [false, true]);
+
+    // the giver's key from the P25X ham directory (Echo is no contact of ours)
+    eq('a hand-off from a directory-only ham: checked against the DIRECTORY key, kept', [g.accept(hand(E, ME, 7, 1)), g.data().tokens[7] && g.data().tokens[7].verified, g.data().tokens[7] && g.data().tokens[7].fromName], [true, 'directory key', 'Echo VK4EE']);
+    await tick(10);
+    eq('... reported with that key', kf[kf.length - 1].k, E.n.key);
+    g.gatewayReply({ app: 'gold', ok: true, trophies: false, why: 'Echo is not your contact', token: { id: 7, seq: 1 } });
+    eq('the ledger records it but says trophies: false (same owner, unknown owner...) -> no XP', [Fs('token').length, g.data().tokens[7].credited], [1, 'none']);
+    g.text({ from: B.n.num, text: hand(B, ME, 8, 1) }); await tick(10);
+    g.gatewayReply({ app: 'gold', ok: false, error: 'out of order', token: { id: 8, seq: 1 } });
+    eq('the ledger refuses (a fork, a bad signature) -> no XP, the user is told', [Fs('token').length, !g.data().tokens[8].credited, /refused/.test(toasts[toasts.length - 1][1])], [1, true, true]);
+    // no radio: the hand-off is kept, the XP waits; "Report to the ledger" asks again
+    const kfReq = k.kfRequest; k.kfRequest = async () => null;
+    g.text({ from: B.n.num, text: hand(B, ME, 11, 1) }); await tick(10);
+    k.kfRequest = kfReq;
+    eq('no P25 radio: kept, no XP', [!!g.data().tokens[11], Fs('token').length], [true, 1]);
+    g.render();
+    eq('... a "Report to the ledger" button', !!$('[data-report="11"]'), true);
+    $('[data-report="11"]').click(); await tick(10);
+    eq('... which reports it again', [kf[kf.length - 1].op, !!kf[kf.length - 1].t, kf[kf.length - 1].k], ['gold', true, B.n.key]);
+    g.gatewayReply({ app: 'gold', ok: true, trophies: true, token: { id: 11, seq: 1 } });
+    eq('... and the answer releases the XP (Bravo again: not a new giver)', Fs('token').slice(-1).map(x => [x[1].id, x[1].newGiver, x[1].givers]), [[11, false, 1]]);
+
+    g.render();
+    const pick = [...document.querySelectorAll('[data-id="1"] .mg-to option')].map(o => o.textContent.split(' · ')[0]);
+    eq('the picker: ham companions only (Charlie has no callsign)', pick.sort(), ['Bravo VK4ZB', 'Delta VK4DM']);
+    eq('render: the held token with its pass-on button', [$('#mg-card').hidden, !!$('[data-give="1"]'), /Token #1/.test($('#mg-body').innerHTML), /on the ledger/.test($('#mg-body').innerHTML)], [false, true, true, true]);
+    eq('render: classic history shown', /Classic history/.test($('#mg-body').innerHTML) && /Old Timer/.test($('#mg-body').innerHTML), true);
+
+    // pass it on to Delta: the node signs (the sim's real key), Kelly DMs it and reports it
+    $('[data-id="1"] .mg-to').value = String(Dl.n.num);
+    $('[data-give="1"]').click();
+    await tick(400);
+    const sent = dms[0] && G.parse(dms[0].text);
+    eq('pass it on: one DM to Delta with hand-off 2, from this node to Delta', sent ? [dms[0].to, sent.kind, sent.id, sent.seq, sent.from, sent.to] : null, [Dl.n.num, 'handoff', 1, 2, ME.slice(0, 12), Dl.n.key.slice(0, 12)]);
+    eq('... signed by the NODE: verifies against its key', sent && G.check(sent, ME, ED), true);
+    eq('... the gateway ledger accepts it, Delta holds the token', [L.handoff(dms[0].text, ME, {}).ok, L.token(1).holder], [true, Dl.n.key.slice(0, 12)]);
+    const rep = L.handoff(kf[kf.length - 1].t, kf[kf.length - 1].k, {});
+    eq('... reported by the giver too (the ledger: a duplicate)', [kf[kf.length - 1].k, rep.duplicate], [ME, true]);
+    eq('... no Pass It On XP before the ledger answers', Fs('gave').length, 0);
+    g.gatewayReply({ app: 'gold', ok: true, trophies: true, duplicate: true, token: L.summary(L.token(1)) });
+    eq('... the ledger says OK -> Pass It On once, Delta a NEW receiver', Fs('gave').map(x => [x[1].id, x[1].seq, x[1].key, x[1].owner, x[1].newReceiver, x[1].receivers]), [[1, 2, Dl.n.key, 'VK4DM', true, 1]]);
+    g.render();
+    eq('render: passed on, no second pass-on button', [/Passed on/.test($('#mg-body').innerHTML), !!$('[data-give="1"]')], [true, false]);
+
+    // a mint pasted in (holder = this node): Holder XP once the ledger says this node holds it
+    const mint = L.mint(ME, { holderName: 'VK4XXX' }, issuer);
+    eq('a minted token pasted: kept at hand-off 0', [g.accept(mint.text), g.data().tokens[mint.id].seq, g.data().tokens[mint.id].from], [true, 0, 'gateway']);
+    await tick(10);
+    eq('... the ledger is asked (no XP yet)', [kf[kf.length - 1].op, kf[kf.length - 1].id, Fs('token').length], ['gold', mint.id, 2]);
+    g.gatewayReply({ app: 'gold', ok: true, token: L.summary(L.token(mint.id)) });
+    eq('... it says you hold it -> Holder XP (the gateway: a new giver)', Fs('token').slice(-1).map(x => [x[1].id, x[1].seq, x[1].newGiver, x[1].givers]), [[mint.id, 0, true, 2]]);
+    eq('a token minted for someone else: refused', g.accept(L.mint(C.n.key, {}, issuer).text), false);
+    const nd = dms.length; await g.give(mint.id, C.n.num);
+    eq('give() to a non-ham (Charlie): refused, nothing sent', [dms.length - nd, /isn't a ham's companion/.test(toasts[toasts.length - 1][1])], [0, true]);
+    // token 11 straight back to Bravo (A->B->A): the report's answer never comes; a status answer settles it
+    k.kfRequest = async () => null;
+    await g.give(11, B.n.num); await tick(400);
+    k.kfRequest = kfReq;
+    eq('back to Bravo: sent, no XP while the ledger is unasked', [G.parse(dms[dms.length - 1].text).seq, Fs('gave').length], [2, 1]);
+    g.render(); $('[data-ask="11"]').click(); await tick(10);
+    g.gatewayReply({ app: 'gold', ok: true, token: { id: 11, seq: 2, holder: B.n.key.slice(0, 12) }, last: [[1, 'VK4XXX', null, 1, 1], [2, 'Bravo VK4ZB', null, 2, 0]] });
+    eq('... status row trophies 0 -> no Pass It On XP, settled', [Fs('gave').length, g.data().tokens[11].gave.credited], [1, 'none']);
+
+    // ask the gateway about token 1
+    $(`[data-ask="1"]`).click(); await tick(10);
+    eq('ask: KF {op: gold, id}', [kf[kf.length - 1].op, kf[kf.length - 1].id], ['gold', 1]);
+    g.gatewayReply({ app: 'gold', ok: true, token: L.summary(L.token(1)), last: L.token(1).history.map(h => [h.seq, h.toName || h.to, h.km ?? null, h.ts]) });
+    g.render();
+    eq('... the ledger view: Delta holds it, the holder chain', [/Ledger:/.test($('#mg-body').innerHTML), /0: Bravo → 1: VK4XXX/.test($('#mg-body').innerHTML)], [true, true]);
+    eq('stored per node key in meshGold2 (another node sees none of these)', Object.keys(mem.meshGold2 ? JSON.parse(mem.meshGold2) : {}), [ME.slice(0, 12)]);
+    eq('the classic meshGold is never written', mem.meshGold === classicJson, true);
+
+    // demo: a session-only book -- nothing stored, nothing reported, no XP
+    const before = mem.meshGold2, nkf = kf.length, nF = F.length;
+    demo = true;
+    eq('demo: a hand-off is kept in the demo book', [g.text({ from: B.n.num, text: hand(B, ME, 12, 1) }), !!g.data().tokens[12]], [true, true]);
+    await tick(10);
+    eq('demo: nothing stored, no KF, no XP', [mem.meshGold2 === before, kf.length - nkf, F.length - nF], [true, 0, 0]);
+    demo = false;
+    eq('demo over: the real book never saw it', [!!g.data().tokens[12], !!g.data().tokens[1]], [false, true]);
+  } catch (e) { out.push(`<span class="bad">FAIL exception: ${esc(e.stack || e)}</span>`); fails.push('exception'); }
+  out.push(`RESULT: ${fails.length ? 'FAIL ' + fails.join(', ') : 'ALL PASS'}`);
+  $('#out').innerHTML = out.join('\n');
+})();
+</script>
+</body></html>

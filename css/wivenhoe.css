@@ -1,0 +1,34 @@
+/* Kelly Page -- the Wivenhoe pumped-storage trainer's own drawing (js/wivenhoeui.js). Everything the trainers share --
+ * plant switch, controls, annunciator, link card, operator tracker, inspector, points, challenges, breakers and the
+ * grid line on the mimic -- is css/scadakit.css. Turbines and flow particles move only while water moves. */
+.wv-root { --wv-water: #1fb6ff; --wv-exp: #39ff88; --wv-dead: #4b5875; }
+.wv-mimic .terrain { fill: #0c1426; stroke: #1c2a4a; stroke-width: 2; }
+.wv-mimic .rock { fill: #08101f; }
+.wv-mimic .water { fill: url(#wv-water); opacity: .9; }
+.wv-mimic .basin { fill: none; stroke: #2c3e68; stroke-width: 3; }
+.wv-mimic .dam { fill: #26324f; stroke: #3b4f7d; stroke-width: 2; }
+.wv-mimic .limit { stroke-width: 1.5; stroke-dasharray: 6 5; opacity: .45; }
+.wv-mimic .limit.hi { stroke: var(--amber); } .wv-mimic .limit.lo { stroke: var(--red); }
+.wv-mimic .limit.on { opacity: 1; stroke-width: 2.5; }
+.wv-mimic .tunnel { fill: none; stroke: #1a2747; stroke-width: 16; stroke-linecap: round; }
+.wv-mimic .tunnel-in { fill: none; stroke: #0e2a52; stroke-width: 9; stroke-linecap: round; }
+.wv-mimic [data-parts] circle { fill: #8fe3ff; filter: drop-shadow(0 0 3px #1fb6ff); }
+.wv-mimic .cavern { fill: #0a1124; stroke: #2c3e68; stroke-width: 2; stroke-dasharray: 5 4; }
+.wv-mimic .casing { fill: #0d1a33; stroke: var(--wv-dead); stroke-width: 3; transition: stroke .3s; }
+.wv-mimic .runner path { fill: none; stroke: #7f93bd; stroke-width: 3.5; stroke-linecap: round; }
+.wv-mimic .runner circle { fill: #7f93bd; }
+.wv-mimic .wv-unit.s-gen .casing, .wv-mimic .wv-unit.s-gen-start .casing { stroke: var(--wv-exp); filter: drop-shadow(0 0 6px rgba(57, 255, 136, .6)); }
+.wv-mimic .wv-unit.s-pump .casing, .wv-mimic .wv-unit.s-pump-start .casing { stroke: var(--wv-water); filter: drop-shadow(0 0 6px rgba(31, 182, 255, .6)); }
+.wv-mimic .wv-unit.na .casing { stroke: var(--red); }
+.wv-mimic .wv-unit.s-gen .runner path, .wv-mimic .wv-unit.s-gen .runner circle { stroke: var(--wv-exp); fill: none; }
+.wv-mimic .wv-unit.s-pump .runner path { stroke: #8fe3ff; }
+.wv-mimic .chip { font: 800 13px var(--ui); letter-spacing: .1em; fill: var(--dim); }
+.wv-mimic .wv-unit.s-gen .chip { fill: var(--wv-exp); } .wv-mimic .wv-unit.s-pump .chip { fill: #8fe3ff; } .wv-mimic .wv-unit.na .chip { fill: var(--red); }
+.wv-mimic .aux rect { fill: #0a1124; stroke: #2c3e68; stroke-width: 2; }
+
+.wv-units { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.wv-state { font: 800 12px var(--ui); letter-spacing: .1em; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line2); color: var(--dim); }
+.wv-state.s-gen, .wv-state.s-gen-start { color: var(--good); border-color: var(--good); }
+.wv-state.s-pump, .wv-state.s-pump-start { color: #8fe3ff; border-color: #1fb6ff; }
+.wv-state.na { color: var(--red); border-color: var(--red); }
+.wv-ucard .sk-sl { margin: 12px 0 6px; }

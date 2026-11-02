@@ -1,0 +1,313 @@
+{
+ "_": "MeshPRS gateway vectors: frame -> the APRS-IS line, or the spec §15.2 drop reason, through the STATELESS part of spec §10.1 (steps 1-4: decode, loop and gating, trust, position validity) and the §10.3 rendering. Replay, duplicate, interval, queue and rate need a clock and are tested with the gate. 'config' is merged over the top-level config. rxAt = 2026-10-29 10:30:00 UTC.",
+ "config": {
+  "igate": "VK4XXX-10",
+  "rxAt": 1793269800000,
+  "bindings": [
+   {
+    "call": "VK4ABC",
+    "key": "02F9523D11111111111111111111111111111111111111111111111111111111"
+   },
+   {
+    "call": "VK4XXX",
+    "key": "A1B2C3D422222222222222222222222222222222222222222222222222222222"
+   }
+  ],
+  "records": [
+   {
+    "seq": 44,
+    "msgno": 7,
+    "toHash": "75E7",
+    "addressee": "VK4XXX-9",
+    "sender": "VK4ABC",
+    "id": "7"
+   }
+  ]
+ },
+ "vectors": [
+  {
+   "id": "gw-001",
+   "spec": "§5.2",
+   "about": "required position example",
+   "hex": "50 00 2A 00 00 12 9F 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 3E 00 4D 6F 62 69 6C 65",
+   "out": "VK4ABC>APZKPG,qAO,VK4XXX-10:!2728.08S/15301.41E>Mobile"
+  },
+  {
+   "id": "gw-002",
+   "spec": "§5.2",
+   "about": "SSID from the frame; CSE then /A=",
+   "hex": "50 00 2B 05 80 A6 53 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 3E 03 2D 00 40 3C",
+   "out": "VK4ABC-9>APZKPG,qAO,VK4XXX-10:!2728.08S/15301.41E>090/032/A=000148"
+  },
+  {
+   "id": "gw-003",
+   "spec": "§10.2",
+   "about": "a retry renders the same line (duplicates are the gate's job)",
+   "hex": "51 00 2A 00 00 12 9F 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 3E 00 4D 6F 62 69 6C 65",
+   "out": "VK4ABC>APZKPG,qAO,VK4XXX-10:!2728.08S/15301.41E>Mobile"
+  },
+  {
+   "id": "gw-004",
+   "spec": "§5.1",
+   "about": "MSG flag gives '='",
+   "hex": "50 00 2A 00 00 12 9F 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 3E 40 4D 6F 62 69 6C 65",
+   "out": "VK4ABC>APZKPG,qAO,VK4XXX-10:=2728.08S/15301.41E>Mobile"
+  },
+  {
+   "id": "gw-005",
+   "spec": "§5.1",
+   "about": "ambiguity 2 blanks the tenths and hundredths",
+   "hex": "50 00 2A 00 00 12 9F 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 3E 10 4D 6F 62 69 6C 65",
+   "out": "VK4ABC>APZKPG,qAO,VK4XXX-10:!2728.  S/15301.  E>Mobile"
+  },
+  {
+   "id": "gw-006",
+   "spec": "§10.3",
+   "about": "text after the symbol (extension + comment) trimmed to 43",
+   "hex": "50 00 2B 05 80 A6 53 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 3E 03 2D 00 40 3C 20 20 4C 6F 6E 67 20 63 6F 6D 6D 65 6E 74 20 74 68 61 74 20 72 75 6E 73 20 77 65 6C 6C 20 70 61 73 74 20 74 68 65 20 66 6F 72 74 79 20 74 68 72 65 65 20 6C 69 6D 69 74",
+   "out": "VK4ABC-9>APZKPG,qAO,VK4XXX-10:!2728.08S/15301.41E>090/032/A=000148Long comment that runs well"
+  },
+  {
+   "id": "gw-007",
+   "spec": "§5.3",
+   "about": "0,0 is refused",
+   "hex": "50 00 2A 00 00 12 9F 5D 8E 02 F9 52 3D 00 00 00 00 00 00 2F 3E 00 4D 6F 62 69 6C 65",
+   "drop": "0,0"
+  },
+  {
+   "id": "gw-010",
+   "spec": "§4.3",
+   "about": "a message without K is mesh-only (decision 0004)",
+   "hex": "40 01 2C 00 00 12 9F 5D 8E 05 81 29 F1 B3 8E 07 4D 65 65 74 20 61 74 20 49 70 73 77 69 63 68 20 31 33 30 30",
+   "drop": "no key"
+  },
+  {
+   "id": "gw-011",
+   "spec": "§6.5",
+   "about": "the message with K",
+   "hex": "50 01 2C 00 00 12 9F 5D 8E 02 F9 52 3D 05 81 29 F1 B3 8E 07 4D 65 65 74 20 61 74 20 49 70 73 77 69 63 68 20 31 33 30 30",
+   "out": "VK4ABC>APZKPG,qAO,VK4XXX-10::VK4XXX-9 :Meet at Ipswich 1300{7"
+  },
+  {
+   "id": "gw-012",
+   "spec": "§6.5",
+   "about": "msgno 0: no {ID",
+   "hex": "50 01 2C 00 00 12 9F 5D 8E 02 F9 52 3D 05 81 29 F1 B3 8E 00 4D 65 65 74 20 61 74 20 49 70 73 77 69 63 68 20 31 33 30 30",
+   "out": "VK4ABC>APZKPG,qAO,VK4XXX-10::VK4XXX-9 :Meet at Ipswich 1300"
+  },
+  {
+   "id": "gw-020",
+   "spec": "§6.2",
+   "about": "an ack without K, matching our record, from the bound addressee",
+   "hex": "40 02 11 05 81 29 F1 B3 8E 2C 07 75 E7",
+   "out": "VK4XXX-9>APZKPG,qAO,VK4XXX-10::VK4ABC   :ack7"
+  },
+  {
+   "id": "gw-021",
+   "spec": "§6.2",
+   "about": "rej",
+   "hex": "40 02 11 05 81 29 F1 B3 8E 2C 87 75 E7",
+   "out": "VK4XXX-9>APZKPG,qAO,VK4XXX-10::VK4ABC   :rej7"
+  },
+  {
+   "id": "gw-022",
+   "spec": "§6.2",
+   "about": "an ack matching no record",
+   "hex": "40 02 11 05 81 29 F1 B3 8E 2D 07 75 E7",
+   "drop": "unknown ack"
+  },
+  {
+   "id": "gw-023",
+   "spec": "§6.2",
+   "about": "an ack from an unbound station is untrusted even with a record",
+   "hex": "40 02 11 05 81 29 F1 B3 8E 2C 07 75 E7",
+   "config": {
+    "bindings": [
+     {
+      "call": "VK4ABC",
+      "key": "02F9523D11111111111111111111111111111111111111111111111111111111"
+     }
+    ]
+   },
+   "drop": "untrusted"
+  },
+  {
+   "id": "gw-024",
+   "spec": "§6.2",
+   "about": "an ack with K whose prefix doesn't match",
+   "hex": "50 02 11 05 81 29 F1 B3 8E DE AD BE EF 2C 07 75 E7",
+   "drop": "key mismatch"
+  },
+  {
+   "id": "gw-030",
+   "spec": "§7.3",
+   "about": "telemetry values without K",
+   "hex": "40 03 2A 04 9B C4 93 5D 8E 00 9F 9C 22 00 C8 63 80",
+   "drop": "no key"
+  },
+  {
+   "id": "gw-031",
+   "spec": "§7.3",
+   "about": "T# from the header seq",
+   "hex": "50 03 2A 04 9B C4 93 5D 8E 02 F9 52 3D 00 9F 9C 22 00 C8 63 80",
+   "out": "VK4ABC-3>APZKPG,qAO,VK4XXX-10:T#042,156,034,000,200,099,10000000"
+  },
+  {
+   "id": "gw-032",
+   "spec": "§7.3",
+   "about": "absent analogs are empty",
+   "hex": "50 03 2A 04 9B C4 93 5D 8E 02 F9 52 3D 00 81 9C 80",
+   "out": "VK4ABC-3>APZKPG,qAO,VK4XXX-10:T#042,156,,,,,10000000"
+  },
+  {
+   "id": "gw-033",
+   "spec": "§7.3",
+   "about": "PARM as a message to itself",
+   "hex": "50 03 2B 04 9B C4 93 5D 8E 02 F9 52 3D 01 42 61 74 74 65 72 79 2C 4E 6F 69 73 65 2C 54 58 20 61 69 72 2C 52 53 53 49 2C 53 4E 52 2C 4C 6F 77 42 61 74",
+   "out": "VK4ABC-3>APZKPG,qAO,VK4XXX-10::VK4ABC-3 :PARM.Battery,Noise,TX air,RSSI,SNR,LowBat"
+  },
+  {
+   "id": "gw-034",
+   "spec": "§7.2",
+   "about": "a profile ID has no registry yet (Q28)",
+   "hex": "50 03 2A 04 9B C4 93 5D 8E 02 F9 52 3D 05 01 00",
+   "drop": "not gated"
+  },
+  {
+   "id": "gw-035",
+   "spec": "§10.3",
+   "about": "no digital byte: bits written 00000000 (decision 0017)",
+   "hex": "50 03 2A 04 9B C4 93 5D 8E 02 F9 52 3D 00 01 9C",
+   "out": "VK4ABC-3>APZKPG,qAO,VK4XXX-10:T#042,156,,,,,00000000"
+  },
+  {
+   "id": "gw-040",
+   "spec": "§8.2",
+   "about": "object without TS: receive time to the minute",
+   "hex": "50 05 30 00 00 12 9F 5D 8E 02 F9 52 3D 61 49 50 53 52 50 54 DC B5 D8 42 A2 6C 2F 72 31 34 37 2E 30 30 30 4D 48 7A 20 2D 30 36 30",
+   "out": "VK4ABC>APZKPG,qAO,VK4XXX-10:;IPSRPT   *291030z2737.53S/15245.98Er147.000MHz -060"
+  },
+  {
+   "id": "gw-041",
+   "spec": "§8.2",
+   "about": "object TS 30 min before receipt is used",
+   "hex": "50 05 30 00 00 12 9F 5D 8E 02 F9 52 3D 65 49 50 53 52 50 54 DC B5 D8 42 A2 6C 2F 72 20 19 E3 6A 31 34 37 2E 30 30 30 4D 48 7A 20 2D 30 36 30",
+   "out": "VK4ABC>APZKPG,qAO,VK4XXX-10:;IPSRPT   *291000z2737.53S/15245.98Er147.000MHz -060"
+  },
+  {
+   "id": "gw-042",
+   "spec": "§8.2",
+   "about": "object TS 2 h off is ignored",
+   "hex": "50 05 30 00 00 12 9F 5D 8E 02 F9 52 3D 65 49 50 53 52 50 54 DC B5 D8 42 A2 6C 2F 72 A4 03 E3 6A 31 34 37 2E 30 30 30 4D 48 7A 20 2D 30 36 30",
+   "out": "VK4ABC>APZKPG,qAO,VK4XXX-10:;IPSRPT   *291030z2737.53S/15245.98Er147.000MHz -060"
+  },
+  {
+   "id": "gw-043",
+   "spec": "§8.2",
+   "about": "killed object",
+   "hex": "50 05 30 00 00 12 9F 5D 8E 02 F9 52 3D 60 49 50 53 52 50 54 DC B5 D8 42 A2 6C 2F 72 31 34 37 2E 30 30 30 4D 48 7A 20 2D 30 36 30",
+   "out": "VK4ABC>APZKPG,qAO,VK4XXX-10:;IPSRPT   _291030z2737.53S/15245.98Er147.000MHz -060"
+  },
+  {
+   "id": "gw-050",
+   "spec": "§8.4",
+   "about": "plain status",
+   "hex": "50 09 33 00 00 12 9F 5D 8E 02 F9 52 3D 08 4E 65 74 20 63 6F 6E 74 72 6F 6C 20 74 6F 6E 69 67 68 74",
+   "out": "VK4ABC>APZKPG,qAO,VK4XXX-10:>Net control tonight"
+  },
+  {
+   "id": "gw-051",
+   "spec": "§8.4",
+   "about": "emergency with position",
+   "hex": "50 09 34 00 00 12 9F 5D 8E 02 F9 52 3D 87 35 EF D8 14 D1 6C 56 65 68 69 63 6C 65 20 72 6F 6C 6C 6F 76 65 72",
+   "out": "VK4ABC>APZKPG,qAO,VK4XXX-10:!2728.08S/15301.41E>EMERGENCY Vehicle rollover"
+  },
+  {
+   "id": "gw-052",
+   "spec": "§8.4",
+   "about": "emergency cancelled, no position",
+   "hex": "50 09 33 00 00 12 9F 5D 8E 02 F9 52 3D 09 4E 65 74 20 63 6F 6E 74 72 6F 6C 20 74 6F 6E 69 67 68 74",
+   "out": "VK4ABC>APZKPG,qAO,VK4XXX-10:>EMERGENCY CANCELLED Net control tonight"
+  },
+  {
+   "id": "gw-053",
+   "spec": "§8.4",
+   "about": "code 8 with a position: the position is not rendered (decision 0017)",
+   "hex": "50 09 33 00 00 12 9F 5D 8E 02 F9 52 3D 88 35 EF D8 14 D1 6C 4E 65 74 20 63 6F 6E 74 72 6F 6C 20 74 6F 6E 69 67 68 74",
+   "out": "VK4ABC>APZKPG,qAO,VK4XXX-10:>Net control tonight"
+  },
+  {
+   "id": "gw-060",
+   "spec": "§6.7",
+   "about": "queries are never gated",
+   "hex": "50 07 12 05 81 29 F1 B3 8E A1 B2 C3 D4 81 00 00 12 9F 5D 8E",
+   "drop": "not gated"
+  },
+  {
+   "id": "gw-061",
+   "spec": "§9.3",
+   "about": "G = 1 never goes back to APRS-IS",
+   "hex": "60 01 A7 05 34 EB 0D B7 0E 00 00 12 9F 5D 8E 4B 53 65 65 20 79 6F 75 20 61 74 20 74 68 65 20 68 61 6D 66 65 73 74",
+   "drop": "looped"
+  },
+  {
+   "id": "gw-062",
+   "spec": "§9.3",
+   "about": "gating 1 = NOGATE",
+   "hex": "54 00 2A 00 00 12 9F 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 3E 00 4D 6F 62 69 6C 65",
+   "drop": "nogate"
+  },
+  {
+   "id": "gw-063",
+   "spec": "§9.3",
+   "about": "gating 3 is treated as 1",
+   "hex": "5C 00 2A 00 00 12 9F 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 3E 00 4D 6F 62 69 6C 65",
+   "drop": "nogate"
+  },
+  {
+   "id": "gw-064",
+   "spec": "§9.3",
+   "about": "gating 2 = test, no test server",
+   "hex": "58 00 2A 00 00 12 9F 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 3E 00 4D 6F 62 69 6C 65",
+   "drop": "test"
+  },
+  {
+   "id": "gw-065",
+   "spec": "§11",
+   "about": "gating 2 to a private test server",
+   "hex": "58 00 2A 00 00 12 9F 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 3E 00 4D 6F 62 69 6C 65",
+   "config": {
+    "testServer": true
+   },
+   "out": "VK4ABC>APZKPG,qAO,VK4XXX-10:!2728.08S/15301.41E>Mobile"
+  },
+  {
+   "id": "gw-070",
+   "spec": "§4.3",
+   "about": "a source with no binding",
+   "hex": "50 09 33 00 00 A2 99 C3 8E 02 F9 52 3D 08 4E 65 74 20 63 6F 6E 74 72 6F 6C 20 74 6F 6E 69 67 68 74",
+   "drop": "untrusted"
+  },
+  {
+   "id": "gw-071",
+   "spec": "§4.3",
+   "about": "a prefix that isn't the bound key's",
+   "hex": "50 09 33 00 00 12 9F 5D 8E DE AD BE EF 08 4E 65 74 20 63 6F 6E 74 72 6F 6C 20 74 6F 6E 69 67 68 74",
+   "drop": "key mismatch"
+  },
+  {
+   "id": "gw-072",
+   "spec": "§4.2",
+   "about": "not an amateur callsign",
+   "hex": "50 09 33 00 00 02 7A 2E 8C 02 F9 52 3D 08 4E 65 74 20 63 6F 6E 74 72 6F 6C 20 74 6F 6E 69 67 68 74",
+   "drop": "bad callsign"
+  },
+  {
+   "id": "gw-073",
+   "spec": "§9.5",
+   "about": "decode drops come first",
+   "hex": "90 00 2A 00 00 12 9F 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 3E 00 4D 6F 62 69 6C 65",
+   "drop": "unknown version"
+  }
+ ]
+}

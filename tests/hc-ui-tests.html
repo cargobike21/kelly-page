@@ -1,0 +1,123 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Ham Contacts: shell tests</title>
+<!-- Ham Contacts shell (js/hc-ui.js): the awards hooks -- on(ev, fn) for mesh.js, setGwCall (an hdir `you`), and the demo
+     world's scripted Handshakes ('mutual', incl. the station that is yours). Real-time (~20 s).
+     Run: msedge --headless=new --allow-file-access-from-files --virtual-time-budget=60000 --dump-dom
+          file:///.../kelly-page/tests/hc-ui-tests.html   -> RESULT: ALL PASS -->
+<link rel="stylesheet" href="../css/hc.css">
+<script src="../vendor/tweetnacl-1.0.3/nacl-fast.min.js"></script>
+<script src="../js/meshqr.js"></script>
+<script src="../js/hc-core.js"></script>
+<script src="../js/hc-service.js"></script>
+<script src="../js/hc-demo.js"></script>
+<script src="../js/hc-contacts.js"></script>
+<script src="../js/hc-share.js"></script>
+<script src="../js/hc-dir.js"></script>
+<script src="../js/hc-ui.js"></script>
+</head><body>
+<div id="hc-root"></div>
+<pre id="out">running…</pre>
+<script>
+(async () => {
+  const out = [], fails = [];
+  const t = (name, ok, extra) => { out.push(`${ok ? 'ok  ' : 'FAIL'} ${name}${ok || extra === undefined ? '' : ' ' + JSON.stringify(extra).slice(0, 300)}`); if (!ok) fails.push(name); };
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const until = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (fn()) return true; } catch { /* */ } await sleep(50); } return false; };
+  try {
+    const HC = window.KellyHC;
+    const mem = new Map(), store = { get: (k, d) => (mem.has(k) ? JSON.parse(mem.get(k)) : d), set: (k, v) => mem.set(k, JSON.stringify(v)) };
+    let bumps = 0, saves = 0;
+    window.KellyHamCalls = { bump: () => { bumps++; }, callOf: () => null, label: (k, n) => n, fromDir() {} };
+    const settings = { myCall: 'vk4xyz' };
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, ch => `&#${ch.charCodeAt(0)};`);
+    const kfSent = [];
+    const k = { $: s => document.querySelector(s), esc, store, toast() {}, settings, save: () => { saves++; }, fmtAgo: ms => `${Math.round((Date.now() - ms) / 1000)} s`,
+      myPos: () => null, distKm: () => 1, nodes: () => [], myNum: () => null, me: () => null, session: () => null, online: () => false,
+      isMeshCore: () => true, isSimLink: () => false, kfRequest: o => { kfSent.push(o); return Promise.resolve(1); }, openTrace: () => ({ ok: true }), openChat() {}, showTab() { tabs++; } };
+    let tabs = 0;
+    const u = window.KellyHamContactsUI(k);
+    u.init();
+    const c = u._c;
+    t('made', !!u && typeof u.on === 'function' && !!c);
+
+    // on(ev, fn) -> off: a pass-through to the bus
+    const seen = [];
+    const off = u.on('card', p => seen.push(p));
+    c.bus.emit('card', { how: 'copy', at: 1 });
+    t('on: gets bus events', seen.length === 1 && seen[0].how === 'copy');
+    t('on: returns off', typeof off === 'function');
+    off(); c.bus.emit('card', { how: 'qr', at: 2 });
+    t('off: stops them', seen.length === 1);
+
+    // setGwCall: the gateway's callsign for our radio
+    c.setGwCall('vk4xyz');
+    t('setGwCall: stored upper case, saved, bumped', settings.gwCall === 'VK4XYZ' && saves === 1 && bumps >= 1, { settings, saves, bumps });
+    const b1 = bumps; c.setGwCall('VK4XYZ');
+    t('setGwCall: same again -> no save, still bumps', saves === 1 && bumps === b1 + 1, { saves, bumps });
+    c.setGwCall('not a call!');
+    t('setGwCall: junk ignored', settings.gwCall === 'VK4XYZ' && saves === 1);
+    c.setGwCall(null);
+    t('setGwCall: null -> cleared + saved', settings.gwCall === '' && saves === 2);
+    c.setGwCall('VK4XYZ');
+
+    // demo: scripted Handshakes
+    const muts = []; u.on('mutual', p => muts.push(p));
+    c.setDemo(true);
+    t('demo on', c.demo() && !!c.demoWorld());
+    t('demo: no KF', c.kfRequest({ op: 'hdir' }, 'x') === null);
+    await until(() => c.svc.contacts().length >= 10, 8000);
+    const w = c.demoWorld(), yours = w.stations.find(s => s.yours);
+    t('demo: yours named with myCall', yours && yours.name === 'VK4XYZ Home node', yours && yours.name);
+    t('demo: yours on the radio', c.svc.contacts().some(r => r.key === yours.key));
+    const zzb = w.stations.find(s => s.name === 'VK4ZZB Springfield'), zze = w.stations.find(s => s.name === 'VK4ZZE Toowoomba');
+    const p1 = c.openTrace(zzb.key, 'ping');
+    t('demo ping: nothing sent, says an answer comes', p1.ok === false && /No ping is sent/.test(p1.reason) && /answers/.test(p1.reason), p1);
+    const p2 = c.openChat(yours.key);
+    t('demo message to yours: says it never scores', p2.ok === false && /never scores/.test(p2.reason), p2);
+    const p3 = c.openTrace(zze.key, 'ping');
+    t('demo ping to a ham who has not added you', p3.ok === false && /hasn't added you/.test(p3.reason), p3);
+    const p4 = c.openTrace(zzb.key, 'trace');
+    t('demo trace: still refused as before', p4.ok === false && /Trace Route needs your real node/.test(p4.reason));
+    c.setGwCall('VK4ZZZ');
+    t('demo: setGwCall ignored', settings.gwCall === 'VK4XYZ');
+    await until(() => muts.length >= 2, 9000);
+    const m1 = muts.find(m => m.key === zzb.key), m2 = muts.find(m => m.key === yours.key);
+    t('demo: ping answered -> mutual ack', m1 && m1.how === 'ack' && m1.type === 1 && m1.demo === true && m1.name === zzb.name, muts);
+    t('demo: yours answered -> mutual, flagged yours', m2 && m2.how === 'message' && m2.yours === true && m2.demo === true, muts);
+    t('demo: nothing from the ham who has not added you', !muts.some(m => m.key === zze.key));
+    // an add of a scripted ham: it says hello back
+    const zzf = w.stations.find(s => s.name === 'VK4ZZF Redbank');
+    let r; for (let i = 0; i < 6; i++) { r = await c.svc.add({ key: zzf.key, type: 1, name: zzf.name }); if (r.ok || r.code !== 'timeout') break; }
+    t('demo add ok', r && r.ok, r);
+    await until(() => muts.some(m => m.key === zzf.key), 9000);
+    t('demo: add answered -> mutual message', muts.some(m => m.key === zzf.key && m.how === 'message' && m.demo === true), muts);
+    // the QR swap's DM in the demo: nothing sent, the world pokes the station (a scripted answer comes as 'mutual')
+    const zzd = w.stations.find(s => s.name === 'VK4ZZD Kenmore');
+    const dm = await c.sendDm(zzd.key, '73 de VK4XYZ, QR swap');
+    t('demo sendDm: nothing sent, the world answers', dm.ok === true && dm.demo === true && dm.answers === true, dm);
+    await until(() => muts.some(m => m.key === zzd.key && m.how === 'ack'), 9000);
+    t('demo sendDm: the answer is a mutual ack', muts.some(m => m.key === zzd.key && m.how === 'ack' && m.demo === true), muts.slice(-3));
+    // window.kellyHCImport: the LoRa Mesh 📷 Scan hook -> this tab + the card preview, nothing added
+    t('kellyHCImport exposed', typeof window.kellyHCImport === 'function');
+    const zzg = w.stations.find(s => s.name === 'VK4ZZG Gold Coast'), nBefore = c.svc.contacts().length;
+    const link = HC.qrLink({ key: zzg.key, type: 1, name: zzg.name });
+    const took = window.kellyHCImport(link);
+    await sleep(300);
+    const pasteBox = document.querySelector('#hc-share [data-sh="paste"]');
+    t('kellyHCImport: shows the tab, fills the preview', took === true && tabs === 1 && pasteBox && pasteBox.value === link && /Add to my radio/.test(document.querySelector('#hc-share [data-sh="prev"]').textContent), { took, tabs });
+    t('kellyHCImport: nothing added', c.svc.contacts().length === nBefore && !(c.svc.get(zzg.key) || {}).onRadio);
+    // demo off: no more answers
+    const n = muts.length;
+    const zzc = w.stations.find(s => s.name === 'VK4ZZC Mobile');
+    c.openTrace(zzc.key, 'ping'); c.setDemo(false);
+    await sleep(6500);
+    t('demo off: a pending answer never comes', muts.length === n, muts.length - n);
+    t('nothing saved to the KF path', kfSent.length === 0, kfSent);
+    const dmOff = await c.sendDm('ab'.repeat(32), 'x');
+    t('live sendDm with no such contact: refused, nothing sent', dmOff.ok === false && /no chat/.test(dmOff.reason), dmOff);
+  } catch (e) { t('no exception', false, String(e && e.stack || e)); }
+  out.push(`RESULT: ${fails.length ? 'FAIL ' + fails.join(', ') : 'ALL PASS'}`);
+  document.getElementById('out').textContent = out.join('\n');
+})();
+</script>
+</body></html>

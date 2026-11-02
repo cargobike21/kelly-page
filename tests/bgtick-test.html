@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>bgtick test</title></head>
+<body>
+<p>Counts a plain 1 s setInterval and a 1 s KellyBgTick side by side. Used by tests/bgtick-cdp.js with the tab in the background.</p>
+<script src="../js/bgtick.js"></script>
+<script>
+  window.counts = { plain: 0, bg: 0, gapsPlain: [], gapsBg: [] };
+  let lp = Date.now(), lb = Date.now();
+  setInterval(() => { const n = Date.now(); counts.plain++; counts.gapsPlain.push(n - lp); lp = n; }, 1000);
+  window.KellyBgTick(() => { const n = Date.now(); counts.bg++; counts.gapsBg.push(n - lb); lb = n; }, 1000);
+</script>
+</body></html>

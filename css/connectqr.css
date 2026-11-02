@@ -1,0 +1,37 @@
+/* Kelly Page -- Connect a phone (js/connectqr.js): the PC card dialog, the switch warnings, the phone banner and the printed card */
+.cqr { position: fixed; inset: 0; z-index: 86; background: rgba(2, 5, 12, .75); display: grid; place-items: center; padding: 16px; }
+.cqr[hidden] { display: none; }
+.cqr-box { background: var(--panel-solid); border: 1px solid var(--line2); border-radius: 16px; padding: 16px; width: min(420px, 100%); max-height: 100%; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 10px; }
+.cqr-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cqr-h b { font: 700 15px var(--display); letter-spacing: .06em; color: var(--cyan); overflow-wrap: anywhere; }
+.cqr-box p { margin: 0; }
+.cqr-box .fld, .cqr-box .fld select { width: 100%; }
+.cqr-note { color: var(--dim); }
+.cqr-warn { color: var(--amber, #ffb347); }
+.cqr-addr { font-family: var(--mono, monospace); overflow-wrap: anywhere; color: var(--dim); }
+.cqr-qr[hidden] { display: none; }
+.cqr-code { display: block; width: min(300px, 100%); height: auto; margin: 0 auto; background: #fff; border-radius: 6px; image-rendering: pixelated; }
+.cqr-new { color: var(--cyan); }
+.cqr-steps { margin: 0; padding-left: 1.3em; }
+.cqr-box .btn { min-height: 44px; }
+
+/* on a phone with no radio link: one quiet bar at the bottom, no animation */
+.cqr-banner { position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 84; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 12px; border-radius: 12px; background: var(--panel-solid); border: 1px solid var(--cyan); box-shadow: 0 6px 24px rgba(0, 0, 0, .5); }
+.cqr-banner[hidden] { display: none; }
+.cqr-banner span { flex: 1 1 12em; }
+.cqr-banner .btn { min-height: 44px; }
+
+/* 🖨 Print card: only the card prints, black on white */
+#cqr-print { display: none; }
+@media print {
+  body.cqr-printing > *:not(#cqr-print) { display: none !important; }
+  body.cqr-printing { background: #fff !important; color: #000 !important; }
+  body.cqr-printing #cqr-print { display: block; font: 14pt system-ui, sans-serif; color: #000; text-align: center; padding: 1cm; }
+  #cqr-print h1 { font-size: 20pt; margin: 0 0 .5cm; }
+  #cqr-print img { width: 8cm; height: 8cm; image-rendering: pixelated; }
+  #cqr-print ol { text-align: left; display: inline-block; margin: .5cm auto; }
+  #cqr-print .cqr-p-addr { font-family: monospace; font-size: 11pt; word-break: break-all; }
+  #cqr-print .cqr-p-warn { font-size: 10pt; }
+}

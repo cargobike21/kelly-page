@@ -1,0 +1,6 @@
+# Kelly Page Pi image. nRF52 LoRa boards (RAK / Adafruit 239a, Seeed 2886, Nordic 1915) are mesh nodes -> /dev/kelly-mesh;
+# any other USB serial lead is the radio -> /dev/kelly-radio (same split as bridge/install-pi.sh).
+SUBSYSTEM=="tty", KERNEL=="ttyUSB[0-9]*|ttyACM[0-9]*", ENV{ID_VENDOR_ID}=="239a|2886|1915", SYMLINK+="kelly-mesh", GROUP="dialout", MODE="0660"
+SUBSYSTEM=="tty", KERNEL=="ttyUSB[0-9]*|ttyACM[0-9]*", ENV{ID_VENDOR_ID}!="239a|2886|1915", SYMLINK+="kelly-radio", GROUP="dialout", MODE="0660"
+# Plugging a lead or node in or out restarts the bridge (if it's running) with what's there now; the page stays up throughout.
+SUBSYSTEM=="tty", KERNEL=="ttyUSB[0-9]*|ttyACM[0-9]*", ACTION=="add|remove", RUN+="/usr/bin/systemctl --no-block try-restart kelly-bridge.service"

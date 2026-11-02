@@ -1,0 +1,96 @@
+#!/bin/bash
+# Kelly Page on this Pi: your callsign, the LoRa node, Bluetooth scanning. Re-run any time:  sudo kellypage-setup
+# Writes /etc/kelly-bridge.env and restarts the bridge. Kelly's own settings live in your browser, not here.
+set -e
+if [ "$(id -u)" -ne 0 ]; then exec sudo "$0" "$@"; fi
+ENV=/etc/kelly-bridge.env
+get() { sed -n "s/^$1=//p" "$ENV"; }
+put() {   # put KEY VALUE (value kept literal)
+  local v="${2//\\/\\\\}"; v="${v//&/\\&}"; v="${v//|/\\|}"
+  if grep -q "^$1=" "$ENV"; then sed -i "s|^$1=.*|$1=$v|" "$ENV"; else echo "$1=$2" >> "$ENV"; fi
+}
+
+echo "== Kelly Page setup =="
+echo "(Enter keeps what's in [brackets].)"
+echo
+
+CALL="$(get KELLY_CALLSIGN)"
+while true; do
+  read -r -p "Your callsign [${CALL:-none}]: " a
+  a="$(echo "${a:-$CALL}" | tr 'a-z' 'A-Z' | tr -cd 'A-Z0-9/-')"
+  if [ -z "$a" ] || echo "$a" | grep -Eq '^[A-Z0-9/]{3,10}(-[0-9]{1,2})?$'; then CALL="$a"; break; fi
+  echo "  That doesn't look like a callsign (e.g. VK4XYZ)."
+done
+put KELLY_CALLSIGN "$CALL"
+
+echo
+echo "-- LoRa mesh node (MeshCore companion / Meshtastic / LoRa APRS) for Kelly's LoRa Mesh page"
+MESH="$(get KELLY_MESH)"
+mapfile -t PORTS < <(ls /dev/serial/by-id/ 2>/dev/null)
+echo "   1) Automatic: a RAK4631 / SenseCAP / XIAO / Nordic board on USB   (the default)"
+i=2
+for p in "${PORTS[@]}"; do echo "   $i) USB: $p"; i=$((i+1)); done
+B=$i;  echo "   $B) Over Bluetooth (MeshCore companion)"
+N=$((i+1)); echo "   $N) Over WiFi (host:port)"
+X=$((i+2)); echo "   $X) None"
+echo "   now: ${MESH:-auto}"
+read -r -p "Choose [keep]: " c
+if [ -n "$c" ]; then
+  if [ "$c" = 1 ]; then MESH=auto
+  elif [ "$c" -ge 2 ] 2>/dev/null && [ "$c" -lt "$B" ]; then MESH="--mesh-serial /dev/serial/by-id/${PORTS[$((c-2))]}"
+  elif [ "$c" = "$B" ]; then
+    read -r -p "   The node's Bluetooth address (AA:BB:CC:DD:EE:FF): " addr
+    read -r -p "   Its PIN (on its screen, else 123456) [123456]: " pin
+    MESH="--mesh-ble $(echo "$addr" | tr -cd 'A-Fa-f0-9:')"; put KELLY_MESH_BLE_PIN "$(echo "${pin:-123456}" | tr -cd 0-9)"
+  elif [ "$c" = "$N" ]; then
+    read -r -p "   host:port (MeshCore 5000, Meshtastic 4403, LoRa APRS KISS 8001): " hp
+    MESH="--mesh-tcp $(echo "$hp" | tr -cd 'A-Za-z0-9.:-')"
+  elif [ "$c" = "$X" ]; then MESH=none
+  fi
+fi
+put KELLY_MESH "$MESH"
+
+echo
+echo "-- Bluetooth LE scanning for Kelly's BLE Presence page (beacons, sensors, phones)"
+BLE="$(get KELLY_BLE_ARGS)"
+read -r -p "Scan Bluetooth on this Pi? (y/n) [$([ -n "$BLE" ] && echo y || echo n)]: " a
+case "$a" in
+  y|Y) BLE="--ble hci0" ;;
+  n|N) BLE="" ;;
+esac
+put KELLY_BLE_ARGS "$BLE"
+if [ -n "$BLE" ]; then
+  rfkill unblock bluetooth 2>/dev/null || true
+  systemctl enable --now bluetooth >/dev/null 2>&1 || true
+  mkdir -p /etc/systemd/system/kelly-bridge.service.d
+  printf '[Service]\n# BLE Inspector: raw HCI advertising reports (read-only)\nAmbientCapabilities=CAP_NET_RAW\n' \
+    > /etc/systemd/system/kelly-bridge.service.d/ble.conf
+  echo "   Note: the Pi's own Bluetooth shares its radio with Wi-Fi -- a USB dongle (hci1) scans better on a busy site."
+else
+  rm -f /etc/systemd/system/kelly-bridge.service.d/ble.conf
+fi
+
+echo
+echo "-- Automatic updates (signed Kelly Page releases, checked once a day; the old version is put back if the new one won't run)"
+AUC=/etc/kellypage/autoupdate.conf
+AU="$(sed -n 's/^ENABLED=//p' "$AUC" 2>/dev/null)"
+read -r -p "Install new Kelly Page releases automatically? (y/n) [$([ "$AU" = 1 ] && echo y || echo n)]: " a
+case "$a" in y|Y) AU=1 ;; n|N) AU=0 ;; esac
+if [ -f "$AUC" ]; then
+  sed -i "s|^ENABLED=.*|ENABLED=${AU:-0}|" "$AUC"
+  if [ "$AU" = 1 ]; then
+    CH="$(sed -n 's/^CHANNEL=//p' "$AUC")"
+    read -r -p "   Channel: stable (tested) or beta (early) [${CH:-stable}]: " c
+    case "$c" in stable|beta) sed -i "s|^CHANNEL=.*|CHANNEL=$c|" "$AUC" ;; esac
+  fi
+fi
+
+systemctl daemon-reload
+systemctl restart kelly-bridge.service
+mkdir -p /var/lib/kellypage && touch /var/lib/kellypage/setup-done
+sleep 3
+echo
+if systemctl is-active --quiet kelly-bridge.service; then echo "Kelly Page is running."; else
+  echo "Kelly Page didn't start -- show this to whoever helps you:"; journalctl -u kelly-bridge -n 15 --no-pager -o cat; fi
+echo
+kellypage-qr

@@ -1,0 +1,120 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pj-map tests</title>
+<link rel="stylesheet" href="../vendor/leaflet-1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="../css/kelly.css">
+<link rel="stylesheet" href="../css/pj-map.css">
+<script src="../vendor/leaflet-1.9.4/leaflet.min.js"></script>
+<script src="../js/mcdecode.js"></script>
+<script src="../js/pj-core.js"></script>
+<script src="../js/pj-demo.js"></script>
+<script src="../js/pj-map.js"></script>
+</head><body style="width:1000px">
+<div id="m1"></div><div id="m2"></div>
+<pre id="out"></pre>
+<script>
+(async function () {
+  const out = [], ok = (cond, name) => out.push((cond ? 'PASS ' : 'FAIL ') + name);
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const warns = []; const cw = console.warn; console.warn = (...a) => { warns.push(a.join(' ')); cw.apply(console, a); };
+  try {
+    const PJ = KellyPJ, D = KellyMcDecode;
+    function ctx(withMap) {
+      const bus = PJ.createBus(), reg = PJ.createRegistry({});
+      let vis = true; const mem = {};
+      const c = { bus, PJ, D, reg, esc: s => String(s ?? '').replace(/[&<>"']/g, ch => '&#' + ch.charCodeAt(0) + ';'),
+        store: { get: (k, d) => mem[k] ?? d, set: (k, v) => { mem[k] = v; } }, fmtAgo: ms => Math.round(ms / 60000) + ' min ago',
+        fx: () => true, reduced: () => false, visible: () => vis, setVis(v) { vis = v; bus.emit('visible', v); },
+        makeMap: withMap ? (el => L.map(el).setView([-27.55, 152.85], 9)) : (() => null),
+        myPos: () => { const n = reg.get('me'); return n && n.lat != null ? { lat: n.lat, lon: n.lon } : null; },
+        ingest: rx => PJ.ingest(bus, reg, rx, { channels: [PJ.DEMO_CHANNEL] }) };
+      return c;
+    }
+    const c = ctx(true), mount = document.getElementById('m1');
+    const me = c.reg.get('me'); me.lat = -27.6210; me.lon = 152.7646;
+    const sel = []; c.bus.on('select', s => sel.push(s));
+    const pj = KellyPJMap(mount, c);
+    ok(!!mount.querySelector('.leaflet-container'), 'Leaflet map made');
+    await wait(400);
+    ok(pj._state().markers.some(m => m.id === 'me' && m.key.startsWith('me')), 'our node marker (cyan me style)');
+
+    const eng = KellyPJDemo._engine(D, PJ.DEMO_CHANNEL, 7);
+    let n = 0;
+    for (let i = 0; i < 80; i++) for (const p of eng.next()) { c.ingest({ raw: p.raw, snr: p.snr, rssi: p.rssi, demo: true }); n++; }
+    await wait(400);
+    let st = pj._state();
+    ok(st.markers.length >= 8, 'markers from demo adverts: ' + st.markers.length + ' (' + n + ' packets)');
+    const rpt = st.markers.filter(m => m.key.startsWith('rpt'));
+    ok(rpt.length >= 4, 'repeaters styled as rpt: ' + rpt.length);
+    ok(st.markers.every(m => m.key === 'me0' || /^(rpt|cmp|room|sens|oth)0/.test(m.key)), 'all fresh tier 0');
+    ok(/stations? with GPS · \d+ without/.test(mount.querySelector('.pj-map-count').textContent), 'count: ' + mount.querySelector('.pj-map-count').textContent);
+    ok(mount.querySelectorAll('.pj-map-m').length === st.markers.length, 'DOM markers match');
+
+    // fading: a repeater last seen 30 h ago (no packets) -> tier 4; a 3 h old advert time -> tier 2
+    const old = c.reg.upsertKey('ab'.repeat(32), { name: 'Old Rptr', role: 'repeater', lat: -27.2, lon: 152.5 });
+    old.lastSeen = Date.now() - 30 * 3600e3;
+    c.bus.emit('nodes', c.reg); await wait(400);
+    ok((pj._state().markers.find(m => m.id === old.id) || {}).key === 'rpt4', 'stale repeater dim tier 4');
+    const sensKey = 'cd'.repeat(32); c.reg.upsertKey(sensKey, { name: 'Sens', role: 'sensor', lat: -27.3, lon: 152.6 });
+    c.bus.emit('packet', { kind: 'advert', t: Date.now() - 3 * 3600e3, route: 'flood', src: { id: sensKey }, journey: [sensKey, 'me'], gps: { lat: -27.3, lon: 152.6 } });
+    await wait(400);
+    ok((pj._state().markers.find(m => m.id === sensKey) || {}).key === 'sens2', 'sensor heard 3 h ago tier 2');
+
+    // pulse on a new GPS advert, and it goes away
+    c.bus.emit('packet', { kind: 'advert', t: Date.now(), route: 'flood', src: { id: sensKey }, journey: [sensKey, 'me'], gps: { lat: -27.3, lon: 152.6 } });
+    ok(pj._state().pulses >= 1 && mount.querySelector('.pj-map-pulse'), 'advert pulse ring shown');
+    await wait(1900);
+    ok(pj._state().pulses === 0 && !mount.querySelector('.pj-map-pulse'), 'pulse removed');
+    const css = [...document.styleSheets].flatMap(s => { try { return [...s.cssRules]; } catch (e) { return []; } }).map(r => r.cssText).join('\n');
+    ok(/pj-map/.test(css) && !/pj-map[^{]*\{[^}]*infinite/.test(css), 'no infinite animation in pj-map.css');
+
+    // select in -> highlight; click -> select out
+    c.bus.emit('select', { node: old.id, from: 'test' }); await wait(50);
+    st = pj._state();
+    ok(st.sel === old.id && (st.markers.find(m => m.id === old.id) || {}).key === 'rpt4s', 'incoming select highlights');
+    const mkEl = mount.querySelector('.pj-map-m.pj-map-sel');
+    ok(!!mkEl, 'highlight class in DOM');
+    mount.querySelector('.pj-map-m.pj-map-r-cmp, .pj-map-m.pj-map-r-sens').click();
+    ok(sel.some(s => s.from === 'map' && s.node), 'marker click emits select from map');
+
+    // paths toggle
+    const cb = mount.querySelector('.pj-map-paths'); cb.checked = true; cb.dispatchEvent(new Event('change'));
+    ok(pj._state().paths > 0 && pj._state().paths <= 20, 'recent paths drawn: ' + pj._state().paths);
+
+    // null / junk events never throw
+    const w0 = warns.length;
+    c.bus.emit('packet', null); c.bus.emit('packet', {}); c.bus.emit('packet', { src: null, journey: null, gps: { lat: null, lon: null }, kind: 'advert' });
+    c.bus.emit('packet', { route: 'flood', journey: [null, 'h:zz', 'me'], kind: 'chat', t: 'x' }); c.bus.emit('select', null); c.bus.emit('select', { node: 'nope' });
+    c.bus.emit('nodes', null); c.bus.emit('visible', undefined);
+    await wait(400);
+    ok(warns.length === w0, 'null fields: no warnings (' + (warns.length - w0) + ')');
+
+    // hidden: no DOM change; shown again -> catch up
+    c.setVis(false);
+    const before = mount.querySelectorAll('.pj-map-m').length;
+    c.reg.upsertKey('ef'.repeat(32), { name: 'Late', role: 'companion', lat: -27.4, lon: 153.0 }); c.bus.emit('nodes', c.reg);
+    await wait(400);
+    ok(mount.querySelectorAll('.pj-map-m').length === before, 'hidden: DOM untouched');
+    c.setVis(true); await wait(200);
+    ok(mount.querySelectorAll('.pj-map-m').length === before + 1, 'visible again: caught up');
+
+    // fold: a placeholder with gps folded into a key -> one marker
+    // reset (as the shell does it)
+    c.reg.clear(); c.bus.emit('reset'); c.bus.emit('nodes', c.reg); await wait(400);
+    st = pj._state();
+    ok(st.markers.length === 1 && st.markers[0].id === 'me' && st.paths === 0, 'reset: only our node left');
+
+    // no Leaflet path
+    const c2 = ctx(false), m2 = document.getElementById('m2'); const pj2 = KellyPJMap(m2, c2);
+    c2.reg.upsertKey('12'.repeat(32), { name: 'X', role: 'repeater', lat: -27, lon: 153 }); c2.bus.emit('nodes', c2.reg); await wait(300);
+    ok(!m2.querySelector('.leaflet-container') && /Leaflet/.test(m2.textContent) && /1 station with GPS/.test(m2.textContent), 'no map -> message + count');
+    pj2.destroy();
+
+    pj.destroy();
+    ok(mount.innerHTML === '', 'destroy clears');
+  } catch (e) { out.push('FAIL threw ' + (e && e.stack || e)); }
+  const fails = out.filter(l => l.startsWith('FAIL')).length;
+  out.push(`RESULT ${fails ? 'FAIL' : 'PASS'} ${out.length - fails}/${out.length}`);
+  document.getElementById('out').textContent = out.join('\n');
+})();
+</script>
+</body></html>

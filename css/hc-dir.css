@@ -1,0 +1,43 @@
+/* Kelly Page -- Ham Contacts > the P25X ham directory (js/hc-dir.js, 2026-10-24). Prefix hc-dr-. Nothing animates. */
+.hc-dr { display: grid; gap: 10px; }
+.hc-dr .card-h h2 { color: var(--hc-card, var(--cyan)); }
+.hc-dr-opt { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; }
+.hc-dr-opt input { width: 18px; height: 18px; accent-color: var(--lime); }
+.hc-dr-note { margin: 0; font-size: 13px; color: var(--dim); max-width: 90ch; }
+.hc-dr-note b { color: var(--hc-call, #fff); }
+.hc-dr-me { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 10px; border: 1px dashed var(--line2); border-radius: 10px; background: var(--raised); }
+.hc-dr-me:empty { display: none; }
+.hc-dr-mine { flex: 1; min-width: 200px; font-size: 13px; }
+.hc-dr-btns { display: inline-flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.hc-dr-msg { margin: 0; min-height: 18px; font: 600 12px var(--mono); color: var(--dim); }
+.hc-dr-msg.ok { color: var(--hc-ok, var(--lime)); } .hc-dr-msg.bad { color: var(--hc-bad, #ff3b5c); } .hc-dr-msg.info { color: var(--cyan); }
+.hc-dr-tools { display: flex; gap: 8px; align-items: center; }
+.hc-dr-q { flex: 1; min-width: 0; padding: 7px 10px; border-radius: 9px; border: 1px solid var(--line2); background: var(--raised); color: inherit; font: 13px var(--mono); }
+.hc-dr-q:focus { outline: none; border-color: var(--cyan); }
+.hc-dr-bulk:empty { display: none; }
+.hc-dr-ask, .hc-dr-sum, .hc-dr-prog { margin-top: 6px; padding: 8px 10px; border-radius: 10px; font-size: 13px; background: var(--raised); border: 1px solid var(--line2); }
+.hc-dr-ask { border-color: var(--hc-warn, var(--amber)); color: var(--hc-warn, var(--amber)); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.hc-dr-sum ul { margin: 6px 0; padding-left: 18px; max-height: 140px; overflow: auto; color: var(--dim); }
+.hc-dr-prog { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.hc-dr-bar { flex: 1; min-width: 80px; height: 8px; border-radius: 4px; background: var(--panel); border: 1px solid var(--line2); overflow: hidden; }
+.hc-dr-bar i { display: block; height: 100%; background: var(--cyan); }
+.hc-dr-list { max-height: 420px; overflow: auto; display: grid; gap: 4px; }
+.hc-dr-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto auto auto; gap: 10px; align-items: center; padding: 6px 8px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel); }
+.hc-dr-row.on { opacity: .8; }
+.hc-dr-row input { width: 16px; height: 16px; accent-color: var(--cyan); }
+.hc-dr-who { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.hc-dr-call { font: 800 15px var(--mono); color: var(--hc-call, #fff); letter-spacing: .03em; }
+.hc-dr-name { color: var(--dim); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hc-dr-type, .hc-dr-when { font-size: 12px; color: var(--dim); white-space: nowrap; }
+.hc-dr-badge { white-space: nowrap; }
+.hc-dr-empty { margin: 6px 0; color: var(--dim); font-size: 13px; }
+.hc-dr-foot { margin: 0; font-size: 12px; color: var(--dim); }
+.hc-dr-foot:empty { display: none; }
+@media (max-width: 600px) {
+  .hc-dr-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .hc-dr-type, .hc-dr-when { display: none; }
+  .hc-dr-badge { grid-column: 2; justify-self: start; }
+  .hc-dr-add { grid-column: 3; grid-row: 1; }
+  .hc-dr-qr { grid-column: 3; grid-row: 2; justify-self: end; }
+  .hc-dr-who { flex-direction: column; gap: 0; }
+}

@@ -1,0 +1,276 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>hc-contacts tests</title>
+<link rel="stylesheet" href="../css/kelly.css">
+<link rel="stylesheet" href="../css/hc.css">
+<link rel="stylesheet" href="../css/hc-contacts.css">
+<script src="../vendor/tweetnacl-1.0.3/nacl-fast.min.js"></script>
+<script src="../js/meshqr.js"></script>
+<script src="../js/hc-core.js"></script>
+<script src="../js/hc-service.js"></script>
+<script src="../js/hc-demo.js"></script>
+<script src="../js/hc-contacts.js"></script>
+</head><body style="width:1000px"><script>if (location.hash === "#phone") document.body.style.width = "auto";</script>
+<!-- js/hc-contacts.js against the demo backend (js/hc-demo.js) through the real service: the three factories, their
+     buttons, Results, op disabling, the banner / empty states, auto-add + discovery settings, destroy. -->
+<div class="hc">
+  <div id="m-contacts"></div><div id="m-announce"></div><div id="m-heard"></div>
+  <div id="m-full"></div><div id="m-empty"></div><div id="m-room"></div>
+</div>
+<pre id="out">running…</pre>
+<script>
+(async function () {
+  const out = [], ok = (cond, name) => out.push((cond ? 'PASS ' : 'FAIL ') + name);
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const until = async (cond, ms = 5000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (cond()) return true; } catch (e) { /* not yet */ } await wait(40); } return false; };
+  const warns = []; const cw = console.warn; console.warn = (...a) => { warns.push(a.join(' ')); cw.apply(console, a); };
+  let world = null;
+  try {
+    const HC = KellyHC, mem = {};
+    const bus = HC.createBus(), ed = HC.naclEd(nacl);
+    const store = { get: (k, d) => k in mem ? JSON.parse(mem[k]) : d, set: (k, v) => { mem[k] = JSON.stringify(v); } };
+    world = KellyHamDemo({ nacl });
+    const distKm = (a, b) => { const R = 6371, r = x => x * Math.PI / 180, dLa = r(b.lat - a.lat), dLo = r(b.lon - a.lon); const h = Math.sin(dLa / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dLo / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
+    const svc = KellyHamContactsService({ backend: world.backend, bus, store, ed, myCall: () => 'VK4ZZA', distKm, myPos: () => ({ lat: world.me.lat, lon: world.me.lon }), demo: true, active: () => true });
+    const says = [], traces = [], chats = [];
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, ch => '&#' + ch.charCodeAt(0) + ';');
+    const c = { bus, HC, svc, $: s => document.querySelector(s), esc, store, toast: () => {}, fmtAgo: ts => ts ? Math.max(0, Math.round((Date.now() - ts) / 60000)) + 'm ago' : 'never',
+      ed, myCall: () => 'VK4ZZA', reduced: () => true, root: () => document.body, visible: () => true, demo: () => true, setDemo: () => {}, demoWorld: () => world,
+      openTrace: (key, m) => { traces.push([key, m]); return { ok: false, reason: 'Trace Route needs your real node: turn the demo off.' }; },
+      openChat: key => chats.push(key), kfRequest: () => null, onGateway: () => () => {}, say: r => says.push(r) };
+    // the shell's say(): every op result lands in the status line too
+    bus.on('op', e => { if (e && e.phase === 'done' && e.result) says.push(e.result); });
+    // the next 'op' done for (op, key)
+    const nextDone = (op, key) => new Promise(res => { const off = bus.on('op', e => { if (e && e.phase === 'done' && e.op === op && (key == null || e.key === key)) { off(); res(e.result); } }); });
+    // click, wait for its op; retry on a lost demo answer (3 % of them)
+    async function opClick(getEl, op, key, tries = 4) {
+      let r = null;
+      for (let i = 0; i < tries; i++) {
+        const el = getEl(); if (!el) return { ok: false, error: 'no element' };
+        const p = nextDone(op, key); el.click();
+        r = await Promise.race([p, wait(6000).then(() => ({ ok: false, code: 'test', error: 'no op event' }))]);
+        if (!(r && r.ok === false && r.code === 'timeout')) break;
+        await wait(60);
+      }
+      await wait(30);
+      return r;
+    }
+
+    world.start(svc);
+    await until(() => svc.contacts().length >= 9 && svc.heard().length >= 3 && svc.state().autoAdd, 6000);
+    ok(svc.contacts().length >= 9, 'demo: contacts loaded: ' + svc.contacts().length);
+
+    // ================= Contacts on my radio
+    const mC = document.getElementById('m-contacts');
+    const C = KellyHCContacts(mC, c);
+    ok(C && typeof C.destroy === 'function', 'KellyHCContacts returns { destroy }');
+    C._render();
+    const rows = () => [...mC.querySelectorAll('.hc-ct-row')];
+    const row = key => mC.querySelector(`.hc-ct-row[data-key="${key}"]`);
+    const btn = (key, a) => mC.querySelector(`[data-act="${a}"][data-key="${key}"]`);
+    ok(rows().length === svc.contacts().length, 'a row per contact: ' + rows().length);
+    const recs = rows().map(r => svc.get(r.dataset.key));
+    ok(recs[0].fav && recs[0].name === 'Ipswich Rptr', 'favourite first: ' + recs[0].name);
+    const firstNoCall = recs.findIndex((r, i) => i > 0 && !r.call), lastCall = recs.map((r, i) => (r.call && !r.fav ? i : -1)).reduce((a, b) => Math.max(a, b), -1);
+    ok(firstNoCall === -1 || lastCall < firstNoCall, 'then hams with a callsign, then the rest: ' + recs.map(r => r.call || r.name).join(' | '));
+    const kB = world.keyOf('VK4ZZB Springfield'), kC = world.keyOf('VK4ZZC Mobile'), kE = world.keyOf('VK4ZZE Toowoomba'), kRp = world.keyOf('Ipswich Rptr'), kBob = world.keyOf('Bob in Brisbane');
+    ok(row(kB) && row(kB).querySelector('b.hc-ct-call') && row(kB).querySelector('b.hc-ct-call').textContent === 'VK4ZZB', 'callsign is the bold thing');
+    ok(row(kB).querySelector('.hc-ct-snr.great') && /6\.5 dB/.test(row(kB).textContent), 'SNR bar class great (6.5 dB)');
+    ok(row(kE).querySelector('.hc-ct-snr.poor'), 'SNR bar class poor (-9.5 dB)');
+    ok(/direct/.test(row(kB).textContent) && /3 hops/.test(row(kE).textContent), 'hop counts: direct / 3 hops');
+    ok(/km/.test(row(kB).querySelector('.hc-ct-meta').textContent), 'km shown');
+    ok(/Companion/.test(row(kB).textContent) && /Repeater/.test(row(kRp).textContent), 'type names');
+    ok(row(kB).querySelector('.hc-ct-key').textContent === kB.slice(0, 8) && row(kB).querySelector('.hc-ct-key').title.includes(kB), 'short key, full key in its title');
+    ok(btn(kB, 'ping') && !btn(kRp, 'ping'), 'Ping only for companions');
+    ok(['share', 'fav', 'disc', 'reset', 'rm', 'trace', 'chat'].every(a => btn(kRp, a)), 'every row action present');
+    ok(!mC.querySelector('.hc-ct-banner:not([hidden])'), 'no nearly-full banner at ' + svc.state().count + ' / 32');
+
+    // search: callsign, name, key prefix
+    C._query('zzc'); ok(rows().length === 1 && rows()[0].dataset.key === kC, 'search by callsign (lower case)');
+    C._query('brisbane'); ok(rows().length === 1 && rows()[0].dataset.key === kBob, 'search by name');
+    C._query(kE.slice(0, 6)); ok(rows().length === 1 && rows()[0].dataset.key === kE, 'search by key prefix');
+    C._query('nothing-like-this'); ok(/No contact matches/.test(mC.textContent), 'no-match message');
+    C._query('');
+
+    // ▦ beside 📣 Share: the contact's own contact/add QR with its REAL type (a repeater stays 2, a room 3, a sensor 4)
+    {
+      const kRoom = world.keyOf('Ipswich Chat Room'), kSen = world.keyOf('Bremer Creek Sensor');
+      ok([kB, kRp, kRoom, kSen].every(x => btn(x, 'qr')), 'a ▦ QR button on each typed row');
+      const sh = btn(kB, 'share'), qb = btn(kB, 'qr');
+      ok(sh && qb && sh.nextElementSibling === qb, 'the ▦ sits right after 📣 Share');
+      const linkOf = async x => {
+        btn(x, 'qr').click();
+        const dlg = document.getElementById('mqr');
+        await until(() => dlg && !dlg.hidden && dlg.querySelector('.mqr-link') && dlg.querySelector('.mqr-link').value, 3000);
+        return dlg ? dlg.querySelector('.mqr-link').value : '';
+      };
+      for (const [x, ty, nm] of [[kB, 1, 'VK4ZZB Springfield'], [kRp, 2, 'Ipswich Rptr'], [kRoom, 3, 'Ipswich Chat Room'], [kSen, 4, 'Bremer Creek Sensor']]) {
+        const l = await linkOf(x);
+        ok(l === KellyMeshQR.contactLink({ key: x, type: ty, name: nm }), `row QR: ${nm} -> type ${ty}`);
+      }
+      const dlg = document.getElementById('mqr');
+      ok(/from the contacts on your radio/.test(dlg.textContent) && !/secret|password/i.test(dlg.querySelector('.mqr-link').value), 'row QR: caption, public key only');
+      dlg.querySelector('[data-mqr="close"]').click();
+      ok(dlg.hidden, 'row QR: closes');
+    }
+
+    // favourite: disabled while it runs, its own Result inline, fav moves to the top group
+    {
+      const p = nextDone('fav', kB); btn(kB, 'fav').click();
+      ok(btn(kB, 'fav').disabled && btn(kB, 'reset').disabled, 'row buttons disabled while the op runs');
+      ok(/working/.test(row(kB).textContent), 'row says working…');
+      let r = await p; if (r.code === 'timeout') r = await opClick(() => btn(kB, 'fav'), 'fav', kB);
+      await wait(30);
+      ok(r.ok && svc.get(kB).fav, 'favourite set: ' + (r.msg || r.error));
+      ok(row(kB).querySelector('.hc-ct-res.ok') && row(kB).querySelector('.hc-ct-res').textContent.includes(r.msg), 'fav Result shown inline');
+      ok(!btn(kB, 'fav').disabled && btn(kB, 'fav').getAttribute('aria-pressed') === 'true', 'enabled again, pressed');
+      ok(rows().slice(0, 2).some(x => x.dataset.key === kB), 'favourite sorted to the top');
+      ok(says.some(x => x === r), 'Result reached the status line (op event)');
+    }
+    // share + countdown
+    {
+      const r = await opClick(() => btn(kC, 'share'), 'share', kC);
+      ok(r.ok, 'share / introduce ok: ' + (r.msg || r.error));
+      ok(svc.shareWait() > 0 && btn(kE, 'share').disabled && /\d+ s/.test(btn(kE, 'share').textContent), 'share rate-limited: countdown on the button: ' + btn(kE, 'share').textContent.trim());
+      const r2 = await svc.share(kE); ok(!r2.ok && r2.code === 'rate', 'service refuses a second share (rate)');
+    }
+    // let them discover: flag on + base mode raised to 1
+    {
+      ok(svc.state().telemetryBase === 0, 'base telemetry starts at 0 (deny)');
+      const r = await opClick(() => btn(kC, 'disc'), 'discover', kC);
+      ok(r.ok && svc.get(kC).letsDiscover && row(kC).querySelector('.hc-ct-disc'), 'discover allowed, tag shown: ' + (r.msg || r.error));
+      ok(svc.state().telemetryBase === 1, 'base mode raised to 1');
+    }
+    // reset path
+    { const r = await opClick(() => btn(kE, 'reset'), 'resetPath', kE); ok(r.ok && /no route yet/.test(row(kE).textContent), 'reset path -> "no route yet": ' + (r.msg || r.error)); }
+    // trace / ping / chat: no radio op; openTrace's refusal shown inline
+    btn(kB, 'trace').click(); await wait(20);
+    ok(traces.length === 1 && traces[0][0] === kB && traces[0][1] === 'auto', 'Trace calls openTrace(key, auto)');
+    ok(/needs your real node/.test(row(kB).querySelector('.hc-ct-res.bad').textContent), 'openTrace refusal shown inline');
+    btn(kB, 'ping').click(); await wait(20);
+    ok(traces[1] && traces[1][1] === 'ping', 'Ping calls openTrace(key, ping)');
+    btn(kB, 'chat').click(); await wait(20);
+    ok(/real node/.test(row(kB).textContent), 'Message in demo explains why not');
+    // remove: confirm, cancel, confirm, working, gone
+    {
+      btn(kBob, 'rm').click(); await wait(20);
+      ok(row(kBob).querySelector('.hc-ct-confirm'), 'remove asks first');
+      btn(kBob, 'rm-no').click(); await wait(20);
+      ok(!row(kBob).querySelector('.hc-ct-confirm') && svc.get(kBob).onRadio, 'cancel keeps it');
+      btn(kBob, 'rm').click(); await wait(20);
+      const p = nextDone('remove', kBob); btn(kBob, 'rm-yes').click(); await wait(10);
+      ok(/working/.test(row(kBob).textContent) && /90 s/.test(row(kBob).textContent), 'remove shows working… up to 90 s');
+      const r = await p; await wait(30);
+      ok(r.ok && !row(kBob), 'removed, row gone: ' + (r.msg || r.error));
+    }
+
+    // nearly-full banner + empty state (wrapped services)
+    {
+      const wrap = over => { const s = {}; for (const f of Object.keys(svc)) s[f] = (...a) => svc[f](...a); return Object.assign(s, over); };
+      const F = KellyHCContacts(document.getElementById('m-full'), { ...c, svc: wrap({ state: () => ({ ...svc.state(), count: 30, maxContacts: 32 }) }) });
+      const b = document.querySelector('#m-full .hc-ct-banner');
+      ok(b && !b.hidden && /nearly full: 30 of 32/.test(b.textContent), 'nearly-full banner at 30 / 32');
+      F.destroy();
+      const E = KellyHCContacts(document.getElementById('m-empty'), { ...c, svc: wrap({ contacts: () => [], state: () => ({ ...svc.state(), link: { online: false, via: 'none', why: 'Connect your MeshCore companion node.' }, count: 0 }) }) });
+      ok(/No node connected/.test(document.querySelector('#m-empty').textContent) && /Connect your MeshCore companion node/.test(document.querySelector('#m-empty').textContent), 'empty state explains the missing node');
+      E.destroy();
+      const E2 = KellyHCContacts(document.getElementById('m-empty'), { ...c, svc: wrap({ contacts: () => [] }) });
+      ok(/no contacts yet/.test(document.querySelector('#m-empty').textContent), 'empty state with a node: what to do');
+      E2.destroy();
+    }
+
+    // ================= Announce myself
+    const mA = document.getElementById('m-announce');
+    const A = KellyHCAnnounce(mA, c);
+    const aBtn = m => mA.querySelector(`[data-act="adv-${m}"]`);
+    ok(aBtn('local') && aBtn('flood') && !aBtn('local').disabled && !aBtn('flood').disabled, 'both advert buttons, enabled');
+    ok(/Zero-hop/.test(mA.textContent) && /every repeater/.test(mA.textContent) && /sparingly/.test(mA.textContent), 'explains zero-hop vs flood');
+    {
+      const p = nextDone('advert', 'advert:local'); aBtn('local').click();
+      ok(aBtn('local').disabled, 'advert button disabled while sending');
+      let r = await p; if (r.code === 'timeout') r = await opClick(() => aBtn('local'), 'advert', 'advert:local');
+      await wait(30);
+      ok(r.ok && mA.querySelector('.hc-an-local .hc-an-res.ok'), 'local advert Result inline: ' + (r.msg || r.error));
+      ok(aBtn('local').disabled && /\d+ s/.test(aBtn('local').textContent), 'local now counting down: ' + aBtn('local').textContent.trim());
+      ok(!aBtn('flood').disabled, 'flood still free');
+    }
+
+    // ================= Heard, not added
+    const mH = document.getElementById('m-heard');
+    const H = KellyHCHeard(mH, c);
+    const hRows = () => [...mH.querySelectorAll('.hc-hd-row')];
+    const hBtn = (key, a) => mH.querySelector(`[data-act="${a}"][data-key="${key}"]`);
+    ok(hRows().length === svc.heard().length && hRows().length >= 3, 'a row per heard station: ' + hRows().length);
+    ok(mH.querySelector('.hc-hd-src') && /heard its advert/.test(mH.textContent), 'source tag (advert)');
+    ok(/Add all hams heard \(\d+\)/.test(mH.querySelector('[data-act="bulk"]').textContent), 'Add all hams heard shows the count');
+    {
+      const keys = hRows().map(r => r.dataset.key);
+      hBtn(keys[0], 'dismiss').click(); await wait(20);
+      ok(!mH.querySelector(`.hc-hd-row[data-key="${keys[0]}"]`), 'dismiss hides it');
+      const r = await opClick(() => hBtn(keys[1], 'add'), 'add', keys[1]);
+      ok(r.ok && svc.get(keys[1]).onRadio && !mH.querySelector(`.hc-hd-row[data-key="${keys[1]}"]`), 'one-click Add: ' + (r.msg || r.error));
+    }
+    // room check offer (a wrapped service that says only 1 fits)
+    {
+      const wrap = over => { const s = {}; for (const f of Object.keys(svc)) s[f] = (...a) => svc[f](...a); return Object.assign(s, over); };
+      const mR = document.getElementById('m-room');
+      const R = KellyHCHeard(mR, { ...c, svc: wrap({ heard: () => svc.heard().concat(svc.contacts().slice(0, 2).map(x => HC.record({ ...x, onRadio: false, pending: true, key: x.key.replace(/^./, 'f') }))), room: n => ({ ok: false, free: 1, warn: `room for 1 more (asked ${n})` }) }) });
+      mR.querySelector('[data-act="bulk"]').click(); await wait(20);
+      ok(/room for 1 more/.test(mR.querySelector('.hc-hd-offer').textContent) && /Add the first 1/.test(mR.querySelector('[data-act="bulk-go"]').textContent), 'room warning offers only as many as fit');
+      mR.querySelector('[data-act="bulk-no"]').click(); await wait(20);
+      ok(!mR.querySelector('.hc-hd-offer'), 'offer cancelled');
+      R.destroy();
+    }
+    // add all hams heard
+    {
+      H._render();
+      const before = svc.contacts().length, n = Number((/\((\d+)\)/.exec(mH.querySelector('[data-act="bulk"]').textContent) || [])[1] || 0);
+      mH.querySelector('[data-act="bulk"]').click(); await wait(20);
+      ok(H._batch() && (mH.querySelector('.hc-hd-prog') || H._batch().done), 'batch shows progress + Stop');
+      await until(() => H._batch().done, 8000);
+      ok(H._batch().done && svc.contacts().length === before + n, `added all hams heard (${n}): ${before} -> ${svc.contacts().length}`);
+      ok(/Added \d+/.test(mH.querySelector('.hc-hd-bulk').textContent), 'summary shown: ' + mH.querySelector('.hc-hd-bulk').textContent.trim().slice(0, 80));
+    }
+    // auto-add panel
+    {
+      const all = () => mH.querySelector('[data-act="aa-all"]');
+      ok(all() && !all().checked && svc.state().autoAdd.all === false, 'auto-add everything shows off (demo)');
+      ok(mH.querySelector('[data-act="aa-t"][data-key="repeater"]').checked && !mH.querySelector('[data-act="aa-t"][data-key="companion"]').checked, 'per-type boxes match (repeaters only)');
+      let r = await opClick(() => mH.querySelector('[data-act="aa-t"][data-key="companion"]'), 'autoAdd', 'autoAdd');
+      const t = svc.state().autoAdd.types;
+      ok(r.ok && t.companion && t.repeater && !t.room && !t.sensor, 'per-type change merges (companion + repeater): ' + JSON.stringify(t));
+      ok(mH.querySelector('[data-act="aa-t"][data-key="companion"]').checked && mH.querySelector('.hc-hd-auto .hc-hd-res.ok'), 'box checked + Result inline');
+      r = await opClick(all, 'autoAdd', 'autoAdd');
+      ok(r.ok && svc.state().autoAdd.all === true && all().checked && mH.querySelector('.hc-hd-types.dimmed'), 'auto-add everything on; per-type dimmed');
+      ok(mH.querySelectorAll('.hc-hd-auto .hc-hd-note').length >= 6, 'a note on each auto-add control');
+      // discovery base mode
+      const radio = m => mH.querySelector(`[data-act="tel"][data-key="${m}"]`);
+      ok(radio(1).checked, 'who may discover: shows 1 (raised by the 🔍 toggle)');
+      r = await opClick(() => radio(2), 'telemetry', 'telemetry');
+      ok(r.ok && svc.state().telemetryBase === 2 && radio(2).checked, 'telemetry base 2 (anyone): ' + (r.msg || r.error));
+    }
+
+    // escaping
+    ok(!/<script/i.test(mC.innerHTML + mH.innerHTML), 'nothing unescaped');
+    // no horizontal scroll (run with #phone at a phone-sized window for the phone layout)
+    C._render(); A._render(); H._render();
+    const wide = [mC, mA, mH].filter(m => m.scrollWidth > m.clientWidth + 1).map(m => m.id);
+    ok(!wide.length && (location.hash !== '#phone' || document.documentElement.scrollWidth <= window.innerWidth + 1), `no horizontal scroll at ${window.innerWidth}px: ${wide.join(',')} page ${document.documentElement.scrollWidth}`);
+
+    // destroy: nothing reacts afterwards, bus events never throw
+    const snap = mC.innerHTML;
+    C.destroy(); A.destroy(); H.destroy();
+    let threw = false;
+    try { bus.emit('contacts', []); bus.emit('state', svc.state()); bus.emit('op', { op: 'x', key: 'y', phase: 'start' }); bus.emit('visible', true); bus.emit('demo', false); } catch (e) { threw = true; }
+    await wait(1100);
+    ok(!threw && mC.innerHTML === snap, 'destroyed parts ignore the bus');
+    ok(!warns.some(w => /Ham Contacts/.test(w)), 'no handler warnings: ' + warns.filter(w => /Ham Contacts/.test(w)).join(' / '));
+  } catch (e) {
+    ok(false, 'threw: ' + (e && e.stack || e));
+  }
+  try { if (world) world.stop(); } catch (e) { /* ignore */ }
+  const fails = out.filter(l => l.startsWith('FAIL'));
+  out.push(fails.length ? `RESULT: FAIL ${fails.length} of ${out.length}` : `RESULT: ALL PASS (${out.length})`);
+  document.getElementById('out').textContent = out.join('\n');
+})();
+</script>
+</body></html>

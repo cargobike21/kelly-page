@@ -1,0 +1,148 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>MeshCore decoder + hash check tests</title>
+<style>body{font:13px Consolas,monospace;background:#0b0f14;color:#dde}.ok{color:#3d8}.bad{color:#f55}</style>
+</head><body>
+<h3>Kelly Page -- MeshCore decoder (js/mcdecode.js), path hash size check (js/mchashcheck.js), analyser (js/mcanalyser.js)</h3>
+<pre id="out">running…</pre>
+<div id="mca-root" style="display:none"></div>
+<script src="../js/mcdecode.js"></script>
+<script src="../js/mchashcheck.js"></script>
+<script src="../js/mcanalyser.js"></script>
+<script>
+// Headless: msedge --headless=new --allow-file-access-from-files --dump-dom tests/mcdecode-tests.html -> RESULT: ALL PASS
+// Samples: tests/mcdecode-samples.json = real packets heard on the SEQ mesh (public adverts + the public #test channel).
+const D = window.KellyMcDecode, HC = window.KellyMcHashCheck, out = [], fails = [];
+function eq(name, got, want) {
+  if (JSON.stringify(got) === JSON.stringify(want)) out.push(`<span class="ok">PASS ${name}</span>`);
+  else { out.push(`<span class="bad">FAIL ${name}: got ${JSON.stringify(got)} want ${JSON.stringify(want)}</span>`); fails.push(name); }
+}
+const H = D.hex, U = D.unhex, te = s => new TextEncoder().encode(s);
+const u32 = (a, v) => a.push(v & 255, v >>> 8 & 255, v >>> 16 & 255, v >>> 24 & 255);
+const pkt = (route, type, sz, hops, payload, transport) => { const b = [(type << 2) | route]; if (transport) b.push(...transport); b.push(((sz - 1) << 6) | hops); for (let i = 0; i < hops * sz; i++) b.push(0x10 + i); b.push(...payload); return Uint8Array.from(b); };
+const testKey = D.sha256(te('#test')).subarray(0, 16);
+(async () => {
+  try {
+    // ---- 1. crypto against published vectors
+    eq('AES-128 FIPS-197 C.1 encrypt', H(D.aesEcbEncrypt(U('000102030405060708090a0b0c0d0e0f'), U('00112233445566778899aabbccddeeff'))), '69c4e0d86a7b0430d8cdb78070b4c55a');
+    eq('AES-128 FIPS-197 C.1 decrypt', H(D.aesEcbDecrypt(U('000102030405060708090a0b0c0d0e0f'), U('69c4e0d86a7b0430d8cdb78070b4c55a'))), '00112233445566778899aabbccddeeff');
+    eq('SHA-256("abc")', H(D.sha256(te('abc'))), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+    eq('SHA-256(56-byte, two blocks)', H(D.sha256(te('abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq'))), '248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1');
+    eq('HMAC-SHA256 RFC 4231 case 2', H(D.hmacSha256(te('Jefe'), te('what do ya want for nothing?'))), '5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843');
+
+    // ---- 2. real packets from the SEQ mesh
+    const x = new XMLHttpRequest(); x.open('GET', 'mcdecode-samples.json', false); x.send();
+    const S = JSON.parse(x.responseText).packets, chans = [{ name: '#test', secret: testKey }];
+    const dd = S.map(p => D.decode(p.hex, { channels: chans, expectHash: 2 }));
+    eq('real: every sample decodes', dd.filter(d => !d.ok).map(d => d.err), []);
+    eq('real: adverts and channel messages are all 2-byte (MBUG)', [...new Set(dd.filter(d => /ADVERT|GRP_TXT/.test(d.typeName)).map(d => d.hashSize))], [2]);
+    // a real find on 2026-10-24: someone at address 16 sends flood requests to a repeater with 1-byte hashes
+    const mm = dd.filter(d => d.mismatch);
+    eq('real: the 1-byte packets are the flood requests from address 16 to the repeater fb', mm.map(d => [d.typeName, d.hashSize, d.info.src, d.info.dest]), [['REQ', 1, '16', 'fb'], ['REQ', 1, '16', 'fb']]);
+    eq('real: the check names them "likely, address 16"', mm.map(d => { const v = HC.evaluate(d, 2); return [v.strength, v.name, v.ok]; }), [['likely', 'address 16', false], ['likely', 'address 16', false]]);
+    const adv = dd.filter(d => d.typeName === 'ADVERT');
+    eq('real: adverts carry a role and a name', adv.length > 0 && adv.every(d => d.info.advert.role && d.info.advert.name), true);
+    const grp = dd.filter(d => d.typeName === 'GRP_TXT' && d.decrypted);
+    eq('real: #test channel messages decrypted with sha256("#test")', grp.length >= 1 && grp.every(d => d.info.channel === '#test' && d.info.sender && d.info.text), true);
+    eq('real: the fields tile the whole packet', dd.every(d => d.fields.reduce((a, f) => a + f.len, 0) === d.len && d.fields.every((f, i) => i === 0 || f.start === d.fields[i - 1].start + d.fields[i - 1].len)), true);
+    const noKey = S.map(p => D.decode(p.hex, { expectHash: 2 })).filter(d => d.typeName === 'GRP_TXT');
+    eq('real: without the key the channel stays encrypted', noKey.every(d => d.encrypted && !d.decrypted && !d.info.text), true);
+    const at1 = D.decode(S.find((p, i) => dd[i].flood).hex, { expectHash: 1 });
+    eq('real: expecting 1-byte flags the 2-byte packet', [at1.mismatch, at1.fields.filter(f => f.warn).map(f => f.key)], [true, ['pathlen', 'path']]);
+
+    // ---- 3. built packets, one per layout
+    let d = D.decode(pkt(1, 3, 2, 3, [0xde, 0xad, 0xbe, 0xef]));
+    eq('ACK: flood, 3 hops of 2 bytes, code', [d.routeName, d.typeName, d.hops, d.hashSize, d.path, d.info.ack], ['flood', 'ACK', 3, 2, ['1011', '1213', '1415'], 'deadbeef']);
+    d = D.decode(pkt(2, 2, 1, 0, [0xaa, 0xbb, 1, 2, ...new Array(16).fill(7)]));
+    eq('TXT_MSG: direct, to/from 1-byte, MAC, encrypted', [d.routeName, d.info.dest, d.info.src, d.encrypted, d.fields.map(f => f.key)], ['direct', 'aa', 'bb', true, ['header', 'pathlen', 'dest', 'src', 'mac', 'cipher4']]);
+    d = D.decode(pkt(0, 3, 1, 1, [1, 2, 3, 4], [0x34, 0x12, 0x78, 0x56]));
+    eq('transport flood: codes read little-endian', [d.routeName, d.transport, d.fields[1].key], ['transport flood', [0x1234, 0x5678], 'transport']);
+    const ek = new Array(32).fill(0).map((_, i) => i);
+    d = D.decode(pkt(1, 7, 2, 0, [0x5f, ...ek, 9, 9, ...new Array(16).fill(1)]));
+    eq('ANON_REQ: dest, the sender\'s full key, MAC', [d.info.dest, d.info.ephKey.slice(0, 8), d.encrypted], ['5f', '00010203', true]);
+    d = D.decode(Uint8Array.of((9 << 2) | 2, 2, 0x1c, 0xf8, 1, 0, 0, 0, 9, 9, 9, 9, 1, 0xab, 0xcd, 0xef, 0x01));
+    eq('TRACE: SNR list, tag, 2-byte route hashes', [d.snrs, d.info.trace.tag, d.info.trace.hashSize, d.info.trace.hashes], [[7, -2], 1, 2, ['abcd', 'ef01']]);
+    d = D.decode(pkt(2, 10, 1, 0, [(2 << 4) | 3, 1, 2, 3, 4]));
+    eq('MULTIPART: remaining + an ACK inside', [d.info.multipart, d.info.ack], [{ remaining: 2, inner: 'ACK' }, '01020304']);
+    d = D.decode(pkt(2, 11, 1, 0, [0x81, 0x04, 9, 0, 0, 0]));
+    eq('CONTROL: discover request', d.info.control, 'discover request');
+    d = D.decode(pkt(2, 11, 1, 0, [0x92, 0x1c, 9, 0, 0, 0, ...ek]));
+    eq('CONTROL: discover answer from a repeater, SNR', [d.info.control, d.fields.find(f => f.key === 'csnr').value], ['discover answer', '7 dB']);
+    const a = []; for (let i = 0; i < 32; i++) a.push(i); u32(a, 1761292800); for (let i = 0; i < 64; i++) a.push(0); a.push(0x82 | 0x10); u32(a, -27470000); u32(a, 153020000); a.push(...te('Test Rptr'));
+    d = D.decode(pkt(1, 4, 2, 1, a));
+    eq('ADVERT: repeater, location, name', [d.info.advert.role, d.info.advert.lat, d.info.advert.lon, d.info.advert.name], ['repeater', -27.47, 153.02, 'Test Rptr']);
+    // a channel message built with the firmware's own scheme (src/Utils.cpp encryptThenMAC)
+    const plain = []; u32(plain, 1761292800); plain.push(0, ...te('VK4XXX: hello mesh'));
+    const ch = { name: 'Club', secret: D.sha256(te('club secret')).subarray(0, 16) };
+    const g = pkt(1, 5, 2, 2, [D.channelHash(ch.secret), ...D.encryptThenMac(ch.secret, Uint8Array.from(plain))]);
+    d = D.decode(g, { channels: [ch] });
+    eq('GRP_TXT: our channel decrypted: sender + text', [d.decrypted, d.info.channel, d.info.sender, d.info.text], [true, 'Club', 'VK4XXX', 'hello mesh']);
+    d = D.decode(g, { channels: [{ name: 'Other', secret: D.sha256(te('other')).subarray(0, 16) }] });
+    eq('GRP_TXT: someone else\'s channel stays encrypted', [d.decrypted, d.encrypted, d.info.text], [false, true, undefined]);
+    const bad = g.slice(); bad[bad.length - 1] ^= 1;
+    eq('GRP_TXT: a tampered packet fails the MAC, not decrypted', D.decode(bad, { channels: [ch] }).decrypted, false);
+    // malformed
+    eq('reserved hash size 4 is rejected', /reserved/.test(D.decode(Uint8Array.of(5, 0xc1, 1, 2, 3, 4)).err), true);
+    eq('a path running off the end is rejected', D.decode(Uint8Array.of(5, 0x45, 1, 2)).ok, false);
+    eq('one byte is too short', D.decode(Uint8Array.of(5)).ok, false);
+
+    // ---- 4. the hash size check
+    const at = (route, type, sz, payload) => D.decode(pkt(route, type, sz, 1, payload), { expectHash: 2, channels: [ch] });
+    const advPkt = sz => at(1, 4, sz, a);
+    let r = HC.evaluate(advPkt(1), 2);
+    eq('check: a 1-byte flood advert = certain, the node named', [r.strength, r.name, r.size, r.expected, r.ok, r.role], ['certain', 'Test Rptr', 1, 2, false, 'repeater']);
+    eq('check: a 2-byte advert is fine', HC.evaluate(advPkt(2), 2).ok, true);
+    eq('check: a RESPONSE is ignored (it copies the asker\'s size)', HC.evaluate(at(1, 1, 1, [1, 2, 3, 4, ...new Array(16).fill(0)]), 2), null);
+    eq('check: a PATH return is ignored', HC.evaluate(at(1, 8, 1, [1, 2, 3, 4, ...new Array(16).fill(0)]), 2), null);
+    eq('check: a direct-routed advert is ignored', HC.evaluate(at(2, 4, 1, a), 2), null);
+    const g1 = D.decode(pkt(1, 5, 1, 0, [D.channelHash(ch.secret), ...D.encryptThenMac(ch.secret, Uint8Array.from(plain))]), { channels: [ch], expectHash: 2 });
+    r = HC.evaluate(g1, 2);
+    eq('check: our channel at 1-byte = likely, sender from the text', [r.strength, r.name, r.via], ['likely', 'VK4XXX', '#Club']);
+    const contacts = [{ name: 'Bob', key: 'bb11', role: 'companion (chat)' }, { name: 'Bea', key: 'bb22' }];
+    r = HC.evaluate(at(1, 2, 1, [0xaa, 0xbb, 1, 2, ...new Array(16).fill(0)]), 2, { byPrefix: h => contacts.filter(c => c.key.startsWith(h)) });
+    eq('check: a DM\'s 1-byte sender address matching two contacts = unknown, both named', [r.unknown, /Bob \/ Bea/.test(r.name)], [true, true]);
+    eq('hint: a repeater is told the CLI command', /set path\.hash\.mode 1, then reboot/.test(HC.hint({ name: 'R', size: 1, expected: 2, role: 'repeater' })), true);
+    eq('hint: a companion is told the app setting', /Default Path Hash Size › 2-byte/.test(HC.hint({ name: 'C', size: 1, expected: 2, role: 'companion (chat)' })), true);
+    eq('hint: 1-byte mentions firmware older than v1.14', /v1\.14/.test(HC.hint({ name: 'C', size: 1, expected: 2 })), true);
+    let t = 1000;
+    const mem = {}, store = { get: (k2, df) => k2 in mem ? JSON.parse(mem[k2]) : df, set: (k2, v) => { mem[k2] = JSON.stringify(v); } };
+    const c = HC.create({ store, now: () => t });
+    const e1 = c.check(advPkt(1), { snr: 5, rssi: -90 }, { expected: 2 });
+    eq('check(): first sighting alerts, with a hint', [!!e1, e1 && e1.alert, e1 && /set path\.hash\.mode 1/.test(e1.rec.hint)], [true, true, true]);
+    eq('check(): the same flood heard again (another repeater) is not logged twice', c.check(advPkt(1), {}, { expected: 2 }), null);
+    t += 10 * 60000;
+    const e2 = c.check(advPkt(1), {}, { expected: 2 });
+    eq('check(): later the same day = logged, no new alert', [!!e2, e2 && e2.alert], [true, false]);
+    t += 25 * 3600000;
+    eq('check(): a day later it alerts again', c.check(advPkt(1), {}, { expected: 2 }).alert, true);
+    eq('check(): a node on the right size is not logged', c.check(advPkt(2), {}, { expected: 2 }), null);
+    eq('check(): one node, three log entries, kept in the store', [c.nodes().length, c.nodes()[0].count, c.log().length, JSON.parse(mem.meshHashLog).length], [1, 3, 3, 3]);
+    eq('check(): the log entry has what a review needs', Object.keys(c.log()[0]).sort(), ['expected', 'hex', 'hops', 'id', 'name', 'path', 'rssi', 'size', 'snr', 'strength', 't', 'type']);
+    eq('self(): our node on 1-byte vs 2 expected', c.self(0, 2), { ours: 1, expected: 2, ok: false, mode: 0, wantMode: 1 });
+    eq('self(): unknown mode -> nothing to say', c.self(null, 2), null);
+    c.clear(); eq('clear(): empty', [c.nodes().length, c.log().length], [0, 0]);
+
+    // ---- 5. the analyser: capture files and the guided tour
+    const k = { $: s => document.querySelector(s), esc: s => String(s ?? '').replace(/[&<>"']/g, ch2 => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch2]), toast() {},
+      decodeOpts: () => ({ channels: chans, expectHash: 2 }), byPrefix: () => [], myName: () => 'VK4XXX', fx: () => false, fmtAgo: () => 'now',
+      hash: { nodes: () => [], log: () => [], clear() {}, forget() {}, expected: () => 2, setExpected() {}, hint: HC.hint, p25: { on: () => false, set() {} } } };
+    const A = window.KellyMcAnalyser(k); A.init();
+    const j = A._parse(JSON.stringify({ format: 'kelly-meshcore-capture', packets: S.slice(0, 3).map(p => ({ t: 5, snr: p.snr, rssi: p.rssi, hex: p.hex })) }));
+    eq('capture: JSON loads', [j.length, j[0].hex], [3, S[0].hex]);
+    const tx = A._parse(`# comment\n2026-10-24T06:00:00.000Z 7.5 -98 ${S[0].hex}\n${S[1].hex}\n\nnot a packet\n`);
+    eq('capture: hex lines load (with and without time/snr/rssi)', [tx.length, tx[0].snr, tx[0].rssi, tx[1].snr, tx[1].hex], [2, 7.5, -98, null, S[1].hex]);
+    const tour = A._tour();
+    const td = tour.map(s => D.decode(s.hex, { channels: [{ name: '#kelly-tour', secret: D.sha256(te('#kelly-tour')).subarray(0, 16) }], expectHash: 2 }));
+    eq('tour: an advert and a decrypted channel message, both 2-byte', [td[0].typeName, td[0].info.advert.name, td[1].decrypted, td[1].info.sender, td.some(x => x.mismatch)], ['ADVERT', 'Kelly Tour Rptr', true, 'VK4XXX', false]);
+    for (const p of S) A.feed({ raw: U(p.hex), snr: p.snr, rssi: p.rssi });
+    await new Promise(r2 => setTimeout(r2, 400));
+    eq('analyser: fed packets reach the list', document.querySelectorAll('#mca-list tr[data-i]').length, S.length);
+    document.querySelector('#mca-list tr[data-i]').click();
+    eq('analyser: picking one draws its byte strip', document.querySelectorAll('#mca-detail .mca-blk').length > 3, true);
+    document.querySelector('#mca-tour').click();
+    eq('analyser: the guided tour opens at step 1', /step 1 of/.test(document.querySelector('.mca-tour').textContent), true);
+  } catch (e) { eq('no exception', String(e && e.stack || e), ''); }
+  out.push(`RESULT: ${fails.length ? 'FAIL ' + fails.join(', ') : 'ALL PASS'}`);
+  document.getElementById('out').innerHTML = out.join('\n');
+})();
+</script>
+</body></html>

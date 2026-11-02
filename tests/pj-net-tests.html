@@ -1,0 +1,124 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pj-net tests</title>
+<link rel="stylesheet" href="../css/kelly.css"><link rel="stylesheet" href="../css/pj.css"><link rel="stylesheet" href="../css/pj-net.css">
+<style>body{font:13px Consolas,monospace;background:#0b0f14;color:#dde;padding:12px}.ok{color:#3d8}.bad{color:#f55}#wrap{width:960px}</style>
+</head><body>
+<!-- Kelly Page -- Packet Journey network canvas (js/pj-net.js) driven with KellyPJ + real samples (tests/mcdecode-samples.json)
+     and made-up events. Open in a browser started with --allow-file-access-from-files (or over http); results in #out,
+     the last line RESULT: ALL PASS / FAIL, document.title = DONE when finished. -->
+<div id="wrap"><div class="pj"><div class="card pj-stage"><div id="pj-net" class="pj-net"></div></div></div></div>
+<pre id="out"></pre>
+<script src="../js/mcdecode.js"></script>
+<script src="../js/pj-core.js"></script>
+<script src="../js/pj-net.js"></script>
+<script>
+(async () => {
+  const out = document.getElementById('out'), fails = [];
+  const log = (ok, name, extra) => { out.innerHTML += `<span class="${ok ? 'ok' : 'bad'}">${ok ? 'PASS' : 'FAIL'} ${name}${extra ? ' -- ' + extra : ''}</span>\n`; if (!ok) fails.push(name); };
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const warns = []; const cw = console.warn; console.warn = (...a) => { warns.push(a.map(String).join(' ')); cw.apply(console, a); };
+  try {
+    const PJ = window.KellyPJ, bus = PJ.createBus(), reg = PJ.createRegistry({ myName: () => 'VK4XXX RAK' });
+    let fxOn = true, vis = true; const draws = [];
+    const c = {
+      bus, PJ, D: window.KellyMcDecode, reg, esc: s => String(s == null ? '' : s).replace(/[&<>"']/g, ch => '&#' + ch.charCodeAt(0) + ';'),
+      store: { m: {}, get(k, d) { return k in this.m ? this.m[k] : d; }, set(k, v) { this.m[k] = v; } },
+      fmtAgo: ts => ts ? Math.floor((Date.now() - ts) / 1000) + 's ago' : 'never',
+      fxLoop: draw => { const s = now => { const t0 = performance.now(), d = draw(now); draws.push(performance.now() - t0); setTimeout(() => requestAnimationFrame(s), d); }; requestAnimationFrame(s); },
+      fx: () => fxOn, reduced: () => !fxOn, visible: () => vis,
+      ingest: rx => PJ.ingest(bus, reg, rx, { channels: [PJ.DEMO_CHANNEL] }),
+    };
+    const sel = []; bus.on('select', s => sel.push(s));
+    const mount = document.getElementById('pj-net');
+    const net = window.KellyPJNet(mount, c), t = net._t;
+    log(!!mount.querySelector('canvas.pj-net-cv'), 'canvas mounted');
+    let samples = [];
+    try { samples = (await (await fetch('mcdecode-samples.json')).json()).packets; } catch (e) { /* file:// without the flag */ }
+    log(samples.length >= 5, 'samples loaded', samples.length + ' packets');
+    for (const p of samples) c.ingest({ raw: p.hex, snr: p.snr, rssi: p.rssi });
+    log(t.nodes.size > 2, 'nodes from journeys', t.nodes.size + ' nodes');
+    log(t.pulses().length > 0 && t.pulses().length <= 60, 'pulses launched', t.pulses().length);
+    log(t.running(), 'loop running');
+    await sleep(300);
+    log(t.links.size > 0, 'links recorded', t.links.size);
+    await sleep(4500);
+    log(t.pulses().length === 0 && t.ripples().length === 0, 'pulses landed and ripples ended', `${t.pulses().length} pulses (${t.pulses().map(p => p.ids.length).join(',')} long), ${t.ripples().length} ripples, running ${t.running()}, warns ${warns.join("|")}, ripple ages ${t.ripples().map(r => (performance.now() - r.t0).toFixed(0)).join(",")}`);
+    const me = t.nodes.get('me');
+    log(Math.abs(me.sx - mount.clientWidth / 2) < 2, 'me in the centre', `${me.sx.toFixed(0)} of ${mount.clientWidth}`);
+
+    // made-up mesh at 30 packets/s for 3 s: random multi-hop floods + direct packets with 'ahead'
+    const keys = Array.from({ length: 40 }, (_, i) => (i * 2654435761 >>> 0).toString(16).padStart(8, '0') + 'ab'.repeat(28));
+    keys.forEach((k, i) => reg.upsertKey(k, { name: 'Node ' + i, role: i < 8 ? 'repeater' : 'companion', lat: -27.4 - i * 0.03, lon: 152.9 + (i % 7) * 0.05 }));
+    bus.emit('nodes', reg);
+    const kinds = PJ.KINDS; let seqN = 1000;
+    const fake = () => {
+      const hops = Math.floor(Math.random() * 5), rpt = Array.from({ length: hops }, () => keys[Math.floor(Math.random() * 8)]);
+      const flood = Math.random() < 0.7;
+      return Object.freeze({ seq: ++seqN, kind: kinds[Math.floor(Math.random() * kinds.length)], route: flood ? 'flood' : 'direct', size: 20 + Math.random() * 200,
+        snr: -20 + Math.random() * 35, rssi: -110 + Math.random() * 60, journey: flood ? [keys[8 + Math.floor(Math.random() * 32)], ...rpt, 'me'] : [keys[8 + Math.floor(Math.random() * 32)], 'me'], ahead: flood ? [] : rpt });
+    };
+    draws.length = 0; let maxP = 0;
+    for (let i = 0; i < 90; i++) { bus.emit('packet', fake()); maxP = Math.max(maxP, t.pulses().length); await sleep(33); }
+    const avg = draws.reduce((s, x) => s + x, 0) / Math.max(1, draws.length), max = Math.max(...draws);
+    log(maxP <= 60, 'pulse cap', 'max ' + maxP);
+    log(avg < 8, 'draw cost under a burst', `${draws.length} frames in 3 s, avg ${avg.toFixed(2)} ms, max ${max.toFixed(1)} ms`);
+    log(draws.length > 45, 'frame rate under a burst', (draws.length / 3).toFixed(0) + ' fps');
+
+    // nulls never throw
+    warns.length = 0;
+    for (const ev of [null, {}, { journey: null, ahead: null, kind: null, size: null, snr: null }, { journey: [null, 'zz', undefined], ahead: 'x', snr: 'a', route: 5 }, { journey: ['unknown'] }, 7, 'x'])
+      bus.emit('packet', ev);
+    bus.emit('select', null); bus.emit('select', {}); bus.emit('select', { packet: {} }); bus.emit('select', { node: 'nope', from: 'stats' });
+    log(!warns.some(w => /net/.test(w)), 'null fields survive', warns.join(' | '));
+
+    // click a node -> info + select
+    await sleep(1500);
+    const tgt = [...t.nodes.values()].find(v => v.id === keys[0]);
+    const r = mount.querySelector('canvas').getBoundingClientRect();
+    mount.querySelector('canvas').dispatchEvent(new MouseEvent('click', { clientX: r.left + tgt.sx, clientY: r.top + tgt.sy, bubbles: true }));
+    const info = mount.querySelector('.pj-net-info');
+    log(!info.hidden && /Node 0/.test(info.textContent), 'click shows details', info.textContent.replace(/\s+/g, ' ').slice(0, 140));
+    log(sel.some(s => s && s.from === 'net' && s.node === keys[0]), 'click emits select');
+    bus.emit('select', { node: keys[3], from: 'stats' });
+    log(t.sel().node === keys[3] && /Node 3/.test(info.textContent), 'select from stats highlights');
+    bus.emit('select', { packet: fake(), from: 'inspect' });
+    log(!!t.sel().path && t.sel().path.ids.length >= 2, 'select packet highlights its journey');
+
+    if (location.hash === '#shot') { for (let i = 0; i < 25; i++) { bus.emit('packet', fake()); await sleep(40); } document.title = 'SHOT'; await sleep(2500); document.title = 'x'; }
+    { const cs = keys.slice(8).map(k => t.nodes.get(k)).filter(Boolean); const rr = cs.map(v => Math.hypot(v.x, v.y));
+      log(true, 'layout info', `alpha ${t.alpha().toFixed(3)} rings ${JSON.stringify([...t.rings()].map(([d, r]) => [String(d), +r.toFixed(2)]))} companions r ${Math.min(...rr).toFixed(2)}..${Math.max(...rr).toFixed(2)} dists ${[...new Set(cs.map(v => v.dist))]}`); }
+    // GPS layout: geo nodes in the map, the rest on the rail
+    t.setLayout('gps'); await sleep(900);
+    const vs = [...t.nodes.values()], railN = vs.filter(v => v.rail).length;
+    log(railN > 0 && railN < vs.length && c.store.get('pjNetLayout') === 'gps', 'GPS layout + rail', `${vs.length - railN} on the map, ${railN} on the rail`);
+    t.setLayout('auto');
+
+    // reduced motion: no pulses, steps instead
+    await sleep(3000); fxOn = false;
+    bus.emit('packet', fake());
+    log(t.pulses().length === 0 && t.flashes().length === 1, 'fx off: lit path, no pulse');
+    await sleep(1600);
+    log(t.flashes().length === 0, 'fx off: steps fade out');
+    fxOn = true;
+
+    // hidden: no animation queued
+    vis = false; bus.emit('packet', fake());
+    log(t.pulses().length === 0, 'hidden tab: nothing animates');
+    vis = true; bus.emit('visible', true);
+
+    // placeholder fold: a path hash later explained by an advert
+    bus.emit('packet', Object.freeze({ kind: 'chat', route: 'flood', journey: ['n:bob', 'h:77', 'me'], ahead: [] }));
+    reg.resolve('77'); reg.upsertKey('77' + 'cd'.repeat(31), { name: 'Folded Rpt', role: 'repeater' }); bus.emit('nodes', reg);
+    log(!t.nodes.has('h:77') && t.nodes.has('77' + 'cd'.repeat(31)), 'placeholder folded into its key');
+
+    bus.emit('reset'); reg.clear(); bus.emit('nodes', reg);
+    log(t.nodes.size === 1 && t.links.size === 0, 'reset clears', t.nodes.size + ' nodes');
+    net.destroy();
+    log(mount.innerHTML === '', 'destroy empties the mount');
+  } catch (e) { log(false, 'exception', e && e.stack); }
+  log(!warns.length, "no warnings anywhere", warns.join(" | ").slice(0, 600));
+  out.innerHTML += `RESULT: ${fails.length ? 'FAIL (' + fails.join(', ') + ')' : 'ALL PASS'}\n`;
+  document.title = 'DONE';
+})();
+</script>
+</body></html>

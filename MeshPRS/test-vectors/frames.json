@@ -1,0 +1,580 @@
+{
+ "_": "MeshPRS frame vectors (spec 1.0 Candidate). Every implementation must pass them: kelly-page/js/meshprs.js (tests/meshprs-tests.html) and kelly-page/bridge/meshprs.py (bridge/test_meshprs.py). 'decode' = the fields the blob decodes to (encode must give the same bytes back); 'drop' = the spec §15.2 reason. lat/lon are the raw i24 values; key is the 4-byte prefix in hex; course is the raw byte (v*360/256 degrees).",
+ "callsign": [
+  [
+   "VK4ABC",
+   "00 00 12 9F 5D 8E"
+  ],
+  [
+   "VK4XXX-9",
+   "05 81 29 F1 B3 8E"
+  ],
+  [
+   "AB1CD",
+   "00 00 00 9F DD 51"
+  ]
+ ],
+ "callsign_bad": [
+  [
+   "00 00 00 00 00 00",
+   "value 0"
+  ],
+  [
+   "EE 6B 28 00 00 00",
+   "40^9, the first value out of range"
+  ],
+  [
+   "FF FF FF FF FF FF",
+   "M17 broadcast is refused"
+  ]
+ ],
+ "to_hash": [
+  [
+   "VK4ABC",
+   "75E7"
+  ]
+ ],
+ "deg_to_raw": [
+  [
+   -27.468,
+   "lat",
+   -2560203
+  ],
+  [
+   153.0235,
+   "lon",
+   7131412
+  ],
+  [
+   -180,
+   "lon",
+   -8388608
+  ],
+  [
+   180,
+   "lon",
+   8388607
+  ]
+ ],
+ "render_lat": [
+  [
+   -2560203,
+   0,
+   "2728.08S"
+  ],
+  [
+   -2609788,
+   0,
+   "2800.00S"
+  ],
+  [
+   -2560203,
+   1,
+   "2728.0 S"
+  ],
+  [
+   -2560203,
+   2,
+   "2728.  S"
+  ],
+  [
+   -2560203,
+   3,
+   "272 .  S"
+  ],
+  [
+   -2560203,
+   4,
+   "27  .  S"
+  ],
+  [
+   0,
+   0,
+   "0000.00N"
+  ]
+ ],
+ "render_lon": [
+  [
+   7131412,
+   0,
+   "15301.41E"
+  ],
+  [
+   -7131412,
+   0,
+   "15301.41W"
+  ],
+  [
+   7131412,
+   3,
+   "1530 .  E"
+  ]
+ ],
+ "frames": [
+  {
+   "id": "pos-001",
+   "spec": "§5.2",
+   "about": "the required example: VK4ABC, K, car, 'Mobile'",
+   "hex": "50 00 2A 00 00 12 9F 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 3E 00 4D 6F 62 69 6C 65",
+   "decode": {
+    "version": 1,
+    "g": 0,
+    "k": 1,
+    "gating": 0,
+    "retry": 0,
+    "subtype": 0,
+    "seq": 42,
+    "src": "VK4ABC",
+    "key": "02F9523D",
+    "lat": -2560203,
+    "lon": 7131412,
+    "sym": "/>",
+    "amb": 0,
+    "msg": 0,
+    "comment": "Mobile"
+   }
+  },
+  {
+   "id": "pos-002",
+   "spec": "§5.2",
+   "about": "second example: alt 45 m, course 90 at 60 km/h",
+   "hex": "50 00 2B 05 80 A6 53 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 3E 03 2D 00 40 3C",
+   "decode": {
+    "version": 1,
+    "g": 0,
+    "k": 1,
+    "gating": 0,
+    "retry": 0,
+    "subtype": 0,
+    "seq": 43,
+    "src": "VK4ABC-9",
+    "key": "02F9523D",
+    "lat": -2560203,
+    "lon": 7131412,
+    "sym": "/>",
+    "amb": 0,
+    "msg": 0,
+    "alt": 45,
+    "course": 64,
+    "speed": 60,
+    "comment": ""
+   }
+  },
+  {
+   "id": "pos-003",
+   "spec": "§9.3",
+   "about": "a first retry differs only in the retry field",
+   "hex": "51 00 2A 00 00 12 9F 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 3E 00 4D 6F 62 69 6C 65",
+   "decode": {
+    "version": 1,
+    "g": 0,
+    "k": 1,
+    "gating": 0,
+    "retry": 1,
+    "subtype": 0,
+    "seq": 42,
+    "src": "VK4ABC",
+    "key": "02F9523D",
+    "lat": -2560203,
+    "lon": 7131412,
+    "sym": "/>",
+    "amb": 0,
+    "msg": 0,
+    "comment": "Mobile"
+   }
+  },
+  {
+   "id": "msg-001",
+   "spec": "§6.1",
+   "about": "VK4ABC to VK4XXX-9, msgno 7, no K",
+   "hex": "40 01 2C 00 00 12 9F 5D 8E 05 81 29 F1 B3 8E 07 4D 65 65 74 20 61 74 20 49 70 73 77 69 63 68 20 31 33 30 30",
+   "decode": {
+    "version": 1,
+    "g": 0,
+    "k": 0,
+    "gating": 0,
+    "retry": 0,
+    "subtype": 1,
+    "seq": 44,
+    "src": "VK4ABC",
+    "key": null,
+    "to": "VK4XXX-9",
+    "msgno": 7,
+    "text": "Meet at Ipswich 1300"
+   }
+  },
+  {
+   "id": "ack-001",
+   "spec": "§6.2",
+   "about": "VK4XXX-9 acks msgno 7 (seq 0x2C); one AES block",
+   "hex": "40 02 11 05 81 29 F1 B3 8E 2C 07 75 E7",
+   "decode": {
+    "version": 1,
+    "g": 0,
+    "k": 0,
+    "gating": 0,
+    "retry": 0,
+    "subtype": 2,
+    "seq": 17,
+    "src": "VK4XXX-9",
+    "key": null,
+    "ackSeq": 44,
+    "msgno": 7,
+    "rej": 0,
+    "toHash": "75E7"
+   }
+  },
+  {
+   "id": "inj-001",
+   "spec": "§6.5",
+   "about": "a G = 1 message a gateway built from APRS-IS",
+   "hex": "60 01 A7 05 34 EB 0D B7 0E 00 00 12 9F 5D 8E 4B 53 65 65 20 79 6F 75 20 61 74 20 74 68 65 20 68 61 6D 66 65 73 74",
+   "decode": {
+    "version": 1,
+    "g": 1,
+    "k": 0,
+    "gating": 0,
+    "retry": 0,
+    "subtype": 1,
+    "seq": 167,
+    "src": "VK2XYZ-7",
+    "key": null,
+    "to": "VK4ABC",
+    "msgno": 75,
+    "text": "See you at the hamfest"
+   }
+  },
+  {
+   "id": "tlm-001",
+   "spec": "§7.2",
+   "about": "values, all five analogs and the bits",
+   "hex": "40 03 2A 04 9B C4 93 5D 8E 00 9F 9C 22 00 C8 63 80",
+   "decode": {
+    "version": 1,
+    "g": 0,
+    "k": 0,
+    "gating": 0,
+    "retry": 0,
+    "subtype": 3,
+    "seq": 42,
+    "src": "VK4ABC-3",
+    "key": null,
+    "kind": 0,
+    "a": [
+     156,
+     34,
+     0,
+     200,
+     99
+    ],
+    "bits": "10000000"
+   }
+  },
+  {
+   "id": "tlm-002",
+   "spec": "§7.2",
+   "about": "PARM definition",
+   "hex": "40 03 2B 04 9B C4 93 5D 8E 01 42 61 74 74 65 72 79 2C 4E 6F 69 73 65 2C 54 58 20 61 69 72 2C 52 53 53 49 2C 53 4E 52 2C 4C 6F 77 42 61 74",
+   "decode": {
+    "version": 1,
+    "g": 0,
+    "k": 0,
+    "gating": 0,
+    "retry": 0,
+    "subtype": 3,
+    "seq": 43,
+    "src": "VK4ABC-3",
+    "key": null,
+    "kind": 1,
+    "text": "Battery,Noise,TX air,RSSI,SNR,LowBat"
+   }
+  },
+  {
+   "id": "obj-001",
+   "spec": "§8.2",
+   "about": "live object IPSRPT, repeater symbol",
+   "hex": "40 05 30 00 00 12 9F 5D 8E 61 49 50 53 52 50 54 DC B5 D8 42 A2 6C 2F 72 31 34 37 2E 30 30 30 4D 48 7A 20 2D 30 36 30",
+   "decode": {
+    "version": 1,
+    "g": 0,
+    "k": 0,
+    "gating": 0,
+    "retry": 0,
+    "subtype": 5,
+    "seq": 48,
+    "src": "VK4ABC",
+    "key": null,
+    "live": 1,
+    "item": 0,
+    "name": "IPSRPT",
+    "lat": -2574884,
+    "lon": 7119426,
+    "sym": "/r",
+    "comment": "147.000MHz -060"
+   }
+  },
+  {
+   "id": "sta-001",
+   "spec": "§8.4",
+   "about": "plain status",
+   "hex": "40 09 33 00 00 12 9F 5D 8E 08 4E 65 74 20 63 6F 6E 74 72 6F 6C 20 74 6F 6E 69 67 68 74",
+   "decode": {
+    "version": 1,
+    "g": 0,
+    "k": 0,
+    "gating": 0,
+    "retry": 0,
+    "subtype": 9,
+    "seq": 51,
+    "src": "VK4ABC",
+    "key": null,
+    "code": 8,
+    "text": "Net control tonight"
+   }
+  },
+  {
+   "id": "sta-002",
+   "spec": "§8.4",
+   "about": "emergency with position",
+   "hex": "40 09 34 00 00 12 9F 5D 8E 87 35 EF D8 14 D1 6C 56 65 68 69 63 6C 65 20 72 6F 6C 6C 6F 76 65 72",
+   "decode": {
+    "version": 1,
+    "g": 0,
+    "k": 0,
+    "gating": 0,
+    "retry": 0,
+    "subtype": 9,
+    "seq": 52,
+    "src": "VK4ABC",
+    "key": null,
+    "code": 7,
+    "lat": -2560203,
+    "lon": 7131412,
+    "text": "Vehicle rollover"
+   }
+  },
+  {
+   "id": "qry-001",
+   "spec": "§6.7",
+   "about": "directed position query VK4XXX-9 -> VK4ABC",
+   "hex": "40 07 12 05 81 29 F1 B3 8E 81 00 00 12 9F 5D 8E",
+   "decode": {
+    "version": 1,
+    "g": 0,
+    "k": 0,
+    "gating": 0,
+    "retry": 0,
+    "subtype": 7,
+    "seq": 18,
+    "src": "VK4XXX-9",
+    "key": null,
+    "qtype": 1,
+    "target": "VK4ABC"
+   }
+  },
+  {
+   "id": "qry-002",
+   "spec": "§6.7",
+   "about": "?IGATE?, one AES block",
+   "hex": "40 07 13 05 81 29 F1 B3 8E 02",
+   "decode": {
+    "version": 1,
+    "g": 0,
+    "k": 0,
+    "gating": 0,
+    "retry": 0,
+    "subtype": 7,
+    "seq": 19,
+    "src": "VK4XXX-9",
+    "key": null,
+    "qtype": 2
+   }
+  },
+  {
+   "id": "pos-001-v0",
+   "spec": "§9.3",
+   "about": "the same frame with version 0 (Draft 0.1): receivers MAY accept it until 1.0 final; stations send version 1",
+   "hex": "10 00 2A 00 00 12 9F 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 3E 00 4D 6F 62 69 6C 65",
+   "decode": {
+    "version": 0,
+    "g": 0,
+    "k": 1,
+    "gating": 0,
+    "retry": 0,
+    "subtype": 0,
+    "seq": 42,
+    "src": "VK4ABC",
+    "key": "02F9523D",
+    "lat": -2560203,
+    "lon": 7131412,
+    "sym": "/>",
+    "amb": 0,
+    "msg": 0,
+    "comment": "Mobile"
+   }
+  }
+ ],
+ "bad": [
+  {
+   "id": "bad-001",
+   "spec": "§9.5",
+   "about": "8 bytes: shorter than the header",
+   "hex": "50 00 2A 00 00 12 9F 5D",
+   "drop": "short frame"
+  },
+  {
+   "id": "bad-002",
+   "spec": "§9.5",
+   "about": "K set but only 12 bytes",
+   "hex": "50 00 2A 00 00 12 9F 5D 8E 02 F9 52",
+   "drop": "short frame"
+  },
+  {
+   "id": "bad-003",
+   "spec": "§9.5",
+   "about": "position cut off before pflags",
+   "hex": "50 00 2A 00 00 12 9F 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 3E",
+   "drop": "short frame"
+  },
+  {
+   "id": "bad-004",
+   "spec": "§9.3",
+   "about": "version 2 (spare, not implemented)",
+   "hex": "90 00 2A 00 00 12 9F 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 3E 00 4D 6F 62 69 6C 65",
+   "drop": "unknown version"
+  },
+  {
+   "id": "bad-004b",
+   "spec": "§9.3",
+   "about": "version 3 (escape, not defined in 1.0)",
+   "hex": "D0 00 2A 00 00 12 9F 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 3E 00 4D 6F 62 69 6C 65",
+   "drop": "unknown version"
+  },
+  {
+   "id": "bad-005",
+   "spec": "§4.1",
+   "about": "source callsign value 0",
+   "hex": "40 09 33 00 00 00 00 00 00 08 4E 65 74 20 63 6F 6E 74 72 6F 6C 20 74 6F 6E 69 67 68 74",
+   "drop": "bad callsign"
+  },
+  {
+   "id": "bad-006",
+   "spec": "§4.1",
+   "about": "addressee value >= 40^9",
+   "hex": "40 01 2C 00 00 12 9F 5D 8E EE 6B 28 00 00 00 07 4D 65 65 74 20 61 74 20 49 70 73 77 69 63 68 20 31 33 30 30",
+   "drop": "bad callsign"
+  },
+  {
+   "id": "bad-007",
+   "spec": "§9.4",
+   "about": "reserved subtype 0x0A",
+   "hex": "40 0A 33 00 00 12 9F 5D 8E 08 4E 65 74 20 63 6F 6E 74 72 6F 6C 20 74 6F 6E 69 67 68 74",
+   "drop": "unknown subtype"
+  },
+  {
+   "id": "bad-008",
+   "spec": "§9.4",
+   "about": "subtype 0xFF",
+   "hex": "40 FF 33 00 00 12 9F 5D 8E 08 4E 65 74 20 63 6F 6E 74 72 6F 6C 20 74 6F 6E 69 67 68 74",
+   "drop": "unknown subtype"
+  },
+  {
+   "id": "bad-009",
+   "spec": "§9.5",
+   "about": "experimental subtype 0xE0",
+   "hex": "40 E0 33 00 00 12 9F 5D 8E 08 4E 65 74 20 63 6F 6E 74 72 6F 6C 20 74 6F 6E 69 67 68 74",
+   "drop": "experimental subtype"
+  },
+  {
+   "id": "bad-010",
+   "spec": "§5.1",
+   "about": "ambiguity 5 (reserved)",
+   "hex": "50 00 2A 00 00 12 9F 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 3E 28 4D 6F 62 69 6C 65",
+   "drop": "bad field"
+  },
+  {
+   "id": "bad-011",
+   "spec": "§5.1",
+   "about": "pflags bit 7 (reserved)",
+   "hex": "50 00 2A 00 00 12 9F 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 3E 80 4D 6F 62 69 6C 65",
+   "drop": "unknown flag"
+  },
+  {
+   "id": "bad-012",
+   "spec": "§5.1",
+   "about": "symbol table 'x' is not a table or overlay",
+   "hex": "50 00 2A 00 00 12 9F 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 78 3E 00 4D 6F 62 69 6C 65",
+   "drop": "bad field"
+  },
+  {
+   "id": "bad-013",
+   "spec": "§9.6",
+   "about": "'|' in a comment",
+   "hex": "50 00 2A 00 00 12 9F 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 3E 00 4D 6F 62 69 6C 65 7C",
+   "drop": "bad text"
+  },
+  {
+   "id": "bad-014",
+   "spec": "§9.6",
+   "about": "a non-ASCII byte in a comment (never transliterated)",
+   "hex": "50 00 2A 00 00 12 9F 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 3E 00 4D 6F 62 69 6C 65 E9",
+   "drop": "bad text"
+  },
+  {
+   "id": "bad-015",
+   "spec": "§6.1",
+   "about": "msgno 128 (reserved)",
+   "hex": "40 01 2C 00 00 12 9F 5D 8E 05 81 29 F1 B3 8E 80 4D 65 65 74 20 61 74 20 49 70 73 77 69 63 68 20 31 33 30 30",
+   "drop": "bad field"
+  },
+  {
+   "id": "bad-016",
+   "spec": "§6.1",
+   "about": "'{' in message text",
+   "hex": "40 01 2C 00 00 12 9F 5D 8E 05 81 29 F1 B3 8E 07 4D 65 65 74 20 61 74 20 49 70 73 77 69 63 68 20 31 33 30 30 7B",
+   "drop": "bad text"
+  },
+  {
+   "id": "bad-017",
+   "spec": "§6.4",
+   "about": "68-character message",
+   "hex": "40 01 2C 00 00 12 9F 5D 8E 05 81 29 F1 B3 8E 07 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78",
+   "drop": "bad text"
+  },
+  {
+   "id": "bad-018",
+   "spec": "§7.2",
+   "about": "telemetry mask bit 5 (reserved)",
+   "hex": "40 03 2A 04 9B C4 93 5D 8E 00 BF 9C 22 00 C8 63 80",
+   "drop": "unknown flag"
+  },
+  {
+   "id": "bad-019",
+   "spec": "§8.2",
+   "about": "object name length 0",
+   "hex": "40 05 30 00 00 12 9F 5D 8E 01 49 50 53 52 50 54 DC B5 D8 42 A2 6C 2F 72 31 34 37 2E 30 30 30 4D 48 7A 20 2D 30 36 30",
+   "drop": "bad field"
+  },
+  {
+   "id": "bad-020",
+   "spec": "§8.2",
+   "about": "object flags bit 3 (reserved)",
+   "hex": "40 05 30 00 00 12 9F 5D 8E 69 49 50 53 52 50 54 DC B5 D8 42 A2 6C 2F 72 31 34 37 2E 30 30 30 4D 48 7A 20 2D 30 36 30",
+   "drop": "unknown flag"
+  },
+  {
+   "id": "bad-021",
+   "spec": "§8.4",
+   "about": "status code 10 (reserved)",
+   "hex": "40 09 33 00 00 12 9F 5D 8E 0A 4E 65 74 20 63 6F 6E 74 72 6F 6C 20 74 6F 6E 69 67 68 74",
+   "drop": "bad field"
+  },
+  {
+   "id": "bad-022",
+   "spec": "§8.4",
+   "about": "status code bit 4 (reserved)",
+   "hex": "40 09 33 00 00 12 9F 5D 8E 18 4E 65 74 20 63 6F 6E 74 72 6F 6C 20 74 6F 6E 69 67 68 74",
+   "drop": "unknown flag"
+  }
+ ]
+}

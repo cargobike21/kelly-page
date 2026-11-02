@@ -1,0 +1,80 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Radio files (KF) tests</title>
+<style>body{font:13px Consolas,monospace;background:#0b0f14;color:#dde}.ok{color:#3d8}.bad{color:#f55}</style>
+</head><body>
+<h3>Kelly Page -- radio files (KF container) tests</h3>
+<pre id="out">running…</pre>
+<script src="../js/sstv.js"></script>
+<script src="../js/kfiles.js"></script>
+<script>
+// js/kfiles.js against a container made by scripts/kelly_files_test.py (= the dashboard's kfEncode
+// format), its own round trip, corruption, and a lossy SSTV-link loopback carrying a KF file.
+// Run headless: msedge --headless --virtual-time-budget=20000 --dump-dom tests/kfiles-tests.html -> "RESULT:".
+// "JSENC:" is a Kelly-made container for the Python side to decode (cross-check).
+const K = window.KellyFiles, S = window.KellySstv, out = [], fails = [];
+const hex = u => Array.from(u, b => b.toString(16).padStart(2, '0')).join('');
+const unhex = h => Uint8Array.from(h.match(/../g).map(x => parseInt(x, 16)));
+function eq(name, got, want) {
+  if (String(got) === String(want)) out.push(`<span class="ok">PASS ${name}</span>`);
+  else { out.push(`<span class="bad">FAIL ${name}: got ${got} want ${want}</span>`); fails.push(name); }
+}
+// golden: kf_encode(1, 3000 B of a made-up INI-style radio file, 'TM9100', 'golden.m91p', 'Kelly test')
+const GOLDEN = '4b4601010100000bb8d3ede2d506544d393130300b676f6c64656e2e6d3931700a4b656c6c79207465737478da8d96c16adb401445f702fdc3ecba6940efdeb1a550b4282134d0a498d045a17421b09a18142b380e69ffbe31b65f7c1387be9d07a1c3e871ce8c3fa5affd30fc4db3eea64febfe619d7e2f863e9d9ca4bb6edea7c7fb8f6939ae5397567d37a455375f8c1f1ecae2e7f5e6d7afb2b81ae7fdd09efff87c35bb3c2f8be72767b7dd72d90fc99e9f7eebeefaf6ec22559595c5f59f36b3a90c93aa2a8bef9b15f7ab2fabf1f1be4559ccc6a77ed55e2c6e6e050681c1619bb75f60bbd516c6776114181dc6fa7067bbd51696f7b0cbf149585958d9599b9dbcb076ab2dcbdeddd8446013874d6564d3d8c8a6029b3aac9691d54747f6fa2b6b61d5ce6a6462cdd189bdd95823b0660fb3ea7064fbd5ff46762ab05387896576dcb2d75f69d521cc2a87896516b4cc2400f3004c3433c686665280790126a2d971d1de7ca814605e8089681614cda401f3064c4cb33a383689c03c0213d7ac09d5691281790410d71074cd2403f30c20b22178a4997460de01c4362014a84907e61d40644350364808f01020b22178aa4142808700b10dd350a3900ee01d40644350364808f01020b22178b04142808740b18d55a8514807f00e28b2317a7f4a08f01028b23178b44142808740b18db11b14d201bc038a6c8cca2621c043a0c8c6e0d14609811e02c536c62e514a07f40e28b231281b25047a085964cbc1a38d12023d842cb6e5d83d4ae980de4116d972f4df9a84400f218b6c3978b45142a08790c5b61cbb47291dd03bc8225b8eca2621d043c822db6ef50f6ccaf1af';
+(async () => {
+  try {
+    eq('CompressionStream available', K.canZip, true);
+    const g = await K.decode(unhex(GOLDEN));
+    eq('golden: kind/model/name/note', `${g.kind} ${g.model} ${g.name} ${g.note}`, '1 TM9100 golden.m91p Kelly test');
+    eq('golden: size + crc32', `${g.body.length} ${S.crc32(g.body).toString(16)}`, '3000 d3ede2d5');
+    eq('golden: starts like the test file', new TextDecoder().decode(g.body.slice(0, 22)), '; Kelly Page test file');
+    // our own container round trip, and a copy for Python to check
+    const mine = await K.encode({ kind: 1, model: 'TP9400', name: 'kelly-made.t94p', note: 'from the browser ✓', body: g.body });
+    const back = await K.decode(mine);
+    eq('round trip identical', hex(back.body) === hex(g.body) && back.note === 'from the browser ✓', true);
+    eq('round trip is compressed', mine.length < g.body.length, true);
+    out.push('JSENC:' + btoa(String.fromCharCode(...mine)));
+    // a single changed byte in the packed file data must be refused, never "saved" (the header's
+    // model/name/note aren't in the file CRC -- the link's CRC-16 per frame + CRC-32 cover them on air)
+    let refused = 0, tried = 0;
+    for (const at of [60, 200, 600, mine.length - 3]) {
+      const bad = mine.slice(); bad[at] ^= 0x40; tried++;
+      try { await K.decode(bad); } catch { refused++; }
+    }
+    eq('corrupted copies refused', `${refused}/${tried}`, `${tried}/${tried}`);
+    const cut = mine.slice(0, mine.length - 10);
+    let cutRefused = false; try { await K.decode(cut); } catch { cutRefused = true; }
+    eq('truncated copy refused', cutRefused, true);
+    // requests and lists
+    const req = await K.decode(await K.request({ op: 'get', id: 'abc123' }));
+    const rj = K.json(req.body);
+    eq('request (carries kv, kd)', `${req.kind} ${rj.op} ${rj.id} ${'kv' in rj} ${rj.kd === 0 || rj.kd === 1}`, '3 get abc123 true true');
+    // short forms (SHORT frames): goldens from scripts/kelly_files_test.py kf_short_request
+    eq('short request, no fields = 2 B', hex(K.shortRequest({ op: 'heard' })), '8317');
+    eq('short request with fields', hex(K.shortRequest({ op: 'list', model: 'TM9100' })), '83017b226d6f64656c223a22544d39313030227d');
+    eq('short request, unknown op keeps it in the JSON', new TextDecoder().decode(K.shortRequest({ op: 'zz', a: 1 }).slice(2)), '{"op":"zz","a":1}');
+    const sd = K.json((await K.decode(K.shortRequest({ op: 'get', id: 'abc' }))).body);
+    eq('short request decodes to the full request', `${sd.op} ${sd.id}`, 'get abc');
+    eq('short answer, stored', K.json((await K.decode(unhex('8400' + hex(new TextEncoder().encode('{"app":"x"}'))))).body).app, 'x');
+    const rawz = new Uint8Array(await new Response(new Blob([new TextEncoder().encode('{"app":"heard","rows":[1,1,1,1,1,1,1,1,1,1,1]}')]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer());
+    eq('short answer, raw deflate', K.json((await K.decode(Uint8Array.from([0x84, 2, ...rawz]))).body).rows.length, 11);
+    eq('request keeps .req for the SHORT path', (await K.request({ op: 'heard' })).req.op, 'heard');
+    eq('model family', ['TM9100', 'TM9480 (P25/MPT)', 'TP9400', 'TP9955', 'TB9100', ''].map(K.family).join(','), 'TM9100,TM9400,TP9400,TP9900,,');
+    // a 30 kB KF file over a lossy link loopback (every 7th burst lost) arrives byte-for-byte
+    const big = new Uint8Array(30000); let x = 12345; for (let i = 0; i < big.length; i++) { x = (x * 1103515245 + 12345) >>> 0; big[i] = x >>> 24; }   // incompressible
+    const pack = await K.encode({ kind: 1, model: 'TM9100', name: 'big.bin', body: big });
+    let clock = 0, n = 0; const now = () => clock;
+    const A = new S.Link({ now, write: b => { if (++n % 7) B.feed(b); } });
+    const B = new S.Link({ now, write: b => A.feed(b), onEvent: e => { if (e.kind === 'rx-done') got = e.r; } });
+    let got = null; A.canWrite = B.canWrite = true;
+    A.sendImage(pack, { mime: K.MIME, to: 5059999, from: 3050002 });
+    for (let i = 0; i < 5000 && A.busy(); i++) { clock += 200; A.tick(); B.tick(); }
+    eq('loopback: arrived as KF', got && got.info.mime, K.MIME);
+    const lb = got && await K.decode(got.data);
+    eq('loopback: file identical after losses', lb && hex(lb.body) === hex(big), true);
+    eq('loopback: something was resent', [...A.tx.values()][0].resent > 0, true);
+  } catch (e) { fails.push('exception'); out.push(`<span class="bad">EXCEPTION ${e && e.message}</span>`); }
+  out.push(`RESULT: ${fails.length ? 'FAIL ' + fails.join(', ') : 'ALL PASS'}`);
+  document.getElementById('out').innerHTML = out.join('\n');
+})();
+</script>
+</body></html>

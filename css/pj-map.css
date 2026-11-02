@@ -1,0 +1,52 @@
+/* Kelly Page -- LoRa Mesh > Packet Journey: pj-map styles (js/pj-map.js, 2026-10-24). Markers are steady styles by
+ * age tier (pj-map-a0 fresh .. a4 24 h+); the only animation is the one-shot advert ring (1 iteration, then removed). */
+.pj-map-card { display: grid; gap: 10px; min-width: 0; }
+.pj-map-bar { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; font: 600 12px var(--mono); color: var(--dim); }
+.pj-map-tog { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; }
+.pj-map-tog input { accent-color: var(--cyan); }
+.pj-map-fit { padding: 4px 10px; font-size: 12px; }
+.pj-map-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-left: auto; }
+.pj-map-legend > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.pj-map-age { color: var(--mute, var(--dim)); font-weight: 500; }
+.pj-map-box { position: relative; height: clamp(360px, 46vh, 420px); border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+  background: var(--bg2, #0a1124); }
+.pj-map-box.pj-map-none { display: flex; align-items: center; justify-content: center; height: auto; min-height: 90px; padding: 16px; text-align: center; }
+.pj-fs .pj-map-box { height: 60vh; }
+@media (max-width: 600px) { .pj-map-box { height: 280px; } .pj-map-legend { margin-left: 0; } .pj-map-age { display: none; } }
+@media (min-width: 1800px) { .pj-map-box { height: 520px; } .pj-map-bar { font-size: 14px; } }
+
+/* role keys (legend) and marker glyphs share the colour vars */
+.pj-map-r-rpt { --pc: var(--magenta, #ff2bd6); } .pj-map-r-cmp { --pc: #3ba8ff; } .pj-map-r-room { --pc: var(--amber, #ffb020); }
+.pj-map-r-sens { --pc: var(--lime, #39ff88); } .pj-map-r-me { --pc: var(--cyan, #00e5ff); } .pj-map-r-oth { --pc: #c8d4ee; }
+.pj-map-k { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--pc); box-shadow: 0 0 6px var(--pc); }
+.pj-map-k.pj-map-r-rpt { border-radius: 1px; transform: rotate(45deg) scale(.85); }
+.pj-map-k.pj-map-r-room { border-radius: 2px; }
+.pj-map-k.pj-map-r-me { background: transparent; border: 2px solid var(--pc); width: 8px; height: 8px; }
+
+/* markers: a 30 px Leaflet divIcon; the glyph <i> is sized / lit by the age tier */
+.leaflet-marker-icon.pj-map-wrap { background: none; border: 0; }
+.pj-map-m { width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.pj-map-m i { display: block; width: 14px; height: 14px; border-radius: 50%; background: var(--pc); border: 2px solid rgba(5, 9, 18, .85);
+  transition: transform .4s ease, opacity .4s ease; }
+.pj-map-r-rpt i { border-radius: 2px; transform: rotate(45deg); }
+.pj-map-r-room i { border-radius: 3px; }
+.pj-map-r-sens i { border-radius: 50% 50% 50% 2px; }
+.pj-map-r-me i { width: 16px; height: 16px; background: rgba(0, 229, 255, .25); border: 3px solid var(--pc); box-shadow: 0 0 0 3px rgba(5, 9, 18, .7), 0 0 16px var(--pc); }
+.pj-map-a0 i { box-shadow: 0 0 14px 3px var(--pc); width: 16px; height: 16px; }
+.pj-map-a1 i { box-shadow: 0 0 8px var(--pc); }
+.pj-map-a2 i { opacity: .7; width: 12px; height: 12px; }
+.pj-map-a3 i { opacity: .5; width: 11px; height: 11px; }
+.pj-map-a4 i { opacity: .3; width: 10px; height: 10px; filter: saturate(.4); }
+.pj-map-sel i { outline: 2px solid #fff; outline-offset: 3px; opacity: 1; }
+
+/* the one-shot advert ring: runs once, the JS removes its marker after ~1.7 s */
+.pj-map-pulse { display: block; width: 60px; height: 60px; border-radius: 50%; border: 3px solid var(--pj-map-pc, #00e5ff);
+  box-shadow: 0 0 14px var(--pj-map-pc, #00e5ff); opacity: 0; transform: scale(.2); animation: pj-map-ring 1.5s ease-out 1 forwards; pointer-events: none; }
+@keyframes pj-map-ring { 0% { opacity: .95; transform: scale(.2); } 100% { opacity: 0; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .pj-map-pulse { animation: none; display: none; } .pj-map-m i { transition: none; } }
+
+.pj-map-path { stroke-linecap: round; stroke-linejoin: round; }
+.leaflet-tooltip.pj-map-tip { background: var(--panel-solid, #0d152a); color: var(--text, #e8f1ff); border: 1px solid var(--line); border-radius: 8px;
+  font: 12px/1.4 var(--mono); box-shadow: 0 4px 18px rgba(0, 0, 0, .5); }
+.leaflet-tooltip-top.pj-map-tip::before { border-top-color: var(--line); }
+.pj-map-hash { color: var(--dim); }

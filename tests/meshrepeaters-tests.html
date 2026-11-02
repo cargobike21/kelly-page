@@ -1,0 +1,112 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mesh repeaters tests</title>
+<style>body{font:13px Consolas,monospace;background:#0b0f14;color:#dde}.ok{color:#3d8}.bad{color:#f55}</style>
+</head><body>
+<h3>Kelly Page -- Repeater management (js/meshrepeaters.js) against the simulated node</h3>
+<pre id="out">running…</pre>
+<div class="card rp-card" id="rp-card" hidden><span id="rp-tag"></span><div id="rp-body"></div></div>
+<script src="../js/meshcore.js"></script>
+<script src="../js/meshcoresim.js"></script>
+<script src="../js/meshqr.js"></script>
+<script src="../js/meshrepeaters.js"></script>
+<script>
+// The real module, a stub Kelly (k), and a real meshcore.js Session wired to the sim (delays 50x shorter).
+// Headless: msedge --headless=new --allow-file-access-from-files --virtual-time-budget=90000 --dump-dom tests/meshrepeaters-tests.html
+// -> RESULT: ALL PASS
+const MC = window.KellyMeshCore, SIM = window.KellyMeshCoreSim, out = [], fails = [];
+const tick = (ms = 0) => new Promise(r => setTimeout(r, ms));
+const until = async (fn, ms = 4000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = fn(); if (v) return v; await tick(10); } return fn(); };
+function eq(name, got, want) {
+  if (String(got) === String(want)) out.push(`<span class="ok">PASS ${name}</span>`);
+  else { out.push(`<span class="bad">FAIL ${name}: got ${got} want ${want}</span>`); fails.push(name); }
+}
+const $ = s => document.querySelector(s), esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const mem = {}, store = { get: (key, d) => key in mem ? JSON.parse(mem[key]) : d, set: (key, v) => { mem[key] = JSON.stringify(v); } };
+const toasts = [], events = [], sounds = [];
+(async () => {
+  try {
+    const sim = SIM.create({ seed: 5, sched: (fn, ms) => { const t = setTimeout(fn, Math.ceil(ms / 50)); return () => clearTimeout(t); } });
+    const nodes = new Map();
+    let session;
+    const framer = new MC.Framer(f => session.onFrame(f));
+    sim.onFrame(f => { const b = new Uint8Array(3 + f.length); b[0] = 0x3e; b[1] = f.length & 255; b[2] = f.length >> 8; b.set(f, 3); framer.push(b); });
+    session = MC.DRIVER.Session({ send: async b => sim.write(b), node: n => nodes.set(n.num, n), self: () => {}, text: () => {}, ack: () => {}, channels: () => {}, status: () => {}, log: () => {}, stat: () => {} });
+    await session.start();
+    let dev = 'meshcore';
+    const k = { $, esc, store, toast: (i, t, d, c) => toasts.push(`${t} | ${d} | ${c}`), addEvent: (c, t) => events.push(t), dirty: () => rp.render(), fmtAgo: () => 'just now', currentPage: () => 'mesh',
+      session: () => session, caps: () => dev === 'meshcore' ? MC.DRIVER.caps : {}, nodes: () => nodes.values(), online: () => true, myCall: () => 'VK4XXX', sfx: s => sounds.push(s) };
+    const rp = window.KellyMeshRepeaters(k);
+    rp.init(); rp.render();
+    eq('card shown for MeshCore', $('#rp-card').hidden, false);
+    // room servers are managed here too (admin login, CLI): 4 repeaters + the room server in the sim world
+    eq('repeaters + room servers only (5 in the sim world), the VK4XXX one first', `${$('#rp-tag').textContent} | ${$('#rp-sel').options[0].textContent.split(' · ')[0]}`, '5 repeaters known | VK4XXX Veranda Rptr');
+    dev = 'meshtastic'; rp.online(); rp.render();
+    eq('card hidden for Meshtastic', $('#rp-card').hidden, true);
+    dev = 'meshcore'; rp.online(); rp.render();
+
+    // a half-typed password survives a redraw
+    $('#rp-pw').value = 'passw'; $('#rp-pw').focus(); rp.online(); rp.render();
+    eq('a redraw keeps a half-typed password and focus', `${$('#rp-pw').value} ${document.activeElement && document.activeElement.id}`, 'passw rp-pw');
+
+    // login (remember ticked) -> admin, clock set, status + telemetry + neighbours read straight away
+    $('#rp-pw').value = 'password'; $('#rp-rem').checked = true;
+    $('#rp-login').click();
+    await until(() => $('#rp-body').textContent.includes('Heard directly'));
+    eq('login: admin chip', !!$('.rp-chip.ok') && $('.rp-chip.ok').textContent, '🛡️ Admin');
+    eq('login: the slow clock was set', $('#rp-body').textContent.includes('its clock was slow: set'), true);
+    eq('login: a toast + the ACK sound', `${toasts.some(t => /^Logged in to VK4XXX Veranda Rptr \| Admin/.test(t))} ${sounds.includes('ack')}`, 'true true');
+    eq('login: password remembered for that repeater', Object.values(store.get('meshRptPw', {}))[0], 'password');
+    eq('status tiles: battery, noise floor (quiet), duplicates', [...document.querySelectorAll('.rp-tiles .tile b')].slice(0, 2).map(b => b.textContent).join(' ') + ' ' + $('#rp-body').textContent.includes('quiet'), '4.11 V -118 dBm true');
+    eq('airtime as a share of uptime', /AirtimeTX1873s[\d.]+%ofthetime/.test($('#rp-body').textContent.replace(/\s+/g, '')), true);
+    eq('telemetry chips: voltage + temperature', [...document.querySelectorAll('.rp-tel .rp-chip')].map(c => c.textContent.split(' ')[0]).join(','), 'voltage,temperature');
+    eq('neighbours named from their key prefix, strongest first', [...document.querySelectorAll('.rp-nb td:first-child')].map(td => td.textContent).join(','), 'Mt Coot-tha Rptr,Toowoomba Rptr');
+
+    // CLI: quick button, typed command, risky command needs a confirm
+    document.querySelector('[data-rp-cli="ver"]').click();
+    await until(() => $('.rp-log') && $('.rp-log').textContent.includes('v1.18.0-sim'));
+    eq('CLI quick button "ver"', $('.rp-log').textContent.includes('> ver') && $('.rp-log').textContent.includes('v1.18.0-sim'), true);
+    $('#rp-cmd').value = 'get name'; $('#rp-run').click();
+    await until(() => $('.rp-log').textContent.includes('> VK4XXX Veranda Rptr'));
+    eq('CLI typed command', $('.rp-log').textContent.includes('> VK4XXX Veranda Rptr'), true);
+    let asked = '';
+    window.confirm = q => { asked = q; return false; };
+    $('#rp-cmd').value = 'set radio 915.0,250,11,5'; $('#rp-run').click();
+    await tick(50);
+    eq('risky CLI command asks first; "no" sends nothing', `${/changes the repeater over the air/.test(asked)} ${$('.rp-log').textContent.includes('set radio')}`, 'true false');
+
+    // own node counters
+    $('#rp-own').click();
+    await until(() => $('.rp-own .tile'));
+    eq('own node counters (GET_STATS)', [...document.querySelectorAll('.rp-own .tile b')].slice(0, 2).map(b => b.textContent).join(' '), '4.01 V -117 dBm');
+
+    // the second repeater: not logged in -> a wrong password is a timeout with a plain reason. Silence is tried twice
+    // (a weak hop loses answers too: a test node, 2026-10-29), so this waits ~2 x 16 s
+    const sel = $('#rp-sel'); sel.value = sel.options[1].value; sel.dispatchEvent(new Event('change', { bubbles: true }));
+    eq('switching repeater: not logged in there', $('#rp-body').textContent.includes('Not logged in'), true);
+    $('#rp-pw').value = 'wrong'; $('#rp-login').click();
+    eq('a login in progress says why it may take a while', $('.rp-busy') && /wrong password gets no answer/.test($('.rp-busy').textContent), true);
+    eq('no answer: tried once more', !!(await until(() => $('.rp-busy') && /trying once more/.test($('.rp-busy').textContent), 25000)), true);
+    await until(() => $('.rp-err'), 25000);
+    eq('a wrong password: no answer, explained', $('.rp-err') && /wrong password, or the repeater is out of range/.test($('.rp-err').textContent), true);
+    eq('the failure goes into the event log', events.some(e => /Mesh repeater .*: Logging in/.test(e)), true);
+    // ▦ QR (QR_REVIEW.md opp. 4): contact/add with the type from the contact -- 2 for a repeater, 3 for a room server
+    const qrOf = async label => {
+      const sl = $('#rp-sel'), o = [...sl.options].find(x => x.textContent.split(' · ')[1] === label); sl.value = o.value; sl.dispatchEvent(new Event('change', { bubbles: true }));
+      $('[data-rp="qr"]').click();
+      await until(() => $('#mqr') && !$('#mqr').hidden && /^meshcore:/.test(($('#mqr .mqr-link') || {}).value || ''), 8000);
+      const link = $('#mqr .mqr-link').value, q = new URLSearchParams(link.split('?')[1] || ''), html = $('#mqr').innerHTML;
+      $('#mqr [data-mqr="close"]').click();
+      return { ok: q.get('public_key') === o.value && q.get('name') === o.textContent.split(' · ')[0], type: q.get('type'), pw: html.includes('type="password"') || ['password', 'wrong'].some(p => link.includes(p) || html.includes(`>${p}<`)) };
+    };
+    eq('▦ QR is on the repeater card', !!$('[data-rp="qr"]'), true);
+    const qa = await qrOf('Repeater');
+    eq('▦ QR of a repeater: its key + name, type 2, no password in the dialog', `${qa.ok} ${qa.type} ${qa.pw}`, 'true 2 false');
+    const qb = await qrOf('Room server');
+    eq('▦ QR of a room server (also on this card): type 3', `${qb.ok} ${qb.type} ${qb.pw}`, 'true 3 false');
+    sim.stop();
+  } catch (e) { out.push(`<span class="bad">ERROR ${e.stack}</span>`); fails.push('exception'); }
+  out.push(`RESULT: ${fails.length ? 'FAIL ' + fails.join(', ') : 'ALL PASS'}`);
+  document.getElementById('out').innerHTML = out.join('\n');
+})();
+</script>
+</body></html>

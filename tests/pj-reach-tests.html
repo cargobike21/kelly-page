@@ -1,0 +1,44 @@
+<!doctype html>
+<!-- Browser check for js/pj-reach.js (2026-10-24): mounts the cards with demo traffic, checks they fill, the select
+     round trip, reset, destroy, and that nothing scrolls the page sideways (run at 390 px wide). Prints RESULT. -->
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>pj-reach tests</title>
+<link rel="stylesheet" href="../css/kelly.css"><link rel="stylesheet" href="../css/pj.css"><link rel="stylesheet" href="../css/pj-reach.css">
+</head><body><div class="pj"><div class="pj-more"><div id="pj-reach" class="pj-part"></div></div></div><pre id="out"></pre>
+<script src="../js/mcdecode.js"></script><script src="../js/pj-core.js"></script><script src="../js/pj-demo.js"></script><script src="../js/pj-reach.js"></script>
+<script>
+(async function () {
+  const out = [], ok = (c, m) => out.push((c ? 'ok   ' : 'FAIL ') + m);
+  try {
+    const PJ = KellyPJ, bus = PJ.createBus(), reg = PJ.createRegistry();
+    let vis = true;
+    const c = { bus, PJ, reg, visible: () => vis, fx: () => true, esc: s => String(s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch])) };
+    const el = document.getElementById('pj-reach'), P = KellyPJReach(el, c);
+    ok(el.querySelectorAll('.card').length === 3, 'three cards');
+    bus.emit('demo', true);
+    const E = KellyPJDemo._engine(KellyMcDecode, PJ.DEMO_CHANNEL, 3); let t = Date.now() - 20 * 60000;
+    for (let i = 0; i < 300; i++) for (const p of E.next()) { t += Math.min(4000, p.dt || 0); PJ.ingest(bus, reg, { raw: p.raw, snr: p.snr, rssi: p.rssi, demo: true, t: Math.min(t, Date.now()) }, { channels: [PJ.DEMO_CHANNEL] }); }
+    bus.emit('visible', true);
+    const rows = el.querySelectorAll('[data-r="reps"] tr[data-id]').length, links = el.querySelectorAll('[data-r="links"] tr[data-id]').length;
+    ok(rows > 3, 'repeater rows: ' + rows);
+    ok(links > 3, 'link rows: ' + links);
+    ok(/×$/.test(el.querySelector('[data-r="ratio"]').textContent), 'ratio shown: ' + el.querySelector('[data-r="ratio"]').textContent);
+    ok(el.querySelector('[data-r="set"]').textContent === 'demo', 'demo tag');
+    let got = null; bus.on('select', x => { if (x.from === 'reach') got = x; });
+    el.querySelector('[data-r="reps"] tr[data-id]').click();
+    ok(got && got.node, 'row click emits select');
+    bus.emit('select', { node: got.node, from: 'net' });
+    ok(el.querySelectorAll('tr.pj-reach-sel').length >= 1, 'incoming select highlights');
+    const sw = document.documentElement.scrollWidth, cw = document.documentElement.clientWidth;
+    ok(sw <= cw + 1, `no page side-scroll (${sw} <= ${cw})`);
+    bus.emit('packet', null); bus.emit('packet', { route: 'flood', journey: null }); bus.emit('select', null);
+    bus.emit('reset');
+    ok(!el.querySelector('[data-r="reps"] tr[data-id]'), 'reset clears');
+    bus.emit('demo', false);
+    ok(el.querySelector('[data-r="set"]').textContent === 'live', 'live tag');
+    P.destroy();
+    ok(el.innerHTML === '', 'destroy empties');
+  } catch (e) { ok(false, 'threw: ' + e.stack); }
+  const fail = out.some(l => l.startsWith('FAIL'));
+  document.getElementById('out').textContent = out.join('\n') + '\nRESULT: ' + (fail ? 'FAIL' : 'PASS');
+})();
+</script></body></html>

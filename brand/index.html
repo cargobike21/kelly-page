@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kelly Page Brand</title>
+<meta name="description" content="Kelly Page brand guidelines: logo suite, colours, typography and usage.">
+<link rel="icon" href="../assets/kelly-favicon.svg" type="image/svg+xml">
+<style>
+  :root {
+    --navy: #0F1D31; --navy-deep: #0A1422; --slate: #5B6B7C; --slate-lt: #768696; --amber: #E8A33A; --amber-deep: #B5701A;
+    --tan: #C98A4B; --blaze: #F2F4F7; --ink: #0F1D31; --body: #36475C; --muted: #6A7A8F; --line: #DDE3EA; --page: #F4F6F9; --card: #FFFFFF;
+    --font: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--body); font: 400 16px/1.6 var(--font); }
+  a { color: var(--amber-deep); }
+  header { background: var(--navy); color: var(--blaze); }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+  .hero { display: grid; grid-template-columns: 1fr 260px; gap: 40px; align-items: center; padding: 56px 0 48px; }
+  .hero img.lockup { width: 420px; max-width: 100%; display: block; }
+  .hero h1 { font-size: 15px; letter-spacing: .28em; text-transform: uppercase; color: var(--amber); margin: 26px 0 8px; font-weight: 700; }
+  .hero p { color: #B8C4D3; max-width: 560px; margin: 0; }
+  .hero .photo { width: 240px; height: 240px; filter: drop-shadow(0 18px 40px rgba(0, 0, 0, .45)); }
+  nav.toc { background: var(--navy-deep); border-top: 1px solid rgba(255, 255, 255, .06); }
+  nav.toc .wrap { display: flex; gap: 26px; overflow-x: auto; }
+  nav.toc a { color: #B8C4D3; text-decoration: none; font-size: 13.5px; font-weight: 600; letter-spacing: .06em; padding: 14px 0; white-space: nowrap; border-bottom: 2px solid transparent; }
+  nav.toc a:hover { color: #fff; border-bottom-color: var(--amber); }
+  section { padding: 56px 0 8px; }
+  h2 { color: var(--ink); font-size: 28px; margin: 0 0 6px; letter-spacing: -.01em; }
+  h2 small { display: block; font-size: 12.5px; letter-spacing: .24em; text-transform: uppercase; color: var(--amber-deep); font-weight: 700; margin-bottom: 6px; }
+  h3 { color: var(--ink); font-size: 17px; margin: 0 0 6px; }
+  .lead { max-width: 760px; margin: 0 0 26px; }
+  .grid { display: grid; gap: 20px; }
+  .g2 { grid-template-columns: repeat(2, 1fr); } .g3 { grid-template-columns: repeat(3, 1fr); } .g4 { grid-template-columns: repeat(4, 1fr); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .card .stage { display: grid; place-items: center; min-height: 220px; padding: 28px; }
+  .card .stage.dark { background: var(--navy); } .card .stage.light { background: var(--blaze); } .card .stage.amber { background: var(--amber); } .card .stage.slate { background: var(--slate); }
+  .card .meta { padding: 16px 18px; border-top: 1px solid var(--line); }
+  .card .meta p { margin: 0 0 8px; font-size: 14px; }
+  .file { font: 600 12.5px Consolas, 'Cascadia Mono', monospace; color: var(--muted); }
+  .dl { font-size: 13.5px; font-weight: 600; text-decoration: none; }
+  .swatch .chip { height: 130px; display: flex; align-items: flex-end; padding: 14px; color: #fff; font-weight: 700; }
+  .swatch .chip.lightchip { color: var(--ink); }
+  .swatch dl { margin: 0; padding: 14px 16px; display: grid; grid-template-columns: 54px 1fr; gap: 3px 8px; font-size: 13px; }
+  .swatch dt { color: var(--muted); } .swatch dd { margin: 0; font-family: Consolas, monospace; color: var(--ink); }
+  .swatch .role { padding: 0 16px 16px; font-size: 13px; color: var(--muted); }
+  .type-sample { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 26px; }
+  .type-sample .t1 { font-size: 44px; font-weight: 700; letter-spacing: .04em; color: var(--ink); line-height: 1.1; }
+  .type-sample .t1 span { color: var(--amber-deep); }
+  .type-sample .t2 { font-size: 14px; font-weight: 600; letter-spacing: .32em; color: var(--muted); margin-top: 10px; }
+  .type-sample .t3 { font-size: 16px; margin-top: 18px; }
+  table.spec { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; font-size: 14px; }
+  table.spec th, table.spec td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--line); }
+  table.spec th { background: #EEF2F6; color: var(--ink); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+  table.spec tr:last-child td { border-bottom: none; }
+  .clear { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 14px; display: grid; place-items: center; padding: 40px; }
+  .clear .zone { position: relative; padding: 30px; outline: 1.5px dashed var(--amber-deep); outline-offset: 0; }
+  .clear .zone img { display: block; width: 150px; }
+  .clear .zone span { position: absolute; font: 700 11px var(--font); color: var(--amber-deep); }
+  .dd { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .dd .card .stage { min-height: 150px; }
+  .dd .do .meta { border-top: 3px solid #2E8B57; } .dd .dont .meta { border-top: 3px solid #C0392B; }
+  .dd .meta b { display: block; font-size: 13px; margin-bottom: 2px; }
+  .dd .do .meta b { color: #2E8B57; } .dd .dont .meta b { color: #C0392B; }
+  footer { margin-top: 64px; background: var(--navy); color: #8A99AD; padding: 30px 0; font-size: 13.5px; }
+  footer .wrap { display: flex; justify-content: space-between; gap: 20px; align-items: center; flex-wrap: wrap; }
+  @media (max-width: 860px) {
+    .hero { grid-template-columns: 1fr; } .hero .photo { width: 180px; height: 180px; }
+    .g2, .g3, .g4, .dd { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap hero">
+    <div>
+      <img class="lockup" src="../assets/kelly-wordmark.svg" alt="Kelly Page -- P25 radio console">
+      <h1>Brand guidelines</h1>
+      <p>How to use the Kelly Page name, logo and colours. The mark is a working dog in profile, ear up, listening -- the amber signal arcs say what the product does.</p>
+    </div>
+    <img class="photo emblem" src="../assets/kelly-logo.svg" alt="">
+  </div>
+  <nav class="toc"><div class="wrap">
+    <a href="#logos">Logo suite</a><a href="#space">Clear space &amp; sizes</a><a href="#colour">Colour</a><a href="#type">Typography</a><a href="#usage">Do &amp; don't</a><a href="#files">Files</a>
+  </div></nav>
+</header>
+
+<main class="wrap">
+
+  <section id="logos">
+    <h2><small>01 · Logo suite</small>Six files</h2>
+    <p class="lead">Use the horizontal lockup wherever there's room for the name. Use the app icon or emblem where space is square. Always use the supplied files; never redraw or retype the logo.</p>
+    <div class="grid g2">
+      <div class="card"><div class="stage dark"><img src="../assets/kelly-wordmark.svg" width="380" alt=""></div>
+        <div class="meta"><h3>Primary lockup -- dark</h3><p>The default. Headers, splash screens, presentations, anywhere on navy or dark backgrounds.</p><span class="file">kelly-wordmark.svg</span></div></div>
+      <div class="card"><div class="stage light"><img src="../assets/kelly-wordmark-light.svg" width="380" alt=""></div>
+        <div class="meta"><h3>Primary lockup -- light</h3><p>For white or light backgrounds: documents, print, invoices, licence certificates. Uses the deep amber for contrast.</p><span class="file">kelly-wordmark-light.svg</span></div></div>
+    </div>
+    <div class="grid g4" style="margin-top:20px">
+      <div class="card"><div class="stage light"><img src="../assets/kelly-mark.svg" width="130" alt=""></div>
+        <div class="meta"><h3>App icon</h3><p>Sidebar, app stores, desktop shortcuts.</p><span class="file">kelly-mark.svg</span></div></div>
+      <div class="card"><div class="stage light"><img src="../assets/kelly-logo.svg" width="130" alt=""></div>
+        <div class="meta"><h3>Emblem</h3><p>Round placements: splash, avatars, stickers, badges.</p><span class="file">kelly-logo.svg</span></div></div>
+      <div class="card"><div class="stage light"><img src="../assets/kelly-favicon.svg" width="64" alt=""> <img src="../assets/kelly-favicon.svg" width="32" alt=""></div>
+        <div class="meta"><h3>Favicon</h3><p>A tighter crop for 16-48 px: browser tabs, small UI.</p><span class="file">kelly-favicon.svg</span></div></div>
+      <div class="card"><div class="stage slate"><img src="../assets/kelly-mono.svg" width="120" alt=""></div>
+        <div class="meta"><h3>Single colour</h3><p>Engraving, embroidery, one-colour print, watermarks.</p><span class="file">kelly-mono.svg</span></div></div>
+    </div>
+  </section>
+
+  <section id="space">
+    <h2><small>02 · Clear space &amp; sizes</small>Give it room</h2>
+    <p class="lead">Keep a clear zone around every logo equal to <b>one quarter of the icon's height</b>. No text, edges or other logos inside it.</p>
+    <div class="grid g2">
+      <div class="clear"><div class="zone"><img src="../assets/kelly-mark.svg" alt=""></div></div>
+      <table class="spec">
+        <tr><th>Logo</th><th>Minimum size</th><th>Below that</th></tr>
+        <tr><td>Primary lockup</td><td>160 px / 40 mm wide</td><td>Use the app icon</td></tr>
+        <tr><td>App icon, emblem</td><td>32 px / 10 mm</td><td>Use the favicon</td></tr>
+        <tr><td>Favicon</td><td>16 px</td><td>--</td></tr>
+        <tr><td>Single colour</td><td>48 px / 12 mm</td><td>Use the favicon</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section id="colour">
+    <h2><small>03 · Colour</small>Palette</h2>
+    <p class="lead">Navy and slate carry the brand. Amber is the accent and should cover no more than about a tenth of any layout. Use deep amber for amber text on light backgrounds.</p>
+    <div class="grid g4">
+      <div class="card swatch"><div class="chip" style="background:var(--navy)">Navy</div><dl><dt>HEX</dt><dd>#0F1D31</dd><dt>RGB</dt><dd>15 29 49</dd></dl><div class="role">Backgrounds, primary text on light</div></div>
+      <div class="card swatch"><div class="chip" style="background:var(--slate)">Slate</div><dl><dt>HEX</dt><dd>#5B6B7C</dd><dt>RGB</dt><dd>91 107 124</dd></dl><div class="role">The mark; secondary surfaces</div></div>
+      <div class="card swatch"><div class="chip" style="background:var(--amber)">Amber</div><dl><dt>HEX</dt><dd>#E8A33A</dd><dt>RGB</dt><dd>232 163 58</dd></dl><div class="role">Accent, highlights, signal arcs (on dark)</div></div>
+      <div class="card swatch"><div class="chip" style="background:var(--amber-deep)">Deep Amber</div><dl><dt>HEX</dt><dd>#B5701A</dd><dt>RGB</dt><dd>181 112 26</dd></dl><div class="role">Amber text and lines on light</div></div>
+      <div class="card swatch"><div class="chip" style="background:var(--slate-lt)">Slate Light</div><dl><dt>HEX</dt><dd>#768696</dd><dt>RGB</dt><dd>118 134 150</dd></dl><div class="role">Mark highlight; muted text on dark</div></div>
+      <div class="card swatch"><div class="chip" style="background:var(--tan)">Tan</div><dl><dt>HEX</dt><dd>#C98A4B</dd><dt>RGB</dt><dd>201 138 75</dd></dl><div class="role">Brow detail only -- not a UI colour</div></div>
+      <div class="card swatch"><div class="chip lightchip" style="background:var(--blaze);border-bottom:1px solid var(--line)">White</div><dl><dt>HEX</dt><dd>#F2F4F7</dd><dt>RGB</dt><dd>242 244 247</dd></dl><div class="role">Text on dark; light backgrounds</div></div>
+      <div class="card swatch"><div class="chip" style="background:var(--navy-deep)">Night</div><dl><dt>HEX</dt><dd>#0A1422</dd><dt>RGB</dt><dd>10 20 34</dd></dl><div class="role">Deepest background, gradients</div></div>
+    </div>
+  </section>
+
+  <section id="type">
+    <h2><small>04 · Typography</small>Clear, sturdy, uppercase</h2>
+    <p class="lead">The name is set in a bold humanist sans, tracked slightly, in capitals. The tagline is semibold with wide tracking. For everything else, use the same family in sentence case.</p>
+    <div class="grid g2">
+      <div class="type-sample"><div class="t1">KELLY <span>PAGE</span></div><div class="t2">P25 RADIO CONSOLE</div>
+        <div class="t3">Name: Segoe UI Bold, +4% tracking · Tagline: Segoe UI Semibold, +32% tracking · Body: Segoe UI Regular</div></div>
+      <table class="spec">
+        <tr><th>Use</th><th>Typeface</th><th>Fallback</th></tr>
+        <tr><td>Brand name, headings</td><td>Segoe UI Bold</td><td>Helvetica Neue Bold, Arial Bold</td></tr>
+        <tr><td>Taglines, labels</td><td>Segoe UI Semibold, caps</td><td>Helvetica Neue Medium</td></tr>
+        <tr><td>Body text</td><td>Segoe UI Regular</td><td>Helvetica Neue, Arial</td></tr>
+        <tr><td>Product UI display</td><td>Orbitron (in the app only)</td><td>Segoe UI</td></tr>
+        <tr><td>Data, IDs, protocol</td><td>JetBrains Mono</td><td>Consolas</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section id="usage">
+    <h2><small>05 · Do &amp; don't</small>Use it well</h2>
+    <div class="dd">
+      <div class="card do"><div class="stage dark"><img src="../assets/kelly-wordmark.svg" width="210" alt=""></div><div class="meta"><b>Do</b>Use the dark lockup on navy and dark photos.</div></div>
+      <div class="card do"><div class="stage light"><img src="../assets/kelly-wordmark-light.svg" width="210" alt=""></div><div class="meta"><b>Do</b>Use the light lockup on white and print.</div></div>
+      <div class="card dont"><div class="stage light"><img src="../assets/kelly-mark.svg" width="110" style="filter:hue-rotate(140deg) saturate(2)" alt=""></div><div class="meta"><b>Don't</b>Recolour the mark. It is slate and amber.</div></div>
+      <div class="card dont"><div class="stage light"><img src="../assets/kelly-mark.svg" width="110" style="transform:scaleX(1.5)" alt=""></div><div class="meta"><b>Don't</b>Stretch, squash or rotate the logo.</div></div>
+      <div class="card dont"><div class="stage" style="background:repeating-linear-gradient(35deg,#c9d3df 0 14px,#8fa0b4 14px 26px,#e6c79a 26px 40px)"><img src="../assets/kelly-wordmark-light.svg" width="210" alt=""></div><div class="meta"><b>Don't</b>Place logos on busy photos without a solid panel.</div></div>
+      <div class="card dont"><div class="stage light"><img src="../assets/kelly-mark.svg" width="110" style="transform:scaleX(-1)" alt=""></div><div class="meta"><b>Don't</b>Flip the mark. It always faces forward, to the right.</div></div>
+      <div class="card dont"><div class="stage dark"><span style="font:700 34px var(--font);color:#fff;letter-spacing:.04em">Kelly<span style="color:var(--amber)">page</span></span></div><div class="meta"><b>Don't</b>Retype the name in other fonts or cases.</div></div>
+      <div class="card dont"><div class="stage light"><img src="../assets/kelly-mark.svg" width="110" style="opacity:.35" alt=""></div><div class="meta"><b>Don't</b>Fade the logo or use it as a low-contrast pattern.</div></div>
+    </div>
+  </section>
+
+  <section id="files">
+    <h2><small>06 · Files</small>Download</h2>
+    <p class="lead">All logos are SVG: they scale to any size, print sharply, and open in any browser, Inkscape, Illustrator or Figma. Generated from <code>brand/make_logos.py</code>, so edit that file, not the SVGs.</p>
+    <table class="spec">
+      <tr><th>File</th><th>Use</th><th></th></tr>
+      <tr><td class="file">kelly-wordmark.svg</td><td>Primary lockup, dark backgrounds</td><td><a class="dl" href="../assets/kelly-wordmark.svg" download>Download</a></td></tr>
+      <tr><td class="file">kelly-wordmark-light.svg</td><td>Primary lockup, light backgrounds</td><td><a class="dl" href="../assets/kelly-wordmark-light.svg" download>Download</a></td></tr>
+      <tr><td class="file">kelly-mark.svg</td><td>App icon</td><td><a class="dl" href="../assets/kelly-mark.svg" download>Download</a></td></tr>
+      <tr><td class="file">kelly-logo.svg</td><td>Circular emblem</td><td><a class="dl" href="../assets/kelly-logo.svg" download>Download</a></td></tr>
+      <tr><td class="file">kelly-favicon.svg</td><td>Favicon / small sizes</td><td><a class="dl" href="../assets/kelly-favicon.svg" download>Download</a></td></tr>
+      <tr><td class="file">kelly-mono.svg</td><td>Single colour (white; recolour for print)</td><td><a class="dl" href="../assets/kelly-mono.svg" download>Download</a></td></tr>
+    </table>
+  </section>
+</main>
+
+<footer><div class="wrap"><img src="../assets/kelly-wordmark.svg" width="200" alt="Kelly Page"><span>Brand guidelines v1.0 · October 2026</span></div></footer>
+</body>
+</html>

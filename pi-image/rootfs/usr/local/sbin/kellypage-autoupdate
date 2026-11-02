@@ -1,0 +1,284 @@
+#!/usr/bin/python3
+"""Kelly Page automatic update (run daily by kellypage-autoupdate.timer; or by hand: sudo kellypage-autoupdate [--force]).
+
+Fetches the signed KPU1 manifest (outbound HTTPS only), checks the signature against the keys pinned in
+/etc/kellypage/release-keys.json, then the rules (product, channel, no downgrade, min_from, not a version that already
+failed here), downloads the zip, checks sha256 and size, and installs it with `kellypage-update` (which puts the old
+version back if it won't start). Finally a health check (kelly-bridge active and HTTP on 127.0.0.1:8025 within 90 s);
+if that fails the previous version is restored (`kellypage-update --rollback`) and the version is recorded in
+/var/lib/kellypage/bad-versions so it is never tried again on this Pi. Everything is logged to the journal.
+
+Config /etc/kellypage/autoupdate.conf:  ENABLED=0|1  CHANNEL=stable|beta  MANIFEST_URL=... (optional)
+Options: --force  run even if ENABLED=0 (a manual check)    --check  verify and report only, install nothing
+
+Exit codes:
+  0  nothing to do (disabled, up to date) or updated and healthy
+  1  could not fetch/read (network, config, local error); nothing changed
+  2  refused: bad signature, unknown key, bad hash/size, downgrade, wrong channel/product, min_from, bad version
+  3  install failed; kellypage-update put the old version back
+  4  new version unhealthy; previous version restored and the new one recorded as bad
+  5  rollback failed -- needs a person (CRITICAL in the journal)
+  9  another run is in progress
+"""
+import fcntl
+import importlib.util
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+
+LIB = "/usr/local/lib/kellypage"
+CONF = "/etc/kellypage/autoupdate.conf"
+KEYS = "/etc/kellypage/release-keys.json"
+STATE = "/var/lib/kellypage"
+BAD = STATE + "/bad-versions"
+VERSION_JS = "/opt/kelly-page/js/version.js"
+LOCK = "/run/kellypage/autoupdate.lock"   # the service's RuntimeDirectory=kellypage
+DEFAULT_URL = "https://downloads.kellypage.app/kellypage-pi-%s.kpu1"
+HEALTH_URL = "http://127.0.0.1:8025/"
+HEALTH_SECONDS = 90
+MAX_ZIP = 300 * 1024 * 1024
+
+OK, EFETCH, EREFUSED, EINSTALL, EHEALTH, EROLLBACK, EBUSY = 0, 1, 2, 3, 4, 5, 9
+
+
+def _load_kpu1():
+    for d in (LIB, os.path.dirname(os.path.abspath(__file__)) + "/../lib/kellypage"):
+        p = os.path.join(d, "kpu1.py")
+        if os.path.exists(p):
+            spec = importlib.util.spec_from_file_location("kpu1", p)
+            m = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(m)
+            return m
+    raise SystemExit("kpu1.py not found")
+
+
+kpu1 = _load_kpu1()
+
+
+def log(level, msg):
+    # journald reads the <N> prefix as the priority when run from systemd; harmless on a terminal
+    pri = {"info": 6, "warn": 4, "err": 3, "crit": 2}[level]
+    print("<%d>kellypage-autoupdate: %s" % (pri, msg), flush=True)
+
+
+class Refused(Exception):
+    pass
+
+
+def read_conf(path=CONF):
+    c = {"ENABLED": "0", "CHANNEL": "stable", "MANIFEST_URL": ""}
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                m = re.fullmatch(r"([A-Z_]+)=(.*)", line)
+                if m and not line.startswith("#"):
+                    c[m.group(1)] = m.group(2).strip().strip('"').strip("'")
+    except FileNotFoundError:
+        pass
+    return c
+
+
+def installed_version(path=VERSION_JS):
+    with open(path, encoding="utf-8") as f:
+        m = re.search(r"KELLY_VERSION\s*=\s*'([^']+)'", f.read())
+    if not m:
+        raise OSError("no KELLY_VERSION in " + path)
+    return m.group(1)
+
+
+def read_bad(path=BAD):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return {l.strip() for l in f if l.strip()}
+    except FileNotFoundError:
+        return set()
+
+
+def mark_bad(version, path=BAD):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(version + "\n")
+
+
+def http_get(url, limit, timeout=60):
+    """Bytes of an https URL, at most `limit` (more = error). The default fetcher; tests replace it."""
+    if not url.startswith("https://"):
+        raise OSError("not https: " + url)
+    req = urllib.request.Request(url, headers={"User-Agent": "kellypage-autoupdate"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        data = r.read(limit + 1)
+    if len(data) > limit:
+        raise OSError("too large: " + url)
+    return data
+
+
+def healthy(wait=HEALTH_SECONDS, sleep=time.sleep, now=time.monotonic):
+    """kelly-bridge active AND the page answering HTTP (any status) on 127.0.0.1:8025, within `wait` seconds."""
+    end = now() + wait
+    while True:
+        active = subprocess.run(["systemctl", "is-active", "--quiet", "kelly-bridge.service"]).returncode == 0
+        if active:
+            try:
+                urllib.request.urlopen(HEALTH_URL, timeout=5).close()
+                return True
+            except urllib.error.HTTPError:
+                return True
+            except (OSError, ValueError):
+                pass
+        if now() >= end:
+            return False
+        sleep(3)
+
+
+def run_update(zip_path):
+    return subprocess.run(["/usr/local/bin/kellypage-update", zip_path]).returncode
+
+
+def run_rollback():
+    return subprocess.run(["/usr/local/bin/kellypage-update", "--rollback"]).returncode
+
+
+def check_manifest(token, keys, conf_channel, installed, bad):
+    """Verify + apply the policy. Returns (payload, file entry) for an update to install, or None if up to date.
+    Raises Refused / kpu1.ManifestError."""
+    p = kpu1.verify(token, keys)
+    if p["product"] != "kellypage-pi":
+        raise Refused("manifest is for product %s, not kellypage-pi" % p["product"])
+    if p["channel"] != conf_channel:
+        raise Refused("manifest channel %s, this Pi follows %s" % (p["channel"], conf_channel))
+    new, cur = kpu1.parse_version(p["version"]), kpu1.parse_version(installed)
+    if new < cur:
+        raise Refused("downgrade refused: %s is older than installed %s" % (p["version"], installed))
+    if new == cur:
+        return None
+    if p["version"] in bad:
+        raise Refused("%s failed on this Pi before; not trying it again" % p["version"])
+    if p.get("min_from") and cur < kpu1.parse_version(p["min_from"]):
+        raise Refused("%s needs at least %s installed first (this Pi has %s): update by hand, see the README" % (
+            p["version"], p["min_from"], installed))
+    zips = [f for f in p["files"] if f["name"].lower().endswith(".zip")]
+    if not zips:
+        raise Refused("manifest has no zip")
+    if zips[0]["size"] > MAX_ZIP:
+        raise Refused("zip larger than the %d MB limit" % (MAX_ZIP >> 20))
+    return p, zips[0]
+
+
+def fetch_zip(entry, dest_dir, getter=http_get):
+    data = getter(entry["url"], entry["size"])
+    if len(data) != entry["size"]:
+        raise Refused("size mismatch: got %d bytes, manifest says %d" % (len(data), entry["size"]))
+    path = os.path.join(dest_dir, entry["name"])
+    with open(path, "wb") as f:
+        f.write(data)
+    if kpu1.sha256_file(path) != entry["sha256"]:
+        raise Refused("sha256 mismatch")
+    return path
+
+
+def main(argv, getter=http_get, update=None, rollback=None, health=None, paths=None):
+    """Returns the exit code. The keyword hooks are for the tests."""
+    update = update or run_update
+    rollback = rollback or run_rollback
+    health = health or healthy
+    P = dict(conf=CONF, keys=KEYS, bad=BAD, version=VERSION_JS, lock=LOCK, tmp=None)
+    P.update(paths or {})
+    force, check_only = "--force" in argv, "--check" in argv
+
+    lockdir = os.path.dirname(P["lock"])
+    try:
+        if os.path.islink(lockdir):
+            raise OSError("%s is a symlink" % lockdir)
+        os.makedirs(lockdir, mode=0o755, exist_ok=True)   # systemd's RuntimeDirectory= makes it; manual runs may not have it
+        fd = os.open(P["lock"], os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    except OSError as e:
+        log("err", "cannot open the lock file: %s" % e)
+        return EFETCH
+    with os.fdopen(fd, "w") as lockf:
+        try:
+            fcntl.flock(lockf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            log("info", "another run is in progress")
+            return EBUSY
+        return _run(P, force, check_only, getter, update, rollback, health)
+
+
+def _run(P, force, check_only, getter, update, rollback, health):
+    conf = read_conf(P["conf"])
+    if conf["ENABLED"] != "1" and not force:
+        log("info", "automatic updates are off (ENABLED=0); sudo kellypage-setup turns them on")
+        return OK
+    channel = conf["CHANNEL"]
+    if channel not in kpu1.CHANNELS:
+        log("err", "CHANNEL=%s is not stable or beta" % channel)
+        return EFETCH
+    url = conf["MANIFEST_URL"] or DEFAULT_URL % channel
+    try:
+        keys = kpu1.load_keys(P["keys"])
+        installed = installed_version(P["version"])
+        token = getter(url, kpu1.MAX_MANIFEST).decode("ascii", "replace")
+    except (OSError, ValueError, kpu1.ManifestError) as e:
+        log("err", "cannot check for updates: %s" % e)
+        return EFETCH
+
+    try:
+        res = check_manifest(token, keys, channel, installed, read_bad(P["bad"]))
+    except (Refused, kpu1.ManifestError) as e:
+        log("err", "REFUSED: %s" % e)
+        return EREFUSED
+    if res is None:
+        log("info", "Kelly Page %s is up to date (%s channel)" % (installed, channel))
+        return OK
+    payload, entry = res
+    log("info", "update available: %s -> %s (%s)" % (installed, payload["version"], channel))
+    if check_only:
+        return OK
+
+    with tempfile.TemporaryDirectory(prefix="kp-autoupdate-", dir=P["tmp"]) as tmp:
+        try:
+            zpath = fetch_zip(entry, tmp, getter)
+        except Refused as e:
+            log("err", "REFUSED: %s" % e)
+            return EREFUSED
+        except OSError as e:
+            log("err", "download failed: %s" % e)
+            return EFETCH
+        log("info", "downloaded and verified %s (%d bytes, sha256 ok); installing" % (entry["name"], entry["size"]))
+        if update(zpath) != 0:
+            log("err", "install of %s failed; kellypage-update restored %s" % (payload["version"], installed))
+            mark_bad(payload["version"], P["bad"])
+            return EINSTALL
+
+    try:
+        now_running = installed_version(P["version"])
+    except OSError:
+        now_running = None
+    if now_running != payload["version"]:
+        # the signed manifest said one version, the zip contained another: never keep it
+        log("err", "installed zip is %s but the manifest says %s -- restoring %s" % (now_running, payload["version"], installed))
+        mark_bad(payload["version"], P["bad"])
+        if rollback() != 0:
+            log("crit", "ROLLBACK FAILED -- Kelly Page needs a person: see /opt/kelly-page.old and journalctl -u kelly-bridge")
+            return EROLLBACK
+        return EHEALTH
+    if health():
+        log("info", "Kelly Page %s is running and healthy" % payload["version"])
+        return OK
+    log("err", "%s is not healthy within %d s -- restoring %s" % (payload["version"], HEALTH_SECONDS, installed))
+    mark_bad(payload["version"], P["bad"])
+    if rollback() != 0:
+        log("crit", "ROLLBACK FAILED -- Kelly Page needs a person: see /opt/kelly-page.old and journalctl -u kelly-bridge")
+        return EROLLBACK
+    log("warn", "restored %s; %s recorded as bad in %s" % (installed, payload["version"], P["bad"]))
+    return EHEALTH
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

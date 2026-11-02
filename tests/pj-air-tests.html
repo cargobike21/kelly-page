@@ -1,0 +1,103 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pj-air tests</title>
+<link rel="stylesheet" href="../css/kelly.css"><link rel="stylesheet" href="../css/pj.css"><link rel="stylesheet" href="../css/pj-air.css">
+</head><body>
+<!-- Packet Journey airtime (js/pj-air.js) DOM side: real packets through KellyPJ.ingest, a fake shell context, demo / live split,
+     hidden = no redraw, reset, null events, the Analyser button, no KellyMcHashCheck = no hash card. Pure maths: tests/pj-air-test.js.
+     Run: msedge --headless=new --allow-file-access-from-files --dump-dom file:///.../tests/pj-air-tests.html  -> RESULT: ALL PASS -->
+<div data-tabs="mesh"><button data-tab="analyser" id="an">analyser</button></div>
+<div class="pj" style="width:600px"><div id="pj-air" class="pj-part"></div></div>
+<div style="width:390px"><div id="pj-air2"></div></div>
+<pre id="out"></pre>
+<script src="../js/mcdecode.js"></script><script src="../js/pj-core.js"></script><script src="../js/mchashcheck.js"></script><script src="../js/pj-air.js"></script>
+<script>
+(async function () {
+  const out = [], D = KellyMcDecode, PJ = KellyPJ; let fails = 0;
+  const eq = (name, got, want) => { const ok = JSON.stringify(got) === JSON.stringify(want); if (!ok) fails++; out.push(`${ok ? 'PASS' : 'FAIL'} ${name}${ok ? '' : ` -- got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`}`); };
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  try {
+    const te = s => new TextEncoder().encode(s);
+    const chans = [{ name: '#test', secret: D.sha256(te('#test')).subarray(0, 16) }, PJ.DEMO_CHANNEL];
+    const S = JSON.parse(await new Promise((res, rej) => { const x = new XMLHttpRequest(); x.open('GET', 'mcdecode-samples.json'); x.onload = () => res(x.responseText); x.onerror = rej; x.send(); })).packets;
+    let vis = true, radioDemo = true;
+    const bus = PJ.createBus(), reg = PJ.createRegistry({});
+    const esc = s => String(s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    const c = { bus, PJ, D, reg, esc, fmtAgo: t => t ? Math.round((Date.now() - t) / 1000) + 's ago' : 'never', fx: () => false, reduced: () => true,
+      visible: () => vis, ingest: rx => PJ.ingest(bus, reg, rx, { channels: chans }),
+      radio: () => radioDemo ? { freqMHz: 923.125, bwKHz: 62.5, sf: 8, cr: 5, demo: true } : { freqMHz: 915.8, bwKHz: 250, sf: 11, cr: 5 },
+      hashExpected: () => 2, byPrefix: () => [] };
+    const $ = s => document.querySelector(s), mount = $('#pj-air');
+    const sel = []; bus.on('select', x => sel.push(x));
+
+    const P = KellyPJAir(mount, c);
+    eq('factory returns destroy()', typeof P.destroy, 'function');
+    eq('pure function exported', typeof KellyPJAir.airtimeMs, 'function');
+    for (const p of S) c.ingest({ raw: p.hex, snr: p.snr, rssi: p.rssi });
+    let V = P._view();
+    eq('real: all packets counted', V.n, S.length);
+    await sleep(1150);
+    eq('DOM: gauge % drawn', /%$/.test(mount.querySelector('[data-r="pct"]').textContent) && V.loadPct > 0, true);
+    eq('DOM: load meaning set', mount.querySelector('[data-r="mean"]').textContent.length > 10, true);
+    eq('DOM: "assumed SEQ defaults" for a demo radio', /assumed SEQ defaults/.test(mount.querySelector('[data-r="radio"]').textContent), true);
+    eq('DOM: preamble 32 at SF8', /preamble 32/.test(mount.querySelector('[data-r="radio"]').textContent), true);
+    eq('DOM: talkers listed', mount.querySelectorAll('[data-r="talk"] tr[data-id]').length, Math.min(8, V.talkers.length));
+    eq('DOM: kind legend', mount.querySelectorAll('[data-r="kleg"] li').length, V.kN.filter(Boolean).length);
+    eq('DOM: canvases sized', [...mount.querySelectorAll('canvas')].every(cv => cv.width > 0 && cv.height > 0), true);
+    eq('DOM: hash card shown', mount.querySelector('[data-r="hashCard"]').hidden, false);
+    eq('DOM: wrong-size row for the real 1-byte station', [...mount.querySelectorAll('[data-r="wrong"] tr')].some(tr => /1-byte/.test(tr.textContent) && /16/.test(tr.textContent)), true);
+    eq('DOM: wrong % shown', /%$/.test(mount.querySelector('[data-r="hpct"]').textContent), true);
+    eq('DOM: no horizontal overflow at 600 px', mount.scrollWidth <= mount.clientWidth + 1, true);
+
+    // talker click -> select
+    const tr = mount.querySelector('[data-r="talk"] tr[data-id]'); tr.click();
+    eq('click talker emits select', sel.length && sel[sel.length - 1].from === 'air' && sel[sel.length - 1].node === tr.dataset.id, true);
+    // Analyser button
+    let an = 0; $('#an').onclick = () => an++;
+    mount.querySelector('[data-act="analyser"]').click();
+    eq('How to fix -> clicks the Analyser tab', an, 1);
+
+    // hidden: no redraw
+    vis = false; bus.emit('visible', false);
+    const before = mount.querySelector('[data-r="tot"]').textContent;
+    c.ingest({ raw: S[0].hex, snr: 1, rssi: -100 });
+    await sleep(1150);
+    eq('hidden: no redraw', mount.querySelector('[data-r="tot"]').textContent, before);
+    vis = true; bus.emit('visible', true);
+    eq('visible again: redraws at once', mount.querySelector('[data-r="tot"]').textContent !== before, true);
+
+    // real radio settings: no "assumed"
+    radioDemo = false; bus.emit('visible', true);
+    eq('real radio: no "assumed" tag', /assumed/.test(mount.querySelector('[data-r="radio"]').textContent), false);
+
+    // demo split
+    bus.emit('demo', true);
+    c.ingest({ raw: S[1].hex, snr: 3, rssi: -90, demo: true });
+    await sleep(1100);
+    eq('demo: shows the demo set', [P._view().n, P._sets().live.n], [1, S.length + 1]);
+    eq('demo: tag says demo', mount.querySelector('[data-r="set"]').textContent, 'demo');
+    bus.emit('demo', false); eq('demo off: live set back', P._view().n, S.length + 1);
+
+    // null-ish events never throw out of the handler
+    let threw = false; const warn = console.warn; console.warn = () => { threw = true; };
+    bus.emit('packet', null); bus.emit('packet', { size: null, d: null, src: null }); bus.emit('packet', { size: 30, kind: 'zzz', src: { id: null }, d: { ok: true, flood: true, hashSize: 1, typeName: 'ADVERT', info: {} } });
+    console.warn = warn;
+    eq('null fields: handler never threw', threw, false);
+
+    // reset
+    bus.emit('reset'); eq('reset clears both sets', [P._sets().live.n, P._sets().demo.n], [0, 0]);
+    eq('reset: empty talkers row', /Waiting/.test(mount.querySelector('[data-r="talk"]').textContent), true);
+
+    // phone width + no KellyMcHashCheck -> no hash card
+    const keep = window.KellyMcHashCheck; window.KellyMcHashCheck = undefined;
+    const m2 = $('#pj-air2'), P2 = KellyPJAir(m2, c);
+    eq('no KellyMcHashCheck: hash card hidden', m2.querySelector('[data-r="hashCard"]').hidden, true);
+    c.ingest({ raw: S[2].hex, snr: 3, rssi: -90 }); await sleep(1100);
+    eq('390 px: no horizontal overflow', m2.scrollWidth <= m2.clientWidth + 1, true);
+    window.KellyMcHashCheck = keep;
+    P2.destroy(); eq('destroy empties the mount', m2.innerHTML, '');
+    P.destroy();
+  } catch (e) { fails++; out.push('FAIL exception ' + (e && e.stack || e)); }
+  out.push(fails ? `RESULT: ${fails} FAIL` : 'RESULT: ALL PASS');
+  document.getElementById('out').textContent = out.join('\n');
+})();
+</script></body></html>

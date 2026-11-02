@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kelly APRS iGate</title>
+<link rel="icon" href="assets/kelly-favicon.svg" type="image/svg+xml">
+<style>
+  /* the manual's look (manual.html): paper + ink, amber accents, one reading column */
+  :root { --paper: #f6f3ec; --ink: #16202e; --muted: #5b6b7c; --rule: #d9d2c4; --panel: #ece6da; --amber: #b5701a; --warn: #a6402e;
+    --body: 'Source Serif 4', Georgia, 'Times New Roman', serif; --head: 'Segoe UI', system-ui, sans-serif; --mono: 'Cascadia Mono', Consolas, monospace; color-scheme: light; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --paper: #0d1726; --ink: #e8ecf2; --muted: #9aa8b8; --rule: #233650; --panel: #13223a; --amber: #e8a33a; --warn: #ff8a73; color-scheme: dark; } }
+  :root[data-theme="dark"] { --paper: #0d1726; --ink: #e8ecf2; --muted: #9aa8b8; --rule: #233650; --panel: #13223a; --amber: #e8a33a; --warn: #ff8a73; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.6 var(--body); }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1, h2, h3 { font-family: var(--head); line-height: 1.25; }
+  h1 { font-size: 30px; margin: 8px 0 4px; } h2 { font-size: 22px; margin: 36px 0 8px; border-bottom: 1px solid var(--rule); padding-bottom: 4px; } h3 { font-size: 18px; margin: 22px 0 6px; }
+  .lede { color: var(--muted); margin-top: 0; }
+  code, .mono { font-family: var(--mono); font-size: .88em; background: var(--panel); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+  .ui { font-family: var(--head); font-weight: 600; white-space: nowrap; }
+  .note { background: var(--panel); border-left: 4px solid var(--amber); padding: 10px 14px; margin: 16px 0; border-radius: 0 6px 6px 0; }
+  .note.warn { border-left-color: var(--warn); }
+  .note b:first-child { font-family: var(--head); }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; margin: 10px 0; }
+  th, td { text-align: left; vertical-align: top; padding: 6px 8px; border-bottom: 1px solid var(--rule); }
+  th { font-family: var(--head); color: var(--muted); font-weight: 600; }
+  .wrap { overflow-x: auto; }
+  a { color: var(--amber); }
+  ol li, ul li { margin: 4px 0; }
+  nav.toc { background: var(--panel); padding: 10px 16px; border-radius: 6px; font-family: var(--head); font-size: 15px; }
+  nav.toc a { display: inline-block; margin: 2px 10px 2px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🗼 Kelly APRS iGate</h1>
+  <p class="lede">Put MeshCore GPS trackers, and their telemetry, on aprs.fi. Every Kelly Page station can be an iGate.</p>
+  <nav class="toc"><a href="#what">What it does</a><a href="#setup">Set up an iGate</a><a href="#list">Your list</a><a href="#telemetry">Telemetry</a><a href="#tracker">Get your tracker on aprs.fi</a><a href="#buy">Buying a tracker</a><a href="#own">Beacon your own position</a><a href="#admin">Club list admin</a><a href="#counters">Counters and problems</a></nav>
+
+  <div class="note warn"><b>Licensed operators only.</b> APRS-IS is an amateur network. A tracker is gated only under its owner's own callsign, which must be a licensed amateur callsign. Never gate anyone else's tracker under your call, and never add an unlicensed person's tracker to your list.</div>
+
+  <h2 id="what">What it does</h2>
+  <p>A MeshCore node with GPS puts its position in its <em>adverts</em>, the short "here I am" packets it sends. When your Kelly's MeshCore node hears an advert from a node on <strong>your list</strong>, Kelly turns it into an APRS position and sends it to APRS-IS, and the node appears on <a href="https://aprs.fi">aprs.fi</a> under its owner's callsign. For devices you set it up for, Kelly also reads the node's telemetry (battery, solar, temperature, noise floor and so on) and sends it as APRS telemetry, which aprs.fi draws as graphs.</p>
+  <ul>
+    <li><strong>Your list, your call.</strong> Only nodes on your own list are gated. You add them yourself, take the ones Kelly offers (nodes it hears with a callsign in their name), or let the club list add its known users. You can edit, turn off or remove any of them.</li>
+    <li><strong>By key, not name.</strong> A node on your list is known by its MeshCore <em>public key</em>, not its name (anyone can copy a name). Kelly also checks each advert's digital signature, so a forged one can't use a listed key.</li>
+    <li><strong>Receive-only.</strong> Positions and telemetry go from MeshCore to APRS-IS only. Nothing goes back onto the air. Messages, channel chat and anything encrypted are never sent anywhere.</li>
+    <li><strong>Internet only.</strong> Everything goes to APRS-IS through the Kelly bridge's internet connection (<code>kelly_bridge.py</code> on your PC or Pi), never over P25. The only thing the iGate fetches over P25 is the club list.</li>
+    <li><strong>Polite.</strong> A tracker is gated at most every 2 minutes, or every 30 seconds if it is moving. The same position twice is dropped. All APRS-IS traffic is rate-limited, and each Kelly waits a random few seconds so several iGates hearing one advert don't all send at once. Kelly only asks a node for its position or telemetry when your node has a direct route to it, never by flooding the mesh.</li>
+  </ul>
+
+  <h2 id="setup">Set up an iGate</h2>
+  <ol>
+    <li>Start the Kelly bridge on a PC or Pi with internet. That's the iGate's way to APRS-IS.</li>
+    <li>Connect your MeshCore node on the <span class="ui">LoRa Mesh</span> page (USB, Bluetooth or the bridge), and leave it connected. Kelly only hears what the node hears.</li>
+    <li>Open <span class="ui">APRS iGate</span>, in the sidebar under Data services.</li>
+    <li>Check the <span class="ui">Callsign</span> (Kelly fills it in from your station setup) and pick an <span class="ui">SSID</span>. <code>-10</code> is the usual one for an iGate. The badge shows the full call, e.g. <code>VK4XXX-10</code>.</li>
+    <li>Put some nodes on <span class="ui">🗼 My list</span> (see <a href="#list">Your list</a>).</li>
+    <li>Try <span class="ui">Dry run</span> first. Turn on <span class="ui">Gate the MeshCore nodes on my list to APRS-IS</span> and watch the <span class="ui">Log</span>: it shows exactly what would be sent. When it looks right, turn Dry run off.</li>
+  </ol>
+  <p>The status badge reads <strong>gating</strong> when everything is ready. Otherwise it names what's missing: a callsign, an empty list, or no Kelly bridge.</p>
+  <div class="note"><b>Running it all the time.</b> Kelly gates only while it's running and the node is connected. On a Raspberry Pi with the Kelly keeper, it keeps gating with every PC switched off. See <code>install-pi.html</code>.</div>
+  <h3>Options</h3>
+  <ul>
+    <li><span class="ui">Ask the trackers on my list for their position</span> (off by default). A tracker's own adverts can be hours apart. With this on, Kelly asks each listed tracker it has a direct route to for its position, at most every 10 minutes (15 by default). Each request goes over the air, so use it sparingly. The tracker must allow location telemetry to you (see <a href="#buy">configuring a tracker</a>).</li>
+    <li><span class="ui">iGate status line</span>: a short status text under your iGate call, every 30 minutes or more.</li>
+    <li><span class="ui">APRS-IS server, filter and limits</span>. The server defaults to <code>aunz.aprs2.net:14580</code> (if it can't be reached, the bridge tries <code>rotate.aprs2.net</code> next), and the limits default to one packet per 5 seconds, a burst of 3, and 2 minutes per station. Leave them alone unless you know why.</li>
+  </ul>
+  <h3>APRS-IS passcode</h3>
+  <p>You don't enter one. The Kelly bridge works it out from your callsign, and it never leaves the bridge. If you need a different passcode, set <code>KELLY_IGATE_PASS</code> in the bridge's environment.</p>
+  <h3>MeshPRS frames</h3>
+  <p>MeshPRS is a new standard for APRS over MeshCore: stations send positions, messages, telemetry, objects and status as small frames on the <code>#meshprs</code> channel. Turn on <span class="ui">Gate MeshPRS frames</span> in the <span class="ui">📡 MeshPRS frames</span> card, and press <span class="ui">Add #meshprs to my node</span> if the card says your node doesn't have the channel yet.</p>
+  <p>A frame reaches aprs.fi only when its callsign is on your list (or the club list) with the same node key, and that node's advert was heard in the last 24 hours. The card counts what was heard, queued, sent and dropped, and why.</p>
+  <p>Kelly can send MeshPRS frames too. Turn on <span class="ui">Send my beacon as a MeshPRS position frame too</span>, pick the SSID, symbol and a short comment, and each time <span class="ui">Beacon my position</span> sends your advert, Kelly also sends a position frame on <code>#meshprs</code>, flood or zero-hop to match. Your node needs the <code>#meshprs</code> channel, and other iGates need your node's key on their list (or the club list) to gate it.</p>
+
+  <h2 id="list">Your list</h2>
+  <p><span class="ui">🗼 My list</span> is the only thing that lets a node through. It fills three ways, and the <span class="ui">From</span> column shows which:</p>
+  <ul>
+    <li><strong>mine</strong>: pick a node from <span class="ui">MeshCore contact</span> (or paste its 64-character key), enter its <strong>owner's</strong> callsign, an SSID (<code>-12</code> one-way tracker, <code>-9</code> car, <code>-7</code> handheld), a symbol and a comment, and press <span class="ui">Add / update</span>.</li>
+    <li><strong>node name</strong>: when your node hears a node with a callsign in its name, e.g. <code>VK4ZR-1 Solar Rpt</code> or <code>VK4XXX Tracker</code>, it's offered under <em>Heard nodes with a callsign in their name</em>. Press <span class="ui">Add</span> (or <span class="ui">Add all</span>), or <span class="ui">Dismiss</span> it. Anyone can name a node anything, so only add the ones you recognise.</li>
+    <li><strong>club list</strong>: the known users the club list admin publishes are added for you. While you leave one alone it follows the club list. Once you edit, disable or remove it, it's yours, and a removed one stays removed.</li>
+  </ul>
+  <p>Use <span class="ui">Edit</span>, <span class="ui">Disable</span> and <span class="ui">✕</span> in the table. A disabled node stays on the list but isn't gated. A removed or dismissed node isn't offered or added again until you press <span class="ui">Forget dismissed nodes</span>.</p>
+
+  <h2 id="telemetry">Telemetry on aprs.fi</h2>
+  <p>APRS telemetry gives each station <strong>5 values</strong> (graphed on aprs.fi) and <strong>8 on/off bits</strong>. Each device is set up separately, because what a node reports depends on its hardware and firmware. Press <span class="ui">Telemetry</span> on a row of your list:</p>
+  <ol>
+    <li>Pick a <span class="ui">Device type</span> to start from: <em>MeshCore repeater</em> (battery, noise floor, transmit airtime, RSSI, SNR), <em>SenseCAP Solar Node</em>, <em>GPS tracker</em> (battery), <em>Weather / environment sensor</em> (battery, temperature, humidity, pressure), or <em>Custom</em>.</li>
+    <li>Press <span class="ui">Read the node now</span>. Kelly asks the node for its telemetry and, for a repeater, its status, and lists every reading under <em>What the node reports</em>, e.g. <code>ch 1 voltage 4.05 V</code> or <code>st:noise -110 dBm</code>.</li>
+    <li>Adjust the 5 values for this device. Each one has a <span class="ui">Source</span> (one of those readings), a <span class="ui">Name</span> and <span class="ui">Unit</span> as aprs.fi will show them, and a <span class="ui">Min</span> and <span class="ui">Max</span>. A value goes out as 0-255 across min-max, so choose a range that just covers what you expect, e.g. a single-cell battery 3.0-4.5 V. The <span class="ui">Now</span> column shows what would be sent. Under <em>and 8 on/off bits</em> you can add rules such as <em>LowBat when the battery is below 3.5 V</em>.</li>
+    <li>Turn on <span class="ui">Send telemetry to aprs.fi</span>, pick how often (every 10 minutes or more), and press <span class="ui">Save for this device</span>. The preview shows the exact lines.</li>
+    <li>Got several of the same device? Press <span class="ui">Save as a device type…</span> and pick that type for the others.</li>
+  </ol>
+  <ul>
+    <li>Kelly polls the node only when your node has a <strong>direct route</strong> to it (it never floods the mesh). If it hasn't one yet, message the node once or wait for the route to be learned. <span class="ui">Read the node now</span> always works by hand.</li>
+    <li>The node must allow telemetry to you. A repeater may want you logged in (LoRa Mesh page) before it answers a status request. Kelly says so in the log.</li>
+    <li>The labels (<code>PARM</code>, <code>UNIT</code>, <code>EQNS</code>, <code>BITS</code>) go with the first report and every 6 hours after that, or straight away when you change the setup. Look under <em>Telemetry</em> on the station's aprs.fi page.</li>
+  </ul>
+
+  <h2 id="tracker">Get your tracker on aprs.fi</h2>
+  <ol>
+    <li><strong>Name it with your callsign</strong>, e.g. <code>VK4XXX Car</code> or <code>VK4XXX-9</code>. Every Kelly iGate that hears it then offers to add it. The <span class="ui">📍 Beacon my position</span> card tells you whether your own node's name carries your callsign.</li>
+    <li>Or give the key (the card's <span class="ui">Copy key</span>) and the callsign, SSID and symbol you want to a Kelly owner near you, or to the club list admin so every Kelly gets it.</li>
+    <li>Each gated station in the iGate's table has an <span class="ui">aprs.fi ↗</span> link.</li>
+  </ol>
+
+  <h2 id="buy">Buying and configuring a MeshCore GPS tracker</h2>
+  <p>Any MeshCore <strong>companion</strong> node with a GPS will do. These all run MeshCore. Check the board is listed on the MeshCore web flasher before you buy, because supported boards change:</p>
+  <div class="wrap"><table>
+    <tr><th>Device</th><th>Good for</th><th>Notes</th></tr>
+    <tr><td>Seeed SenseCAP T1000-E</td><td>Pocket, keyring, pet</td><td>Credit-card size, GPS and battery built in, weatherproof. The easiest choice.</td></tr>
+    <tr><td>RAK WisBlock (RAK4631 core + RAK12500 GNSS module)</td><td>Car, bike, fixed</td><td>Modular and very low power. Needs a case, a battery and an antenna.</td></tr>
+    <tr><td>LilyGO T-Echo</td><td>Handheld</td><td>e-paper screen, GPS, nRF52 (long battery life).</td></tr>
+    <tr><td>Heltec Wireless Tracker / LilyGO T-Beam</td><td>Car (USB powered)</td><td>ESP32 with GPS. Uses more power, fine on a car's USB.</td></tr>
+  </table></div>
+  <ul>
+    <li><strong>Buy the 915 MHz version.</strong> Australia uses 915-928 MHz (LIPD class licence). A 433 or 868 MHz unit won't work here.</li>
+    <li>Flash the MeshCore <strong>companion</strong> firmware (not repeater) with the MeshCore web flasher, using Chrome or Edge over USB.</li>
+    <li>Set the radio the way the SEQ mesh does (MBUG, <a href="https://wiki.mbug.com.au/">wiki.mbug.com.au</a>): <code>923.125 MHz</code>, <code>62.5 kHz</code>, <code>SF8</code>, <code>CR5</code>, and <strong>2-byte path hashes</strong>. Kelly's LoRa Mesh page warns if the hash size is wrong and can fix it. Check the wiki before changing anything, as the settings can change.</li>
+    <li>In the MeshCore app, turn the <strong>GPS on</strong> and allow your <strong>location in adverts</strong>. The names vary between app versions; look under the node's settings or its location settings. Without this, adverts carry no position and there is nothing to gate.</li>
+    <li>For position polls and telemetry to work, allow telemetry (location and environment) to your iGate's node, or to your contacts / favourites, in the tracker's telemetry settings.</li>
+    <li>Name the node with your callsign (e.g. <code>VK4XXX Car</code>), so Kelly iGates offer to add it.</li>
+    <li>Adverts are what get gated, so how often the tracker adverts decides how often it moves on aprs.fi. Keep <em>flood</em> adverts rare. They fill the shared mesh, and MBUG asks for floods to be kept low.</li>
+  </ul>
+
+  <h2 id="own">Beacon your own position</h2>
+  <p>No tracker? Your Kelly can send your position out through your own MeshCore node, so another Kelly iGate puts it on aprs.fi. Name your node with your callsign so those iGates offer to add it.</p>
+  <ul>
+    <li><span class="ui">Position</span>: <em>Kelly's position</em> (GPS › Fixed position, or your radio's GPS) or <em>the node's own GPS</em>.</li>
+    <li><span class="ui">Precision</span>: rounds Kelly's position before the node advertises it: exact, about 100 m, about 1 km, or about 10 km. Choose about 1 km if you'd rather not show your house. The node's own GPS isn't rounded.</li>
+    <li><span class="ui">Every</span>: at least 15 minutes for a zero-hop advert (heard by nodes in range), at least 60 minutes with <span class="ui">Flood</span> (repeated across the mesh).</li>
+  </ul>
+  <p>Kelly gives the node the position, and the node keeps advertising it until it's changed.</p>
+
+  <h2 id="admin">Club list admin</h2>
+  <p>The <strong>club list</strong> is an optional list of known users that every Kelly adds to its owner's own list. It has a version number that only goes up and is <strong>signed</strong> by an admin key. Every Kelly checks the signature before using a list, and refuses one that doesn't check out or is older than the one it has. It travels over P25 (the iGate's only use of P25): Kelly checks once a day, and parked radios are told when there's a new one. It can also be imported from a file or fetched from an address. The P25X gateway stores and hands out the list, but it has no key and can't change it.</p>
+  <h3>One-time: make and pin the admin key</h3>
+  <ol>
+    <li>In <span class="ui">APRS iGate › Club list › Admin</span>, press <span class="ui">Generate an admin key</span>. The key stays in this browser only. Press <span class="ui">Show my seed</span> and keep that 64-character seed somewhere safe and private (a password manager). Anyone with the seed can sign club lists.</li>
+    <li>The panel shows the public key, marked <strong>not pinned</strong>. Paste it into <code>ADMIN_KEYS</code> in <code>kelly-page/js/igate-wl.js</code>, copy that file to <code>gateway/igate-wl.js</code>, deploy the gateway, and release Kelly. From then on every station accepts lists signed by that key.</li>
+    <li>To use the same key in another browser, press <span class="ui">Import my seed</span> there.</li>
+  </ol>
+  <h3>Adding, changing and removing stations</h3>
+  <ol>
+    <li>Pick the node from <span class="ui">MeshCore contact</span> (if your node has heard it) or paste its 64-character key. Fill in callsign, SSID, symbol and comment, and press <span class="ui">Add / update</span>. Use <span class="ui">Edit</span>, <span class="ui">Disable</span> and <span class="ui">✕</span> in the table for existing ones.</li>
+    <li>Press <span class="ui">Sign + publish vN over P25</span> with your radio connected. The gateway checks the signature and the version, then pushes the list to parked Kelly radios, and the rest pick it up on their daily check. Or use <span class="ui">Sign + save a file</span> and upload the file on the dashboard (<code>POST /api/igate/whitelist</code>), or give it to members to import.</li>
+  </ol>
+  <p>A station you remove from the club list leaves each Kelly's list, unless that owner has edited it. Owners always have the last word on their own list.</p>
+  <div class="note"><b>Lost the seed?</b> Make a new key, pin it in place of the old one and release. Lists signed with the old key are then refused, so publish a fresh list with the new key straight away.</div>
+
+  <h2 id="counters">Counters and problems</h2>
+  <p>The counters at the top survive a restart. <span class="ui">Reset counters</span> clears them.</p>
+  <div class="wrap"><table>
+    <tr><th>Counter</th><th>Means</th><th>What to do</th></tr>
+    <tr><td>Heard (MeshCore)</td><td>Positions your node heard</td><td>None? Check the node is connected and the trackers' GPS and location-in-adverts are on.</td></tr>
+    <tr><td>Telemetry</td><td>Telemetry lines sent (reports and labels)</td><td>None? Check the device's telemetry is on, it has a direct route, and the log for "not allowed" or "log in".</td></tr>
+    <tr><td>Not on my list</td><td>A position from a key that isn't on your list</td><td>Normal: other people's nodes. Add the ones you want.</td></tr>
+    <tr><td>Invalid position</td><td>0,0, out of range, no fix, heard over 10 minutes ago, an older advert replayed, or a bad signature</td><td>The log says which. A tracker indoors often has no fix.</td></tr>
+    <tr><td>Duplicate</td><td>The same station and position again within 30 s</td><td>Normal.</td></tr>
+    <tr><td>Rate-limited</td><td>Too soon for that station, or over the overall limit</td><td>Normal in a busy area.</td></tr>
+    <tr><td>Couldn't send</td><td>No Kelly bridge, or APRS-IS not verified</td><td>Check the APRS-IS box: <em>Not verified</em> = the bridge's passcode doesn't match the callsign; <em>No bridge</em> = start <code>kelly_bridge.py</code>.</td></tr>
+  </table></div>
+</main>
+</body>
+</html>

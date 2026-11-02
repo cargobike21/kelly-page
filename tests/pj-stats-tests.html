@@ -1,0 +1,144 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pj-stats tests</title>
+<link rel="stylesheet" href="../css/kelly.css"><link rel="stylesheet" href="../css/pj.css"><link rel="stylesheet" href="../css/pj-stats.css">
+</head><body>
+<!-- Packet Journey stats (js/pj-stats.js): real packets from mcdecode-samples.json through KellyPJ.ingest, a fake shell context,
+     storage cap under a synthetic flood, demo / live split, select, reset, null fields, id folding.
+     Run: msedge --headless=new --allow-file-access-from-files --dump-dom file:///.../tests/pj-stats-tests.html  -> RESULT: ALL PASS -->
+<div class="pj" style="width:1200px"><div id="pj-ticker" class="pj-ticker"></div><div id="pj-stats" class="pj-stats"></div></div>
+<pre id="out"></pre>
+<script src="../js/mcdecode.js"></script><script src="../js/pj-core.js"></script><script src="../js/pj-stats.js"></script>
+<script>
+(async function () {
+  const out = [], D = KellyMcDecode, PJ = KellyPJ; let fails = 0;
+  const eq = (name, got, want) => { const ok = JSON.stringify(got) === JSON.stringify(want); if (!ok) fails++; out.push(`${ok ? 'PASS' : 'FAIL'} ${name}${ok ? '' : ` -- got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`}`); };
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  try {
+    const te = s => new TextEncoder().encode(s);
+    const chans = [{ name: '#test', secret: D.sha256(te('#test')).subarray(0, 16) }, PJ.DEMO_CHANNEL];
+    const S = JSON.parse(await (await new Promise((res, rej) => { const x = new XMLHttpRequest(); x.open('GET', 'mcdecode-samples.json'); x.onload = () => res({ json: async () => x.responseText }); x.onerror = rej; x.send(); })).json()).packets;
+    for (const k of Object.keys(localStorage)) if (k.startsWith('pjtest.')) localStorage.removeItem(k);
+    let vis = true;
+    const bus = PJ.createBus(), reg = PJ.createRegistry({});
+    const store = { get(k, d) { const v = localStorage.getItem('pjtest.' + k); return v == null ? d : JSON.parse(v); }, set(k, v) { localStorage.setItem('pjtest.' + k, JSON.stringify(v)); } };
+    const esc = s => String(s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    const c = { bus, PJ, D, reg, esc, store, fmtAgo: t => t ? Math.round((Date.now() - t) / 1000) + 's ago' : 'never', fx: () => false, reduced: () => true,
+      visible: () => vis, ingest: rx => PJ.ingest(bus, reg, rx, { channels: chans, expectHash: 2 }) };
+    const $ = s => document.querySelector(s), mount = $('#pj-stats'), tick = $('#pj-ticker');
+    const sel = []; bus.on('select', x => sel.push(x));
+
+    let P = KellyPJStats(mount, c, tick);
+    eq('factory returns destroy()', typeof P.destroy, 'function');
+    const evs = S.map(p => c.ingest({ raw: p.hex, snr: p.snr, rssi: p.rssi }));
+    let V = P._view();
+    eq('real: total = samples', V.total, S.length);
+    eq('real: kinds sum to total', V.kinds.reduce((a, b) => a + b, 0), S.length);
+    eq('real: kind counts match events', PJ.KINDS.map(k => evs.filter(e => e.kind === k).length), V.kinds);
+    eq('real: flood + direct = total', V.flood + V.direct, S.length);
+    eq('real: leaderboard has the advertisers', V.board.length >= evs.filter(e => e.advert).length ? true : V.board.length, true);
+    const chat = evs.filter(e => e.text).length, adv = new Set(evs.filter(e => e.advert).map(e => e.advert.key.slice(0, 12))).size;
+    eq('real: ticker = decoded chat + first adverts', V.tick.length, Math.min(20, chat + adv));
+    eq('real: some #test chat decoded into the ticker', V.tick.some(t => t.c && t.x), chat > 0);
+    eq('real: perMin counts the burst', V.perMin, S.length);
+    eq('real: decPct is a percentage', V.decPct == null || (V.decPct >= 0 && V.decPct <= 100), true);
+    await sleep(1150);
+    eq('DOM: total tile drawn within ~1 s', $('[data-t="total"]').textContent, String(S.length));
+    eq('DOM: leaderboard rows', mount.querySelectorAll('tbody tr[data-id]').length, Math.min(12, V.board.length));
+    eq('DOM: ticker items', tick.querySelectorAll('.pj-tick-list li:not(.pj-tick-idle)').length, V.tick.length);
+    eq('DOM: canvases sized', [...mount.querySelectorAll('canvas')].every(cv => cv.width > 0 && cv.height > 0), true);
+    eq('DOM: set tag says live', $('[data-r="set"]').textContent, 'live');
+
+    // select both ways
+    const row = mount.querySelector('tbody tr[data-id]'); row.click();
+    eq('click row emits select from stats', sel.length && sel[sel.length - 1].from === 'stats' && sel[sel.length - 1].node === row.dataset.id, true);
+    const other = mount.querySelectorAll('tbody tr[data-id]')[1];
+    if (other) { bus.emit('select', { node: other.dataset.id, from: 'net' }); eq('incoming select highlights the row', other.classList.contains('pj-stats-sel') && !row.classList.contains('pj-stats-sel'), true); }
+
+    // hidden: no redraw
+    vis = false; bus.emit('visible', false);
+    c.ingest({ raw: S[0].hex, snr: 1, rssi: -100 });
+    await sleep(1150);
+    eq('hidden: no redraw', $('[data-t="total"]').textContent, String(S.length));
+    vis = true; bus.emit('visible', true);
+    eq('visible again: redraws at once', $('[data-t="total"]').textContent, String(S.length + 1));
+
+    // demo split
+    bus.emit('demo', true);
+    c.ingest({ raw: S[1].hex, snr: 3, rssi: -90, demo: true }); c.ingest({ raw: S[2].hex, snr: 3, rssi: -90, demo: true });
+    eq('demo: shows the demo set', [P._view().total, P._sets().live.total], [2, S.length + 1]);
+    await sleep(1100);
+    eq('demo: tag says demo', $('[data-r="set"]').textContent, 'demo');
+    bus.emit('demo', false);
+    eq('demo off: back to live', P._view().total, S.length + 1);
+
+    // null fields never throw
+    bus.emit('packet', {}); bus.emit('packet', { kind: null, src: { id: null }, journey: null, route: 'flood', hops: null, advert: { key: null } }); bus.emit('packet', null);
+    eq('null fields counted, no throw', P._view().total, S.length + 3);
+
+    // persistence + restore
+    P._save();
+    const saved = localStorage.getItem('pjtest.pjStats');
+    eq('saved, versioned', JSON.parse(saved).v, KellyPJStats.createAgg ? 1 : 0);
+    P.destroy();
+    eq('destroy empties the mounts', [mount.innerHTML, tick.innerHTML], ['', '']);
+    P = KellyPJStats(mount, c, tick);
+    eq('restore: totals back after reload', P._view().total, S.length + 3);
+    eq('restore: demo not persisted', P._sets().demo.total, 0);
+
+    // storage cap: a big synthetic day -- 400 stations, 20 000 packets, every one with signal
+    const A = KellyPJStats.createAgg(PJ.KINDS), big = A.empty(), t0 = Date.now() - 3600e3;
+    for (let i = 0; i < 20000; i++) {
+      const id = 'k' + (i % 400).toString(16).padStart(62, '0'), rp = 'h:' + (i % 37).toString(16).padStart(4, '0');
+      A.add(big, { t: t0 + i * 180, kind: PJ.KINDS[i % 7], route: i % 3 ? 'flood' : 'direct', hops: i % 6, snr: (i % 30) - 10, rssi: -60 - (i % 60),
+        src: { id, name: 'Station number ' + (i % 400) }, heardFrom: i % 3 ? rp : id, journey: [id, rp, 'me'], text: i % 50 ? null : 'hello ' + i, sender: 'X', channel: '#test',
+        advert: i % 7 ? null : { key: id, name: 'n' + i, role: 'Repeater' }, gps: i % 2 ? { lat: -27, lon: 152 } : null });
+    }
+    const size = JSON.stringify({ v: 1, live: A.compact(big, x => x) }).length;
+    out.push(`INFO saved size at cap: ${size} bytes (cap ${KellyPJStats.createAgg && 150000})`);
+    eq('cap: stations bounded', Object.keys(big.st).length <= 250, true);
+    eq('cap: saved copy <= 150 KB', size <= 150000, true);
+    eq('cap: ticker <= 20', big.tick.length, 20);
+
+    // id folding at draw time: h:ab12 later explained by a key
+    const f = A.empty();
+    A.add(f, { kind: 'chat', route: 'flood', src: { id: 'h:ab12' }, heardFrom: 'h:ab12', snr: 5, rssi: -80, journey: ['h:ab12', 'me'] });
+    A.add(f, { kind: 'advert', route: 'flood', src: { id: 'ab12cd' }, heardFrom: 'ab12cd', snr: 7, rssi: -70, journey: ['ab12cd', 'me'] });
+    const fv = A.view(f, id => id === 'h:ab12' ? 'ab12cd' : id);
+    eq('fold: placeholder merged into the key', [fv.board.length, fv.board[0].n, fv.board[0].bs, fv.board[0].br], [1, 2, 7, -70]);
+
+    // reset
+    bus.emit('reset');
+    eq('reset: cleared + saved copy gone', [P._view().total, localStorage.getItem('pjtest.pjStats')], [0, 'null']);
+    eq('reset: ticker idle line', !!tick.querySelector('.pj-tick-idle'), true);
+
+    // "hams only" on Most heard stations (AWARDS_REVIEW.md M5): a view filter over KellyHamCalls.hamOf, off by default
+    S.forEach(p => c.ingest({ raw: p.hex, snr: p.snr, rssi: p.rssi }));
+    const rows = () => [...mount.querySelectorAll('tbody[data-r="board"] tr[data-id]')].map(tr => tr.dataset.id);
+    const redraw = () => bus.emit('visible', true), box = () => mount.querySelector('[data-r="hamsBox"]'), cb = () => mount.querySelector('[data-r="hams"]');
+    delete window.KellyHamCalls; redraw();
+    const all = rows(), V0 = P._view();
+    eq('hams: no KellyHamCalls -> toggle hidden, every station', [box().hidden, all.length], [true, Math.min(12, V0.board.length)]);
+    const hamId = all.find(id => (reg.get(id) || {}).key), hamKey = hamId && reg.get(hamId).key, asked = [];
+    eq('hams: a keyed station on the board', !!hamKey, true);
+    window.KellyHamCalls = { hamOf: x => { asked.push(x); return { ham: !!hamKey && x.key === hamKey, tier: 'probable' }; } };
+    redraw();
+    eq('hams: toggle shown, off by default, nothing filtered', [box().hidden, cb().checked, rows().length], [false, false, all.length]);
+    cb().checked = true; cb().dispatchEvent(new Event('change', { bubbles: true }));
+    eq('hams: on -> only hams listed', rows(), [hamId]);
+    eq('hams: count says hams of stations', /^1 ham of \d+$/.test(mount.querySelector('[data-r="bcount"]').textContent), true);
+    eq('hams: hamOf asked with key / name / type / demo', asked.some(x => x.key === hamKey && 'name' in x && typeof x.type === 'number' && x.demo === false), true);
+    eq('hams: choice stored', store.get('pjStatsHams', null), true);
+    eq('hams: nothing counted changes', [P._view().total, P._view().board.length], [V0.total, V0.board.length]);
+    window.KellyHamCalls = { hamOf: () => ({ ham: false }) }; redraw();
+    eq('hams: none heard -> says so', /No hams among/.test(mount.querySelector('[data-r="board"]').textContent), true);
+    window.KellyHamCalls = { hamOf: () => { throw new Error('boom'); } }; redraw();
+    eq('hams: a throwing hamOf counts as not a ham', rows().length, 0);
+    delete window.KellyHamCalls; redraw();
+    eq('hams: KellyHamCalls gone -> hidden again, every station', [box().hidden, rows().length], [true, all.length]);
+    P.destroy();
+  } catch (e) { fails++; out.push('FAIL threw: ' + (e && e.stack || e)); }
+  for (const k of Object.keys(localStorage)) if (k.startsWith('pjtest.')) localStorage.removeItem(k);
+  out.push(fails ? `RESULT: ${fails} FAILED` : 'RESULT: ALL PASS');
+  document.getElementById('out').textContent = out.join('\n');
+})();
+</script></body></html>

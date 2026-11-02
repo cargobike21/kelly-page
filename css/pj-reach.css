@@ -1,0 +1,52 @@
+/* Kelly Page -- LoRa Mesh > Packet Journey: repeater reach, link quality, duplicates (js/pj-reach.js, 2026-10-24).
+ * Three stacked cards in one .pj-more column; tables scroll inside their card, the page never does. Nothing animates. */
+.pj-reach { display: grid; gap: 14px; min-width: 0; }
+.pj-reach-card { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.pj-reach-card .card-h { flex-wrap: wrap; gap: 8px; }
+.pj-reach-note { margin: 0; }
+
+/* tables */
+.pj-reach-tbl { overflow: auto; max-height: 420px; min-width: 0; }
+.pj-reach-tbl table { width: 100%; border-collapse: collapse; }
+.pj-reach-tbl th { position: sticky; top: 0; background: var(--panel-solid, #0d152a); color: var(--dim); font: 600 11px var(--mono); text-transform: uppercase;
+  letter-spacing: .06em; text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line2, var(--line)); white-space: nowrap; }
+.pj-reach-tbl td { padding: 5px 8px; border-top: 1px solid var(--line); white-space: nowrap; font: 600 14px var(--mono); font-variant-numeric: tabular-nums; }
+.pj-reach-tbl tbody tr[data-id] { cursor: pointer; }
+.pj-reach-tbl tbody tr[data-id]:hover td { background: rgba(0, 229, 255, .06); }
+.pj-reach-tbl tr.pj-reach-sel td { background: rgba(0, 229, 255, .16); }
+.pj-reach-tbl tr.pj-reach-sel td:first-child { box-shadow: inset 3px 0 0 var(--cyan); }
+.pj-reach-rk { color: var(--amber); font-weight: 800; width: 2em; }
+.pj-reach-nm { font-family: var(--ui) !important; font-size: 15px !important; font-weight: 700; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.pj-reach-n { color: var(--lime); font-weight: 800; }
+.pj-reach-arr { color: var(--dim); padding: 5px 2px !important; }
+.pj-reach-empty { color: var(--dim); font-family: var(--ui) !important; white-space: normal !important; padding: 14px 8px !important; list-style: none; }
+
+/* bars: reach (cyan) and link quality (coloured inline) */
+.pj-reach-bar { width: 90px; height: 8px; border-radius: 4px; overflow: hidden; background: var(--raised, #131e3a); }
+.pj-reach-bar i { display: block; height: 100%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+.pj-reach-q { width: 70px; }
+
+/* duplicates */
+.pj-reach-dup { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.pj-reach-gauge { flex: 0 0 180px; max-width: 100%; }
+.pj-reach-gauge canvas, .pj-reach-card > canvas { display: block; width: 100%; }
+.pj-reach-dtext { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 2px; }
+.pj-reach-big { font: 800 clamp(30px, 3vw, 48px) / 1.05 var(--display); color: var(--lime); font-variant-numeric: tabular-nums; text-shadow: 0 0 14px currentColor; }
+.pj-reach-unit { font: 700 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+.pj-reach-explain { margin: 6px 0 0; color: var(--text); }
+.pj-reach-h3 { margin: 0; font: 700 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--cyan); }
+.pj-reach-worst { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.pj-reach-worst li { display: grid; grid-template-columns: 3em 10px minmax(0, auto) minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: 14px; min-width: 0; }
+.pj-reach-worst li[data-id] { cursor: pointer; }
+.pj-reach-worst li[data-id]:hover { background: rgba(0, 229, 255, .06); }
+.pj-reach-worst b { font: 800 14px var(--mono); }
+.pj-reach-worst i { width: 10px; height: 10px; border-radius: 50%; }
+.pj-reach-worst span { font: 600 12px var(--mono); color: var(--dim); white-space: nowrap; }
+.pj-reach-worst em { font-style: normal; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pj-reach-worst time { font: 600 11px var(--mono); color: var(--dim); white-space: nowrap; }
+
+@media (max-width: 600px) {
+  .pj-reach-tbl td { font-size: 13px; padding: 4px 6px; }
+  .pj-reach-nm { max-width: 130px; }
+  .pj-reach-gauge { flex-basis: 150px; }
+}

@@ -1,0 +1,251 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Kelly Ham Contacts callsign tests</title>
+<link rel="stylesheet" href="../css/hc.css"><link rel="stylesheet" href="../css/hc-calls.css"></head>
+<body>
+<h3>Kelly Page -- Ham Contacts callsign mapping (js/hc-calls.js)</h3>
+<pre id="out">running…</pre>
+<div class="hc"><div id="hc-calls"></div></div>
+<script>
+// Headless: msedge --headless=new --allow-file-access-from-files --virtual-time-budget=20000 --dump-dom tests/hc-calls-tests.html
+// The registry must exist (and answer plainly) BEFORE KellyHC loads in odd orders: checked by loading hc-calls.js first in an iframe-free way below.
+try { localStorage.removeItem('kelly.hcCalls'); } catch (e) { /* file:// with storage off */ }
+</script>
+<script src="../vendor/tweetnacl-1.0.3/nacl-fast.min.js"></script>
+<script>window.__preHC = true;</script>
+<script src="../js/hc-calls.js"></script>
+<script>
+// loaded before KellyHC: it must still return plain names and never throw
+window.__early = { label: KellyHamCalls.label('ab'.repeat(32), 'Bob VK4ZZQ'), call: KellyHamCalls.callOf(null, 'Bob'), threw: (() => { try { KellyHamCalls.set('ab'.repeat(32), 'VK4ZZQ'); return false; } catch (e) { return /did not load/.test(e.message); } })() };
+</script>
+<script src="../js/meshqr.js"></script>
+<script src="../js/hc-core.js"></script>
+<script src="../js/hc-service.js"></script>
+<script src="../js/hc-demo.js"></script>
+<script>
+const out = [], fails = [];
+const t = (name, ok, extra) => { if (ok) out.push(`PASS ${name}`); else { out.push(`FAIL ${name}${extra === undefined ? '' : ': ' + JSON.stringify(extra)}`); fails.push(name); } };
+const throws = (fn, re) => { try { fn(); return false; } catch (e) { return re ? re.test(e.message) : true; } };
+const tick = (ms = 0) => new Promise(r => setTimeout(r, ms));
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// ---- the hooks, copied VERBATIM from js/mesh.js (callLabel, nmc) and js/tr-ui.js (hamLabel)
+const ms = { dev: 'meshcore' };
+const callLabel = (key, name) => { const H = window.KellyHamCalls; if (!H || !name || ms.dev !== 'meshcore') return name; try { return H.label(key || null, name) || name; } catch { return name; } };
+const hamLabel = (key, name) => { const H = window.KellyHamCalls; if (!H || !key) return name; try { return H.label(key, name) || name; } catch { return name; } };
+
+(async () => {
+  try {
+    const HC = window.KellyHC, R = window.KellyHamCalls, nacl = window.nacl, ed = HC.naclEd(nacl);
+    t('early: plain name, no throw', __early.label === 'Bob VK4ZZQ' && __early.call === null && __early.threw, __early);
+
+    // ---- a store we can break
+    const mem = new Map();
+    let failSet = false, failGet = false, sets = 0;
+    const store = { get: (k, d) => { if (failGet) throw new Error('boom'); return mem.has(k) ? JSON.parse(mem.get(k)) : d; },
+      set: (k, v) => { sets++; if (failSet) { const e = new Error('full'); e.name = 'QuotaExceededError'; throw e; } mem.set(k, JSON.stringify(v)); } };
+
+    // ---- fake shell context around the demo service (as hc-ui.js setDemo builds it)
+    const bus = HC.createBus();
+    const world = KellyHamDemo({ nacl });
+    const svc = KellyHamContactsService({ backend: world.backend, bus, store, ed, myCall: () => 'VK4ZZA', distKm: () => 1,
+      myPos: () => ({ lat: world.me.lat, lon: world.me.lon }), demo: true, active: () => true });
+    let changes = 0;
+    R.init({ store, bus });
+    R.onChange(() => { changes++; bus.emit('calls'); svc._emitAll(); });
+    world.start(svc);
+    await tick(50);
+    const said = [];
+    let vis = true;
+    const c = { bus, HC, svc, $: s => document.querySelector(s), esc, store, toast: () => {}, fmtAgo: () => '1m', ed, myCall: () => 'VK4ZZA', reduced: () => true,
+      root: () => document.body, visible: () => vis, demo: () => true, setDemo: () => {}, demoWorld: () => world, openTrace: () => ({ ok: true }), openChat: () => {},
+      kfRequest: () => null, onGateway: () => () => {}, say: r => said.push(r) };
+
+    const kBob = world.keyOf('Bob in Brisbane'), kRpt = world.keyOf('Ipswich Rptr'), kZZB = world.keyOf('VK4ZZB Springfield');
+
+    // ---- 'name' precedence and plain names
+    t('name src', JSON.stringify(R.callOf(kZZB, 'VK4ZZB Springfield')) === JSON.stringify({ call: 'VK4ZZB', src: 'name' }));
+    t('no call -> null + plain label', R.callOf(kBob, 'Bob in Brisbane') === null && R.label(kBob, 'Bob in Brisbane') === 'Bob in Brisbane');
+    t('label never throws on junk', R.label({}, null) === '' && R.label(undefined, 42) === '42' && R.callOf(Symbol.iterator, {}) === null);
+
+    // ---- set: mine
+    const before = changes;
+    R.set(kBob, ' vk4xyz-7 ', 'Bob in Brisbane');
+    t('set -> mine', JSON.stringify(R.callOf(kBob, 'x')) === JSON.stringify({ call: 'VK4XYZ', src: 'mine' }) && changes === before + 1);
+    t('label after set', R.label(kBob, 'Bob in Brisbane') === 'VK4XYZ · Bob in Brisbane', R.label(kBob, 'Bob in Brisbane'));
+    t('stored', JSON.parse(mem.get('hcCalls'))[0].c === 'VK4XYZ');
+    t('label(null, name) by name, case-insensitive', R.label(null, 'bob in brisbane') === 'VK4XYZ? · bob in brisbane' && R.label(null, 'Bob') === 'Bob');
+
+    // ---- precedence mine > dir > name
+    const entry = (name, call, at, x) => { const e = { k: world.keyOf(name), c: call, n: name, t: 1, at, x: x ? 1 : 0 }; e.s = HC.b64u(world.sign(name, HC.dirBytes(e))); return e; };
+    const now = Math.floor(Date.now() / 1000);
+    const eZZB = entry('VK4ZZB Springfield', 'VK4ZZW', now - 100), eBob = entry('Bob in Brisbane', 'VK4ABC', now - 100), eRpt = entry('Ipswich Rptr', 'VK4RBX', now - 100);
+    t('entries verify', [eZZB, eBob, eRpt].every(e => HC.verifyEntry(e, ed).ok));
+    R.label(kZZB, 'VK4ZZB Springfield');   // memoise first
+    R.fromDir([eZZB, eBob, eRpt]);
+    t('dir beats name', JSON.stringify(R.callOf(kZZB, 'VK4ZZB Springfield')) === JSON.stringify({ call: 'VK4ZZW', src: 'dir' }));
+    t('memo cleared by fromDir', R.label(kZZB, 'VK4ZZB Springfield') === 'VK4ZZW · VK4ZZB Springfield', R.label(kZZB, 'VK4ZZB Springfield'));
+    t('mine beats dir', R.callOf(kBob, 'Bob in Brisbane').src === 'mine' && R.callOf(kBob, '').call === 'VK4XYZ');
+    t('label(null) by dir name', R.label(null, 'IPSWICH RPTR') === 'VK4RBX? · IPSWICH RPTR');
+    t('all()', (a => a.length === 3 && a.find(m => m.key === kBob).src === 'mine' && a.find(m => m.key === kRpt).src === 'dir')(R.all()), R.all());
+    // an older entry never overwrites a newer one; a withdrawn one removes it
+    R.fromDir([entry('Ipswich Rptr', 'VK4OLD', now - 1000)]);
+    t('older dir entry ignored', R.callOf(kRpt, 'Ipswich Rptr').call === 'VK4RBX');
+    R.fromDir([entry('Ipswich Rptr', 'VK4RBX', now - 10, true)]);
+    t('withdrawn removes dir mapping', R.callOf(kRpt, 'Ipswich Rptr') === null && R.label(kRpt, 'Ipswich Rptr') === 'Ipswich Rptr');
+    t('junk fromDir tolerated', (() => { R.fromDir(null); R.fromDir([null, 1, { k: 'zz' }]); return true; })());
+
+    // ---- clear + memo
+    R.label(kBob, 'Bob in Brisbane');
+    t('clear', R.clear(kBob) === true && R.callOf(kBob, 'Bob in Brisbane').src === 'dir' && R.label(kBob, 'Bob in Brisbane') === 'VK4ABC · Bob in Brisbane');
+    t('clear unknown/bad', R.clear(kBob) === false && R.clear('nope') === false && R.clear(null) === false);
+    R.set(kBob, 'VK4XYZ', 'Bob in Brisbane');
+
+    // ---- bad input
+    t('bad call rejected', throws(() => R.set(kBob, 'hello'), /not an amateur callsign/) && throws(() => R.set(kBob, ''), /callsign/) && R.callOf(kBob, '').call === 'VK4XYZ');
+    t('bad key rejected', throws(() => R.set('abc', 'VK4XYZ'), /key/) && throws(() => R.set('0'.repeat(64), 'VK4XYZ'), /key/) && throws(() => R.set(null, 'VK4XYZ'), /key/));
+
+    // ---- a full / throwing store
+    failSet = true;
+    const kFull = 'cd'.repeat(32);
+    t('store full tolerated', (() => { R.set(kFull, 'VK4FUL'); return R.callOf(kFull, '').call === 'VK4FUL'; })());
+    failSet = false; R.clear(kFull);
+    failGet = true;
+    t('throwing store get tolerated on init', (() => { R.init({ store, bus }); return R.all().filter(m => m.src === 'mine').length === 0; })());
+    failGet = false; R.init({ store, bus });
+    t('reload from store', R.callOf(kBob, '').call === 'VK4XYZ' && R.callOf(null, 'Bob in Brisbane').call === 'VK4XYZ');
+
+    // ---- name ambiguity: two keys with one name and different calls -> neither
+    const kA = '11'.repeat(32), kB = '22'.repeat(32);
+    R.set(kA, 'VK4AAA', 'Field Day'); R.set(kB, 'VK4BBB', 'Field Day');
+    t('ambiguous name matches neither', R.label(null, 'Field Day') === 'Field Day');
+    R.clear(kA); R.clear(kB);
+
+    // ---- cap 500
+    const saved = mem.get('hcCalls');
+    const hexOf = i => 'f' + (i + 1).toString(16).padStart(63, '0');
+    const n0 = R.all().filter(m => m.src === 'mine').length;
+    let capErr = null;
+    R._batch(() => { for (let i = 0; i < 520; i++) { try { R.set(hexOf(i), 'VK4CAP'); } catch (e) { capErr = capErr || e.message; } } });
+    t('cap 500', R.all().filter(m => m.src === 'mine').length === 500 && /500/.test(capErr || '') && JSON.parse(mem.get('hcCalls')).length === 500, [R.all().filter(m => m.src === 'mine').length, capErr]);
+    // a store that holds too many (hand-edited) loads only the newest 500
+    mem.set('hcCalls', JSON.stringify(Array.from({ length: 600 }, (_, i) => ({ k: hexOf(i), c: 'VK4LOD', at: i }))));
+    R.init({ store, bus });
+    t('load caps at 500, newest kept', R.all().length - R.all().filter(m => m.src === 'dir').length === 500 && R.callOf(hexOf(599), '') && !R.callOf(hexOf(0), ''));
+    mem.set('hcCalls', saved); R.init({ store, bus });
+    t('back to the saved list', R.all().filter(m => m.src === 'mine').length === n0);
+
+    // ---- export / import round trip
+    const txt = KellyHCCalls.exportText();
+    const ex = JSON.parse(txt);
+    t('export', ex.kind === 'kelly-ham-calls' && ex.calls.length === n0 && ex.calls.every(x => x.key && x.call) && !ex.calls.find(x => x.key === kRpt));
+    R.clear(kBob);
+    let ir = KellyHCCalls.importText(txt);
+    t('import round trip', ir.ok && ir.added === 1 && ir.rejected === 0 && R.callOf(kBob, '').call === 'VK4XYZ' && R.callOf(null, 'Bob in Brisbane').call === 'VK4XYZ', ir);
+    ir = KellyHCCalls.importText(txt);
+    t('import again = same', ir.ok && ir.added === 0 && ir.same === n0, ir);
+    const ch0 = changes;
+    ir = KellyHCCalls.importText(JSON.stringify({ calls: [{ key: kBob, call: 'VK4NEW' }, { key: 'xyz', call: 'VK4AAA' }, { key: kZZB, call: 'not a call' }, 7, { key: kRpt, call: 'vk4rbx' }] }));
+    t('import validates + one change event', ir.ok && ir.updated === 1 && ir.added === 1 && ir.rejected === 3 && ir.why['bad key'] === 1 && ir.why['bad callsign'] === 1 && changes === ch0 + 1, [ir, changes - ch0]);
+    t('import summary', /1 added, 1 updated, 3 rejected \(.*bad key ×1/.test(KellyHCCalls.importSummary(ir)), KellyHCCalls.importSummary(ir));
+    t('import junk', !KellyHCCalls.importText('not json').ok && !KellyHCCalls.importText('x'.repeat(300000)).ok && KellyHCCalls.importText('{"' + kRpt + '":"VK4MAP"}').updated === 1);
+    R.clear(kRpt); R.set(kBob, 'VK4XYZ');
+    // import into a full list: rejected as 'list full'
+    R._batch(() => { for (let i = 0; i < 500; i++) { try { R.set(hexOf(i), 'VK4CAP'); } catch (e) { /* full */ } } });
+    ir = KellyHCCalls.importText(JSON.stringify([{ key: 'ab'.repeat(32), call: 'VK4ZZT' }]));
+    t('import capped', ir.rejected === 1 && ir.why['list full'] === 1, ir);
+    R._batch(() => { for (let i = 0; i < 520; i++) R.clear(hexOf(i)); });
+
+    // ---- the editor
+    const mount = document.getElementById('hc-calls');
+    const ed1 = KellyHCCalls(mount, c);
+    const row = k => mount.querySelector(`.hc-cs-row[data-key="${k}"]`);
+    t('editor lists contacts + heard', !!row(kBob) && !!row(kZZB) && mount.querySelectorAll('.hc-cs-row').length >= svc.contacts().length + 1);
+    t('editor shows source', row(kBob).querySelector('.hc-cs-src').textContent === 'mine' && row(kZZB).querySelector('.hc-cs-src').textContent === 'directory'
+      && row(kZZB).querySelector('[data-act="usename"]').dataset.call === 'VK4ZZB', row(kZZB).textContent);
+    // edit the repeater: bad call first, then a good one with Enter
+    row(kRpt).querySelector('[data-act="edit"]').click();
+    let inp = mount.querySelector('.hc-cs-in');
+    t('edit opens with focus', !!inp && document.activeElement === inp);
+    inp.value = 'junk'; inp.dispatchEvent(new Event('input', { bubbles: true }));
+    inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    t('bad call shown inline, nothing saved', /not an amateur callsign/.test(row(kRpt).textContent) && R.callOf(kRpt, 'Ipswich Rptr') === null && mount.querySelector('.hc-cs-in').value === 'junk');
+    // a redraw while typing keeps the text and focus
+    inp = mount.querySelector('.hc-cs-in'); inp.value = 'vk4rb'; inp.dispatchEvent(new Event('input', { bubbles: true })); inp.focus();
+    ed1._render();
+    inp = mount.querySelector('.hc-cs-in');
+    t('redraw keeps typed text + focus', inp && inp.value === 'vk4rb' && document.activeElement === inp);
+    inp.value = 'vk4rbx'; inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    t('Enter saves', R.callOf(kRpt, 'Ipswich Rptr').src === 'mine' && R.callOf(kRpt, '').call === 'VK4RBX' && !mount.querySelector('.hc-cs-in') && said.some(r => r.ok && /VK4RBX/.test(r.msg)));
+    const rec = svc.get(kRpt);
+    t('service record carries call + callSrc mine', rec && rec.call === 'VK4RBX' && rec.callSrc === 'mine' && rec.label === 'VK4RBX · Ipswich Rptr', rec && [rec.call, rec.callSrc, rec.label]);
+    t('svc.contacts() too', svc.contacts().find(r => r.key === kRpt).callSrc === 'mine');
+    // Esc cancels
+    row(kRpt).querySelector('[data-act="edit"]').click();
+    inp = mount.querySelector('.hc-cs-in'); inp.value = 'VK4ZZZ';
+    inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    t('Esc cancels', !mount.querySelector('.hc-cs-in') && R.callOf(kRpt, '').call === 'VK4RBX');
+    // use the one in its name (dir said VK4ZZW)
+    row(kZZB).querySelector('[data-act="usename"]').click();
+    t('use the one in its name', JSON.stringify(R.callOf(kZZB, 'VK4ZZB Springfield')) === JSON.stringify({ call: 'VK4ZZB', src: 'mine' }));
+    // clear
+    row(kRpt).querySelector('[data-act="clear"]').click();
+    t('clear button', R.callOf(kRpt, 'Ipswich Rptr') === null && row(kRpt).querySelector('.hc-cs-src').textContent === 'none');
+    // filter
+    mount.querySelector('#hc-cs-only').click();
+    t('filter no callsign yet', !row(kBob) && !!row(kRpt) && [...mount.querySelectorAll('.hc-cs-row')].every(r => r.classList.contains('none')));
+    mount.querySelector('#hc-cs-only').click();
+    // search
+    const q = mount.querySelector('#hc-cs-q'); q.value = 'brisb'; q.dispatchEvent(new Event('input'));
+    t('search', mount.querySelectorAll('.hc-cs-row').length === 1 && !!row(kBob));
+    q.value = ''; q.dispatchEvent(new Event('input'));
+    // editor import
+    const r2 = ed1._import(JSON.stringify([{ key: kRpt, call: 'VK4RBX' }, { key: 'bad', call: 'VK4RBX' }]));
+    t('editor import + summary', r2.added === 1 && /1 added, 1 rejected/.test(mount.querySelector('#hc-cs-msg').textContent) && row(kRpt).querySelector('.hc-cs-call').textContent === 'VK4RBX');
+    // throttle + visibility: no redraw while hidden; one on show
+    vis = false;
+    R.set(kRpt, 'VK4QQQ');
+    await tick(60);
+    t('hidden: no redraw', row(kRpt).querySelector('.hc-cs-call').textContent === 'VK4RBX');
+    vis = true; bus.emit('visible', true);
+    await tick(1200);
+    t('shown: redrawn', row(kRpt).querySelector('.hc-cs-call').textContent === 'VK4QQQ');
+    t('escapes names', !/<script/i.test(mount.innerHTML.replace(/&lt;script/g, '')));
+
+    // ---- demo mappings stay out of the saved list and go when the demo stops
+    bus.emit('demo', true);
+    const kDemo = world.keyOf('VK4ZZL Bundamba');
+    R.set(kDemo, 'VK4DMO'); R.set(kBob, 'VK4DEM');
+    t('demo: in memory, not saved', R.callOf(kDemo, '').call === 'VK4DMO' && !JSON.parse(mem.get('hcCalls')).find(x => x.k === kDemo) && JSON.parse(mem.get('hcCalls')).find(x => x.k === kBob).c === 'VK4XYZ'
+      && !JSON.parse(KellyHCCalls.exportText()).calls.find(x => x.key === kDemo));
+    bus.emit('demo', false);
+    t('demo off: dropped, real one back', R.callOf(kDemo, '') === null && R.callOf(kBob, '').call === 'VK4XYZ');
+
+    // ---- the hooks (copied verbatim from mesh.js / tr-ui.js)
+    t('hook callLabel (chat / pop-up / byPrefix)', callLabel(kBob, 'Bob in Brisbane') === 'VK4XYZ · Bob in Brisbane' && callLabel(undefined, 'Bob in Brisbane') === 'VK4XYZ? · Bob in Brisbane'
+      && callLabel(kZZB, 'VK4ZZB Springfield') === 'VK4ZZB Springfield', callLabel(kBob, 'Bob in Brisbane'));
+    t('hook hamLabel (Trace Route)', hamLabel(kBob, 'Bob in Brisbane') === 'VK4XYZ · Bob in Brisbane' && hamLabel(null, 'Bob in Brisbane') === 'Bob in Brisbane');
+    const real = window.KellyHamCalls;
+    window.KellyHamCalls = undefined;
+    t('hooks: registry absent -> plain name', callLabel(kBob, 'Bob in Brisbane') === 'Bob in Brisbane' && hamLabel(kBob, 'Bob in Brisbane') === 'Bob in Brisbane');
+    window.KellyHamCalls = { label() { throw new Error('x'); } };
+    t('hooks: registry throws -> plain name', callLabel(kBob, 'Bob in Brisbane') === 'Bob in Brisbane' && hamLabel(kBob, 'Bob in Brisbane') === 'Bob in Brisbane');
+    window.KellyHamCalls = real;
+    // nmc / byPrefix shape: a node map like mesh.js st.nodes
+    const nodes = new Map([[1, { key: kBob, longName: 'Bob in Brisbane' }], [2, { key: kRpt, longName: 'Ipswich Rptr' }]]);
+    const byPrefix = h => { h = String(h || '').toLowerCase(); const o = []; for (const n of nodes.values()) if (n.key && n.key.startsWith(h)) o.push({ name: callLabel(n.key, n.longName || n.key.slice(0, 8)), key: n.key }); return o; };
+    t('byPrefix names', byPrefix(kBob.slice(0, 2))[0].name === 'VK4XYZ · Bob in Brisbane' && byPrefix(kRpt.slice(0, 4))[0].name === 'VK4QQQ · Ipswich Rptr');
+
+    // ---- memo: a cheap label (1e5 calls well under a second)
+    const t0 = performance.now(); for (let i = 0; i < 100000; i++) R.label(kBob, 'Bob in Brisbane');
+    t('label is cheap (memo)', performance.now() - t0 < 500, performance.now() - t0);
+
+    // ---- destroy unsubscribes
+    ed1.destroy();
+    t('destroy', mount.innerHTML === '' && (() => { bus.emit('calls'); bus.emit('contacts', []); return true; })());
+    world.stop();
+  } catch (e) { fails.push('exception'); out.push(`FAIL exception: ${e && e.stack || e}`); }
+  out.push(fails.length ? `RESULT: FAIL ${fails.join(', ')}` : 'RESULT: ALL PASS');
+  document.getElementById('out').textContent = out.join('\n');
+})();
+</script>
+</body></html>

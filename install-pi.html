@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kelly Page on a Raspberry Pi</title>
+<link rel="icon" href="assets/kelly-favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&family=Rajdhani:wght@600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+  /* Layout: one reading column with a sticky contents rail on wide screens; the app's own navy +
+     amber brand, its display face for the name only, a book face for reading, mono for what you type. */
+  :root {
+    --paper: #f6f3ec; --ink: #16202e; --muted: #5b6b7c; --rule: #d9d2c4; --panel: #ece6da;
+    --amber: #b5701a; --navy: #0f1d31; --key-bg: #fffdf8; --warn: #a6402e;
+    --display: 'Orbitron', 'Segoe UI', sans-serif;
+    --head: 'Rajdhani', 'Segoe UI', system-ui, sans-serif;
+    --body: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+    --mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+    --paper: #0d1726; --ink: #e8ecf2; --muted: #9aa8b8; --rule: #233650; --panel: #13223a;
+    --amber: #e8a33a; --navy: #0f1d31; --key-bg: #0f1d31; --warn: #ff8a73; color-scheme: dark; } }
+  :root[data-theme="dark"] {
+    --paper: #0d1726; --ink: #e8ecf2; --muted: #9aa8b8; --rule: #233650; --panel: #13223a;
+    --amber: #e8a33a; --navy: #0f1d31; --key-bg: #0f1d31; --warn: #ff8a73; color-scheme: dark; }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.62 var(--body); padding-inline: 16px; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding-block: 28px 64px; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; }
+  @media (max-width: 860px) { .wrap { grid-template-columns: minmax(0, 1fr); gap: 8px; } }
+
+  /* masthead */
+  .mast { grid-column: 1 / -1; display: flex; align-items: center; gap: 20px; padding-bottom: 22px; border-bottom: 2px solid var(--ink); flex-wrap: wrap; }
+  .mast img { width: 76px; height: 76px; }
+  .mast h1 { font: 700 clamp(26px, 4.6vw, 40px)/1.05 var(--display); letter-spacing: .06em; margin: 0; text-transform: uppercase; }
+  .mast h1 span { color: var(--amber); }
+  .mast p { margin: 6px 0 0; font: 600 15px/1.3 var(--head); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .mast .ver { margin-left: auto; font: 500 13px/1.6 var(--mono); color: var(--muted); text-align: right; }
+  @media (max-width: 600px) { .mast .ver { margin-left: 0; text-align: left; } }
+
+  /* contents rail */
+  nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; font: 600 15px/1.35 var(--head); }
+  nav.toc b { display: block; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+  nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; counter-reset: toc; }
+  nav.toc li { counter-increment: toc; display: grid; grid-template-columns: 26px 1fr; }
+  nav.toc li::before { content: counter(toc, decimal-leading-zero); color: var(--amber); font: 500 12px/1.9 var(--mono); }
+  nav.toc a { color: var(--ink); text-decoration: none; }
+  nav.toc a:hover, nav.toc a:focus-visible { color: var(--amber); text-decoration: underline; outline: none; }
+  @media (max-width: 860px) { nav.toc { position: static; padding: 14px 0 6px; border-bottom: 1px solid var(--rule); } nav.toc ol { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); } }
+
+  /* reading column */
+  main { min-width: 0; max-width: 68ch; counter-reset: sec; }
+  section { padding-top: 34px; scroll-margin-top: 16px; }
+  h2 { counter-increment: sec; font: 700 28px/1.15 var(--head); letter-spacing: .02em; margin: 0 0 12px; text-wrap: balance; display: flex; gap: 12px; align-items: baseline; }
+  h2::before { content: counter(sec, decimal-leading-zero); font: 500 15px/1 var(--mono); color: var(--amber); }
+  h3 { font: 700 20px/1.25 var(--head); letter-spacing: .02em; margin: 26px 0 6px; text-wrap: balance; }
+  p, li { text-wrap: pretty; }
+  p { margin: 0 0 14px; }
+  ul, ol { margin: 0 0 14px; padding-left: 1.3em; }
+  li { margin: 4px 0; }
+  a { color: var(--amber); }
+  strong { font-weight: 600; }
+  code, kbd { font: 500 .84em var(--mono); }
+  kbd { border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px; background: var(--key-bg); white-space: nowrap; }
+  .ui { font: 700 .95em var(--head); letter-spacing: .02em; white-space: nowrap; border-bottom: 1px dotted var(--muted); }
+  .lede { font-size: 19px; }
+  .note { border-left: 3px solid var(--amber); background: var(--panel); padding: 12px 16px; margin: 16px 0; border-radius: 0 6px 6px 0; }
+  .note.warn { border-left-color: var(--warn); }
+  .note b:first-child { font: 700 14px var(--head); letter-spacing: .1em; text-transform: uppercase; display: block; margin-bottom: 2px; }
+  .note p:last-child, .note ul:last-child { margin-bottom: 0; }
+  ol.steps { counter-reset: step; list-style: none; padding: 0; }
+  ol.steps > li { counter-increment: step; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 4px; margin: 10px 0; }
+  ol.steps > li::before { content: counter(step); width: 24px; height: 24px; border-radius: 50%; background: var(--navy); color: #f2f4f7; font: 700 13px/24px var(--head); text-align: center; margin-top: 3px; }
+
+  /* tables */
+  .table { overflow-x: auto; margin: 10px 0 18px; border: 1px solid var(--rule); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 15.5px; line-height: 1.45; }
+  th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--rule); }
+  tr:last-child td { border-bottom: 0; }
+  th { font: 700 13px var(--head); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); background: var(--panel); }
+  td:first-child { font: 700 16px var(--head); white-space: nowrap; }
+
+  .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 12px 0 16px; }
+  .pick { border: 1px solid var(--rule); border-radius: 8px; padding: 14px 16px; min-width: 0; }
+  .pick h4 { margin: 0 0 4px; font: 700 19px var(--head); }
+  .pick h4 small { font: 600 12px var(--head); letter-spacing: .12em; text-transform: uppercase; color: var(--amber); margin-left: 6px; }
+  .pick p { margin: 0; font-size: 15.5px; }
+
+  figure.shot { margin: 18px 0; }
+  figure.shot img { display: block; max-width: 100%; height: auto; border: 1px solid var(--rule); border-radius: 6px; background: #fff; }
+  figure.shot figcaption { margin-top: 6px; font: 600 14px var(--head); letter-spacing: .02em; color: var(--muted); }
+  footer { grid-column: 1 / -1; border-top: 1px solid var(--rule); padding-top: 16px; font: 500 13px/1.6 var(--mono); color: var(--muted); }
+
+  @media print {
+    body { background: #fff; color: #000; font-size: 11pt; padding: 0; }
+    nav.toc { display: none; } .wrap { display: block; padding: 0; } main { max-width: none; }
+    section { break-inside: auto; padding-top: 18px; } h2, h3 { break-after: avoid; }
+    a { color: inherit; } .note { break-inside: avoid; }
+  }
+  /* commands to type: dark box, wraps nothing (scrolls sideways on a phone) */
+  pre.cmd { margin: 10px 0 14px; padding: 12px 14px; background: var(--navy); color: #f2f4f7; border: 1px solid var(--rule); border-radius: 6px;
+            font: 500 15px/1.55 var(--mono); overflow-x: auto; white-space: pre; }
+  pre.cmd em { color: #e8a33a; }
+  td:first-child { white-space: normal; }
+
+  /* set-up diagram: scrolls sideways on a phone rather than shrinking the labels to nothing */
+  figure.diagram { margin: 18px 0 22px; }
+  figure.diagram .scroll { overflow-x: auto; border: 1px solid var(--rule); border-radius: 8px; background: var(--key-bg); }
+  figure.diagram svg { display: block; width: 100%; min-width: 620px; height: auto; }
+  figure.diagram figcaption { margin-top: 6px; font: 600 14px var(--head); letter-spacing: .02em; color: var(--muted); }
+  .d-dev { fill: var(--navy); stroke: var(--ink); stroke-width: 1.5; }
+  .d-ant { stroke: var(--ink); stroke-width: 3; stroke-linecap: round; fill: none; }
+  .d-link { stroke: var(--amber); stroke-width: 3.5; fill: none; stroke-linecap: round; }
+  .d-t { fill: var(--ink); font: 700 16px var(--head); letter-spacing: .02em; }
+  .d-s { fill: var(--muted); font: 500 11.5px var(--mono); }
+  .d-l { fill: var(--amber); font: 700 13px var(--head); letter-spacing: .04em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="mast">
+    <img src="assets/kelly-logo.svg" alt="">
+    <div>
+      <h1>Kelly <span>Page</span></h1>
+      <p>Raspberry Pi installation · headless, beside your radio</p>
+    </div>
+    <div class="ver">October 2026<br>This version works until 28 Nov 2026</div>
+  </header>
+
+  <nav class="toc" aria-label="Contents">
+    <b>Contents</b>
+    <ol>
+      <li><a href="#about">What this gives you</a></li>
+      <li><a href="#need">What you need</a></li>
+      <li><a href="#models">Which Raspberry Pi</a></li>
+      <li><a href="#card">Prepare the SD card</a></li>
+      <li><a href="#boot">First power-up</a></li>
+      <li><a href="#ssh">Log in to the Pi</a></li>
+      <li><a href="#copy">Copy Kelly to the Pi</a></li>
+      <li><a href="#install">Install Kelly</a></li>
+      <li><a href="#open">Connect the radio and open Kelly</a></li>
+      <li><a href="#keeper">Stay on air with your PC off</a></li>
+      <li><a href="#ble">Bluetooth LE presence (optional)</a></li>
+      <li><a href="#everyday">Everyday use</a></li>
+      <li><a href="#update">Moving to a new version</a></li>
+      <li><a href="#trouble">Troubleshooting</a></li>
+      <li><a href="#safe">Keeping it safe</a></li>
+    </ol>
+  </nav>
+
+  <main>
+
+  <section id="about">
+    <h2>What this gives you</h2>
+    <p class="lede">A Raspberry Pi is a small, cheap computer about the size of a deck of cards. Set up this way, it sits beside your radio with the radio's data lead plugged into it, and stays switched on. You then use Kelly Page from any PC, laptop or tablet in the house: just open a bookmark. Your PC no longer needs the lead, or a COM port.</p>
+    <figure class="diagram">
+      <div class="scroll">
+      <svg viewBox="0 0 800 200" role="img" aria-labelledby="dg-t">
+        <title id="dg-t">The Tait radio's data lead plugs into a USB socket on the Raspberry Pi. The Pi connects to your home router by network cable or Wi-Fi, and your PC on the same network opens Kelly Page in Chrome or Edge.</title>
+        <!-- links first, so the devices sit on top of them -->
+        <path class="d-link" d="M176 91 H300"/>
+        <path class="d-link" d="M450 96 H520"/>
+        <path class="d-link" d="M600 91 H650"/>
+        <text class="d-l" x="238" y="80" text-anchor="middle">DATA LEAD</text>
+        <text class="d-s" x="238" y="112" text-anchor="middle">USB-serial</text>
+        <text class="d-s" x="238" y="127" text-anchor="middle">19200 baud</text>
+        <text class="d-l" x="550" y="34" text-anchor="middle">HOME NETWORK</text>
+        <text class="d-s" x="550" y="50" text-anchor="middle">network cable or Wi-Fi</text>
+
+        <!-- Tait radio -->
+        <path class="d-ant" d="M150 62 V20"/>
+        <rect class="d-dev" x="20" y="60" width="150" height="62" rx="7"/>
+        <rect x="32" y="71" width="72" height="22" rx="3" fill="#e8a33a" opacity=".9"/>
+        <circle cx="130" cy="82" r="10" fill="none" stroke="#f2f4f7" stroke-width="2"/>
+        <circle cx="156" cy="82" r="6" fill="none" stroke="#f2f4f7" stroke-width="2"/>
+        <rect x="32" y="102" width="14" height="8" rx="2" fill="#5b6b7c"/><rect x="52" y="102" width="14" height="8" rx="2" fill="#5b6b7c"/>
+        <rect x="72" y="102" width="14" height="8" rx="2" fill="#5b6b7c"/><rect x="92" y="102" width="14" height="8" rx="2" fill="#5b6b7c"/>
+        <rect x="168" y="85" width="9" height="12" rx="1.5" fill="#c9ced6"/>
+        <text class="d-t" x="95" y="150" text-anchor="middle">Tait radio</text>
+        <text class="d-s" x="95" y="168" text-anchor="middle">TM9100 · TM9400 · TP9400</text>
+
+        <!-- Raspberry Pi -->
+        <rect x="300" y="55" width="150" height="76" rx="8" fill="#2e6b46" stroke="var(--ink)" stroke-width="1.5"/>
+        <g fill="#d9c27a"><circle cx="318" cy="64" r="2"/><circle cx="328" cy="64" r="2"/><circle cx="338" cy="64" r="2"/><circle cx="348" cy="64" r="2"/><circle cx="358" cy="64" r="2"/><circle cx="368" cy="64" r="2"/><circle cx="378" cy="64" r="2"/><circle cx="388" cy="64" r="2"/><circle cx="398" cy="64" r="2"/><circle cx="408" cy="64" r="2"/></g>
+        <rect x="335" y="80" width="34" height="34" rx="3" fill="#1d2430"/>
+        <rect x="378" y="84" width="22" height="16" rx="2" fill="#1d2430"/>
+        <rect x="432" y="72" width="22" height="16" rx="2" fill="#c9ced6"/>
+        <rect x="432" y="92" width="22" height="16" rx="2" fill="#c9ced6"/>
+        <rect x="294" y="84" width="14" height="14" rx="2" fill="#c9ced6"/>
+        <text class="d-t" x="375" y="158" text-anchor="middle">Raspberry Pi</text>
+        <text class="d-s" x="375" y="176" text-anchor="middle">runs the Kelly bridge</text>
+
+        <!-- home router -->
+        <path class="d-ant" d="M532 80 L524 62 M588 80 L596 62"/>
+        <rect class="d-dev" x="520" y="78" width="80" height="28" rx="5"/>
+        <circle cx="540" cy="92" r="3" fill="#7bd88f"/><circle cx="553" cy="92" r="3" fill="#7bd88f"/><circle cx="566" cy="92" r="3" fill="#e8a33a"/>
+        <text class="d-s" x="560" y="126" text-anchor="middle">home router</text>
+
+        <!-- PC -->
+        <rect class="d-dev" x="650" y="45" width="130" height="86" rx="6"/>
+        <rect x="659" y="54" width="112" height="68" rx="2" fill="#13223a"/>
+        <rect x="659" y="54" width="112" height="12" rx="2" fill="#e8a33a"/>
+        <rect x="666" y="73" width="30" height="42" rx="2" fill="#233650"/>
+        <rect x="702" y="73" width="62" height="8" rx="2" fill="#5b6b7c"/><rect x="702" y="86" width="48" height="8" rx="2" fill="#5b6b7c"/><rect x="702" y="99" width="56" height="8" rx="2" fill="#5b6b7c"/>
+        <rect x="705" y="131" width="20" height="11" fill="var(--ink)"/>
+        <rect x="685" y="142" width="60" height="5" rx="2" fill="var(--ink)"/>
+        <text class="d-t" x="715" y="170" text-anchor="middle">Your PC</text>
+        <text class="d-s" x="715" y="188" text-anchor="middle">Kelly in Chrome or Edge</text>
+      </svg>
+      </div>
+      <figcaption>The radio's data lead plugs into the Pi. The Pi joins your home network, and you open Kelly in the web browser on your PC.</figcaption>
+    </figure>
+    <p>The Pi runs <strong>headless</strong>: no screen, keyboard or mouse. You set it up once from your PC over your home network, by typing a handful of commands that this guide gives you word for word. Allow about an hour the first time, most of it waiting.</p>
+    <p>For everything about using Kelly itself (its pages, statuses, texts, maps and how the radio must be programmed), see the <a href="manual.html">operator's manual</a>.</p>
+    <div class="note"><b>How to read the commands</b><p>Anything in a dark box like the one below is typed exactly as shown, then you press <kbd>Enter</kbd>. Capital letters, spaces, quote marks and colons all matter. Where a command has a word in <em>italics</em>, such as <code><em>vk4abc</em></code>, type your own value instead.</p></div>
+    <pre class="cmd">this is a command</pre>
+  </section>
+
+  <section id="need">
+    <h2>What you need</h2>
+    <div class="table"><table>
+      <thead><tr><th>Item</th><th>Details</th></tr></thead>
+      <tbody>
+        <tr><td>Raspberry Pi</td><td>A Pi 3, 4 or 5, or a Pi Zero 2 W. See <a href="#models">Which Raspberry Pi</a>.</td></tr>
+        <tr><td>Power supply</td><td>The <strong>official</strong> Raspberry Pi supply for your model (see the table in the next section). A weak phone charger makes the USB lead drop out at random, which looks like a radio fault.</td></tr>
+        <tr><td>microSD card</td><td><strong>8 GB minimum, 16 or 32 GB recommended</strong>, a good brand (SanDisk, Samsung, Kingston) marked <strong>A1</strong> or <strong>Class 10</strong>. Everything on the card is wiped.</td></tr>
+        <tr><td>Card reader</td><td>To write the card from your PC. Many laptops have an SD slot; use the full-size adapter that comes with the card.</td></tr>
+        <tr><td>Radio data lead</td><td>The same USB-serial lead you use (or would use) with Kelly on a PC. Leads with an <strong>FTDI</strong>, Prolific, CH340 or Silicon Labs chip work with no drivers to install. A <strong>MOXA UPort</strong> needs one extra word during the install (see <a href="#install">Install Kelly</a>).</td></tr>
+        <tr><td>Tait radio</td><td>A TM9100, TM9400 or TP9400 programmed for Kelly: 19200 baud, CCDI on. See <a href="manual.html#radio">Setting up the radio</a> in the operator's manual.</td></tr>
+        <tr><td>Home network</td><td>A router with a spare network socket (best), or Wi-Fi. The Pi must be on the same network as the PC you use Kelly from. It needs internet while you install.</td></tr>
+        <tr><td>Your PC</td><td>Windows 10 or 11 (or a Mac) with <strong>Chrome</strong> or <strong>Edge</strong>, on the same network. Windows 7 can't do the setup steps, but once the Pi is running any PC on the network can use Kelly.</td></tr>
+        <tr><td>Optional</td><td>A network cable. A clip-on ferrite on the radio's data lead if the Pi sits near the transmitter.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section id="models">
+    <h2>Which Raspberry Pi</h2>
+    <p>The Pi has very little to do. Kelly's screens, maps and buttons all run in the browser on <em>your PC</em>; the Pi only passes the radio's data across the network and hands out Kelly's files. Measured on a Raspberry Pi 4, that job uses about 27 MB of memory and well under 1% of the processor. So any recent Pi feels just as quick in use; a slower one only takes a few seconds longer to load Kelly when you first open the bookmark.</p>
+    <p>If you want the Pi to <a href="#keeper">keep your station on air with your PC off</a>, the Pi also runs its own copy of Kelly in a hidden web browser. That's a bigger job: about 190 MB of memory and a few percent of the processor on a Pi 4, and a 200 MB download once. Choose a Pi with at least 1 GB of memory for it.</p>
+    <div class="table"><table>
+      <thead><tr><th>Model</th><th>Verdict</th><th>Power supply</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Pi 4 Model B</td><td><strong>Recommended</strong> · tested</td><td>USB-C, 5.1 V 3 A</td><td>Any memory size (1 GB is plenty, 2 GB or more is comfortable with Kelly running on the Pi too). This is the model Kelly was tested on, including the PC-off set-up.</td></tr>
+        <tr><td>Pi 5</td><td><strong>Recommended</strong></td><td>USB-C, 5.1 V 5 A (27 W)</td><td>More than it needs; fine if you already have one.</td></tr>
+        <tr><td>Pi 3 Model B / B+</td><td><strong>Good</strong></td><td>micro-USB, 5.1 V 2.5 A</td><td>Plenty fast for the bridge. Should manage Kelly on the Pi too (1 GB), a little slower to start; not tested. The 3 B+ has 5 GHz Wi-Fi; the 3 B only 2.4 GHz.</td></tr>
+        <tr><td>Pi Zero 2 W</td><td><strong>Good</strong>, budget choice</td><td>micro-USB, 5.1 V 2.5 A</td><td>Wi-Fi only (2.4 GHz). It has one data socket, the micro-USB marked <strong>USB</strong> (not PWR), so you need a <strong>micro-USB OTG adapter</strong> for the radio lead. Only 512 MB of memory: fine for the bridge, too tight to keep Kelly on air with your PC off.</td></tr>
+        <tr><td style="white-space:normal">Pi 1, Pi 2, original Pi Zero / Zero W</td><td>Not recommended</td><td>&mdash;</td><td>Should still run it, but the setup is slow and Kelly takes noticeably longer to open. Choose the <strong>32-bit</strong> Lite system for these. Too slow to run Kelly on the Pi itself. Not tested.</td></tr>
+        <tr><td>Pi Pico</td><td>Won't work</td><td>&mdash;</td><td>A different kind of board: it can't run Linux.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section id="card">
+    <h2>Prepare the SD card</h2>
+    <p>The Pi's "hard drive" is its SD card. You put the operating system on it with Raspberry Pi's free <strong>Imager</strong> program. The system to choose is <strong>Raspberry Pi OS Lite</strong>: Debian Linux made for the Pi, with no desktop, which is exactly what a headless Pi needs. Imager also lets you set the Pi's name, your login and the network before the card ever goes in the Pi.</p>
+    <ol class="steps">
+      <li><div>On your PC, go to <strong>raspberrypi.com/software</strong>, download <strong>Raspberry Pi Imager</strong> for Windows, and install it. Plug the SD card into the PC.</div></li>
+      <li><div>Start Imager. On the <span class="ui">Device</span> page, choose your Pi model and press <span class="ui">Next</span>.</div></li>
+      <li><div>On the <span class="ui">Operating system</span> page, choose <span class="ui">Raspberry Pi OS (other)</span>, then <span class="ui">Raspberry Pi OS Lite (64-bit)</span>. (The 32-bit one only for the old models in the table above.) Don't choose plain "Raspberry Pi OS": that's the desktop version, much bigger and slower.</div></li>
+      <li><div>On the <span class="ui">Storage</span> page, pick your SD card. <strong>Check the size matches your card</strong>, so you don't wipe a USB stick or backup drive by mistake.</div></li>
+      <li><div><strong>Hostname:</strong> type <code>kelly</code>. This is the name you'll reach the Pi by, as <code>kelly.local</code>. (Two Pis on one network need different names, for example <code>kelly2</code>.)</div></li>
+      <li><div><strong>Localisation:</strong> your capital city or time zone (for example <strong>Brisbane</strong>, Australia/Brisbane) and keyboard layout <strong>us</strong>.</div></li>
+      <li><div><strong>User:</strong> a username and password. Your callsign in <strong>small letters</strong> makes a good username, for example <code>vk4abc</code>. Pick a password you'll remember and <strong>write both down</strong>: you need them in a few minutes.</div></li>
+      <li><div><strong>Wi-Fi:</strong> if the Pi will use Wi-Fi, enter your network name (SSID) and password exactly, capitals included, and the country <strong>AU</strong>.
+        <div class="note warn"><b>Don't skip the Wi-Fi page</b><p>Even if you're using a network cable, <strong>do not press Skip here</strong>. Leave the boxes empty and press <span class="ui">Next</span>. The very next page is the one that switches on <strong>SSH</strong>, the remote login this whole guide depends on, and skipping the Wi-Fi page can carry you straight past it. A headless Pi without SSH can't be reached at all; the only cure is to write the card again.</p></div></div></li>
+      <li><div><strong>Remote access (SSH):</strong> turn <strong>Enable SSH</strong> on, and choose <strong>Use password authentication</strong>. Press <span class="ui">Next</span>.</div></li>
+      <li><div><strong>Raspberry Pi Connect:</strong> leave it off. Kelly doesn't use it. Press <span class="ui">Next</span>.</div></li>
+      <li><div>Check the summary, then press <span class="ui">Write</span> and confirm. Windows may ask for permission; say yes. Writing and checking takes 5 to 15 minutes. When Imager says it's finished, take the card out.</div></li>
+    </ol>
+    <div class="note"><b>Older Imager?</b><p>These page names are from Imager 2. An older Imager (version 1.x) asks <em>"Would you like to apply OS customisation settings?"</em> after you choose the card: press <span class="ui">Edit settings</span>, fill in the same things on the <span class="ui">General</span> tab, then on the <span class="ui">Services</span> tab tick <strong>Enable SSH</strong> with <strong>Use password authentication</strong>, press <span class="ui">Save</span>, then <span class="ui">Yes</span>. Better still, download the current Imager.</p></div>
+  </section>
+
+  <section id="boot">
+    <h2>First power-up</h2>
+    <ol class="steps">
+      <li><div>Put the SD card into the slot under the Pi (the label faces away from the board).</div></li>
+      <li><div>If you're using a cable, plug the Pi into your router. Leave the radio lead out for now.</div></li>
+      <li><div>Plug in the power supply. There's no power switch: the red light comes on and the green one flickers.</div></li>
+      <li><div><strong>Wait five minutes.</strong> The first start sets itself up and may restart once on its own. Don't unplug it during this time.</div></li>
+    </ol>
+  </section>
+
+  <section id="ssh">
+    <h2>Log in to the Pi</h2>
+    <p>You control the Pi by typing commands into a window on your PC, using <strong>SSH</strong> (Secure Shell). Windows 10 and 11 have it built in.</p>
+    <ol class="steps">
+      <li><div>On the PC, click <strong>Start</strong>, type <code>cmd</code> and open <strong>Command Prompt</strong>. (On a Mac, open <strong>Terminal</strong>; the commands are the same.)</div></li>
+      <li><div>Type this, using your own username from the Imager step, and press <kbd>Enter</kbd>:
+        <pre class="cmd">ssh <em>vk4abc</em>@kelly.local</pre></div></li>
+      <li><div>The first time, it asks <em>"Are you sure you want to continue connecting (yes/no/[fingerprint])?"</em>. Type <code>yes</code> and press <kbd>Enter</kbd>. That's normal: your PC is meeting the Pi for the first time.</div></li>
+      <li><div>Type your Pi password and press <kbd>Enter</kbd>. <strong>Nothing appears on screen while you type the password</strong>, not even dots. That's normal too; just type it and press <kbd>Enter</kbd>.</div></li>
+      <li><div>You're in when the line ends with something like <code><em>vk4abc</em>@kelly:~ $</code>. Commands you type in this window now run on the Pi. Leave this window open.</div></li>
+    </ol>
+    <div class="note"><b>"Could not resolve hostname kelly.local"?</b><p>Your PC can't find the Pi by name. Wait another few minutes and try again. If it still fails, log in to your router's web page, look in its list of connected devices for <strong>kelly</strong>, note its number (for example <code>192.168.1.57</code>) and use that instead: <code>ssh <em>vk4abc</em>@192.168.1.57</code>. Use the same number in place of <code>kelly.local</code> everywhere else in this guide.</p></div>
+  </section>
+
+  <section id="copy">
+    <h2>Copy Kelly to the Pi</h2>
+    <p>Kelly Page comes as a zip file, for example <code>KellyPage-0.4.16-2026-10-12-expires-2026-11-28.zip</code>. Leave it zipped; the Pi unpacks it.</p>
+    <ol class="steps">
+      <li><div>Open a <strong>second</strong> Command Prompt window (Start, <code>cmd</code>). This one stays on your PC.</div></li>
+      <li><div>Go to the folder holding the zip. If it's in Downloads:
+        <pre class="cmd">cd Downloads</pre></div></li>
+      <li><div>Type the start of the copy command, <code>scp Kelly</code>, then press <kbd>Tab</kbd>: Windows fills in the rest of the zip's name. Then add a space and <code><em>vk4abc</em>@kelly.local:</code> so the whole line looks like this:
+        <pre class="cmd">scp KellyPage-0.4.16-2026-10-12-expires-2026-11-28.zip <em>vk4abc</em>@kelly.local:</pre>
+        The <strong>colon at the very end matters</strong>: without it, Windows makes a copy on your own PC instead of sending it to the Pi.</div></li>
+      <li><div>Type your Pi password (invisible again) and press <kbd>Enter</kbd>. It shows 100% when the copy is done. You can close this window.</div></li>
+    </ol>
+  </section>
+
+  <section id="install">
+    <h2>Install Kelly</h2>
+    <p>Back in the <strong>first</strong> window, the one logged in to the Pi:</p>
+    <ol class="steps">
+      <li><div>Unpack the zip:
+        <pre class="cmd">python3 -m zipfile -e KellyPage-*.zip ~</pre>
+        This makes a folder called <code>Kelly Page</code>. It prints nothing when it works.</div></li>
+      <li><div>Run Kelly's installer. Type it exactly, <strong>with the quote marks</strong> (the folder name has a space in it):
+        <pre class="cmd">sudo bash ~/"Kelly Page/bridge/install-pi.sh"</pre>
+        Using a <strong>MOXA UPort</strong> lead? Add <code>--moxa</code> at the end, after a space, to install its firmware too.</div></li>
+      <li><div>It asks for your password (<code>sudo</code> means "as the administrator"). It then takes two to five minutes, mostly downloading, and finishes with <strong>== Done ==</strong> and your Kelly address, like this:
+        <pre class="cmd">http://kelly.local:8025/?connect=ip&amp;token=<em>k7m2qx9wa4</em></pre>
+        The letters after <code>token=</code> are your Pi's own password for Kelly. Copy the whole address into a note; you can show it again any time with <code>cat ~/kelly-address.txt</code>.</div></li>
+      <li><div>Log out of the Pi:
+        <pre class="cmd">exit</pre></div></li>
+    </ol>
+    <p>That's the last command you need. From now on the Pi starts Kelly by itself every time the radio lead is plugged in, including after a power cut.</p>
+  </section>
+
+  <section id="open">
+    <h2>Connect the radio and open Kelly</h2>
+    <ol class="steps">
+      <li><div>Plug the radio's data lead into one of the Pi's USB sockets and into the radio, and switch the radio on.</div></li>
+      <li><div>On your PC, open Chrome or Edge and paste your Kelly address into the address bar (the <code>http://kelly.local:8025/?connect=ip&amp;token=&hellip;</code> one).</div></li>
+      <li><div>Kelly opens and connects on its own. Within a few seconds the Dashboard shows your radio's model and serial number.</div></li>
+      <li><div>Press <kbd>Ctrl</kbd>+<kbd>D</kbd> to bookmark it. That bookmark is how you open Kelly from now on.</div></li>
+      <li><div>If you're new to Kelly, carry on with <a href="manual.html#first">First start</a> in the operator's manual (choosing Shack mode, your callsign, and so on).</div></li>
+    </ol>
+    <div class="note warn"><b>Don't press Serial</b><p>With the radio on the Pi, Kelly reaches it over the network through the <strong>IP bridge</strong>, which the bookmark chooses for you. If you go to <span class="ui">Admin</span> and press <span class="ui">Serial</span>, the browser says <em>"Web Serial not available"</em>: that button is only for a radio plugged into the PC itself. Just use the bookmark.</p></div>
+    <h3>On your phone</h3>
+    <p>The installer finishes with a QR code. Point your phone's camera at it (the phone on the same WiFi as the Pi) and open the link: that's Kelly on your phone, token and all, nothing to type. To show the code again, log in to the Pi and run <code>sudo python3 /opt/kelly-page/bridge/kelly_bridge.py --connect-qr</code>. If the address starts with <code>https</code> and the Pi uses its own certificate, the phone warns once: tap <span class="ui">Advanced › Proceed</span>.</p>
+    <p>You can open Kelly from more than one PC or tablet at once; they all see the same radio. Each browser keeps its own settings, so use <span class="ui">Admin › Save config</span> and <span class="ui">Load config</span> to copy your set-up between them.</p>
+  </section>
+
+  <section id="keeper">
+    <h2>Stay on air with your PC off</h2>
+    <p class="lede">Kelly does its work in your web browser. When your PC goes to sleep or you close the tab, nobody is minding the radio: messages for you go unanswered, and after about ten minutes the P25X network marks your station as gone. The Pi can fix that by running its own copy of Kelly, all the time, in a hidden web browser.</p>
+
+    <h3>How it works</h3>
+    <figure class="diagram">
+      <div class="scroll">
+      <svg viewBox="0 0 800 230" role="img" aria-labelledby="kp-t">
+        <title id="kp-t">While nobody has Kelly open, the Pi's own Kelly works the radio. When you open your bookmark, the Pi's Kelly steps aside and yours works the radio; about ten seconds after you close it, the Pi's Kelly takes over again.</title>
+        <rect class="d-dev" x="20" y="30" width="230" height="150" rx="8" style="fill: var(--panel); stroke: var(--rule)"/>
+        <text class="d-l" x="135" y="58" text-anchor="middle">PC OFF OR ASLEEP</text>
+        <text class="d-t" x="135" y="96" text-anchor="middle">The Pi's Kelly</text>
+        <text class="d-t" x="135" y="118" text-anchor="middle">works the radio</text>
+        <text class="d-s" x="135" y="148" text-anchor="middle">parked, answering the</text>
+        <text class="d-s" x="135" y="164" text-anchor="middle">network, logging traffic</text>
+        <rect class="d-dev" x="550" y="30" width="230" height="150" rx="8" style="fill: var(--panel); stroke: var(--rule)"/>
+        <text class="d-l" x="665" y="58" text-anchor="middle">YOU OPEN KELLY</text>
+        <text class="d-t" x="665" y="96" text-anchor="middle">Your Kelly</text>
+        <text class="d-t" x="665" y="118" text-anchor="middle">works the radio</text>
+        <text class="d-s" x="665" y="148" text-anchor="middle">the Pi's Kelly waits,</text>
+        <text class="d-s" x="665" y="164" text-anchor="middle">switched off</text>
+        <path class="d-link" d="M262 80 H538"/><path class="d-link" d="M526 70 L538 80 L526 90"/>
+        <text class="d-s" x="400" y="68" text-anchor="middle">you open your bookmark</text>
+        <text class="d-l" x="400" y="102" text-anchor="middle">STEPS ASIDE AT ONCE</text>
+        <path class="d-link" d="M538 140 H262"/><path class="d-link" d="M274 130 L262 140 L274 150"/>
+        <text class="d-s" x="400" y="128" text-anchor="middle">you close it, or the PC sleeps</text>
+        <text class="d-l" x="400" y="162" text-anchor="middle">TAKES OVER AFTER ~10 S</text>
+        <text class="d-s" x="400" y="215" text-anchor="middle">Only one Kelly ever works the radio, so nothing is ever sent twice.</text>
+      </svg>
+      </div>
+      <figcaption>The Pi's Kelly covers for you whenever no one has Kelly open.</figcaption>
+    </figure>
+    <ul>
+      <li><strong>While nobody has Kelly open,</strong> the Pi's Kelly is connected to the radio. It parks the radio for the network, answers messages, and checks in, exactly as your own Kelly would.</li>
+      <li><strong>When you open your bookmark,</strong> the Pi's Kelly steps aside in the same second and switches itself off, and your Kelly takes over, picking up the Pi's log of everything it heard (see <em>Good to know</em> below). Two copies of Kelly on one radio would both answer the network and send everything twice, so the Pi makes sure that never happens.</li>
+      <li><strong>About ten seconds after you close Kelly</strong> (or your PC goes to sleep), the Pi's Kelly starts up again, reconnects and parks the radio. The network sees your station come back within half a minute.</li>
+      <li><strong>After a power cut</strong> it all starts again by itself once the Pi is back up and the radio lead is plugged in.</li>
+    </ul>
+
+    <h3>Setting it up</h3>
+    <p>The Pi's Kelly needs your station's settings (your callsign, your personality such as Shack, your status and preset labels). You give it a copy of them as a <strong>configuration file</strong>, saved from your own Kelly.</p>
+    <ol class="steps">
+      <li><div>Open Kelly from your bookmark and set it up the way you want: <span class="ui">Admin › Personality</span> (Shack for most shack radios), your callsign, your labels.</div></li>
+      <li><div>Press <span class="ui">Admin › Save config (.xml)</span>. A file such as <code>kelly-config-VK4ABC-2026-10-13.xml</code> lands in your Downloads folder.</div></li>
+      <li><div>Copy it to the Pi under the name <code>kelly-config.xml</code>, from a Command Prompt on your PC. Type the start of your file's name and press <kbd>Tab</kbd> to fill in the rest:
+        <pre class="cmd">cd Downloads
+scp kelly-config-<em>VK4ABC</em>-<em>2026-10-13</em>.xml <em>vk4abc</em>@kelly.local:kelly-config.xml</pre>
+        The name after the colon matters: the Pi only looks for <code>kelly-config.xml</code>.</div></li>
+      <li><div>Log in to the Pi and run the installer again, exactly as in <a href="#install">Install Kelly</a>:
+        <pre class="cmd">sudo bash ~/"Kelly Page/bridge/install-pi.sh"</pre>
+        (If you tidied away the <code>Kelly Page</code> folder, unpack the zip again first.) The first time, it downloads a hidden web browser for the Pi, about 200 MB, so allow a few minutes. It finishes with <em>Kelly also runs on the Pi itself, so your radio stays on the network with your PC off.</em></div></li>
+      <li><div>Close Kelly on your PC and wait half a minute. The Pi's Kelly is now on the radio.</div></li>
+    </ol>
+
+    <h3>What it sets up for you</h3>
+    <ul>
+      <li>A hidden web browser on the Pi (Chromium, the same browser engine as Chrome), with Kelly open in it.</li>
+      <li>A small helper, <strong>kelly-keeper</strong>, that starts and stops that browser and hands the radio over between it and you. It starts with the Pi and stops whenever the radio lead is unplugged.</li>
+      <li>Your settings, loaded into the Pi's Kelly, with a few changes for running on its own: no sounds (the Pi has no speaker), no animations, and no automatic Kelly updates over the air. You update the Pi by running the installer with a new version, as in <a href="#update">Moving to a new version</a>; the Pi's Kelly comes back with the new version and your settings.</li>
+    </ul>
+
+    <h3>Changing its settings later</h3>
+    <p>Changed something in your own Kelly that the Pi's should have too, such as a new label? Save the config again and copy it over the old one with the same <code>scp</code> command. The Pi notices the new file within a few seconds and loads it; there's no need to run the installer.</p>
+
+    <h3>Good to know</h3>
+    <ul>
+      <li><strong>What the Pi heard comes to you.</strong> The Pi's Kelly keeps a log of the texts, calls, status changes, bulletins, storm alerts, pictures and positions that arrive while it's in charge. When you open your bookmark, your Kelly picks that log up from the Pi within a few seconds and adds it to your own history, with one message such as <em>While you were away: 3 texts, 12 calls</em>, and the badges show what's new. Nothing is added twice, and nothing goes out over the air to fetch it. If you clear your logs (<span class="ui">Admin › Clear logs</span>), the Pi's older log isn't added back.</li>
+      <li><strong>Sounds play only on your PC,</strong> while your own Kelly is open.</li>
+      <li><strong>Opening Kelly on a second PC or a tablet</strong> works as before. The Pi's Kelly stays switched off until the last of them is closed.</li>
+    </ul>
+
+    <h3>Checking on it</h3>
+    <p>Log in to the Pi (<code>ssh <em>vk4abc</em>@kelly.local</code>) and type:</p>
+    <pre class="cmd">journalctl -u kelly-keeper -n 15 --no-pager</pre>
+    <p>The last few lines tell the story, for example:</p>
+    <pre class="cmd">[keeper] Kelly started in headless Chromium (pid 90415)
+[keeper] applied kelly-config.xml (callsign VK4XXX, home transparent) and reloaded Kelly
+[keeper] someone opened Kelly from another computer -- stepping aside
+[keeper] Kelly started in headless Chromium (pid 90754)</pre>
+    <p><em>Kelly started</em> as the last line means the Pi's Kelly is on the radio; <em>stepping aside</em> means someone has Kelly open. <em>bridge or radio not up -- waiting</em> means the radio lead isn't plugged in, or the bridge isn't running.</p>
+
+    <h3>Turning it off</h3>
+    <p>To go back to Kelly only running while your PC has it open, remove the configuration file and run the installer again:</p>
+    <pre class="cmd">rm ~/kelly-config.xml
+sudo bash ~/"Kelly Page/bridge/install-pi.sh"</pre>
+    <p>Or switch it off for now without changing anything else, and back on later:</p>
+    <pre class="cmd">sudo systemctl disable --now kelly-keeper</pre>
+    <pre class="cmd">sudo systemctl enable --now kelly-keeper</pre>
+  </section>
+
+  <section id="ble">
+    <h2>Bluetooth LE presence (optional)</h2>
+    <p class="lede">The Pi's own Bluetooth can watch for small Bluetooth LE devices around your home: a keyring beacon, a thermometer, a tag on the go-box. Kelly's <span class="ui">BLE Presence</span> page then sends a P25 text to your radio when one arrives, leaves, hasn't been seen for a while, or reads out of range. For example: <em>VK4ABC arrived Home 17:42</em>, or <em>Go-box battery low 15%</em>.</p>
+
+    <h3>Switching it on</h3>
+    <p>Run the installer once more with <code>--ble</code> added. It installs the Bluetooth software, switches Bluetooth on, and finishes with a short test that should hear a few devices:</p>
+    <pre class="cmd">sudo bash ~/"Kelly Page/bridge/install-pi.sh" --ble</pre>
+    <pre class="cmd">   self-test on hci0:
+   hci0: OK, 42.4 C
+   heard 93 adverts from 8 devices in 6 s</pre>
+    <p>The choice is remembered: later upgrades keep Bluetooth on without <code>--ble</code>.</p>
+
+    <h3>Register a beacon</h3>
+    <ol class="steps">
+      <li><div>Open Kelly, go to <span class="ui">Telemetry › BLE Presence</span>, and press <span class="ui">Start scanning</span>.</div></li>
+      <li><div>Hold your beacon near the Pi. It appears in <span class="ui">Nearby</span>, with what Kelly can read from it (an iBeacon number, a temperature, a battery level). Press <span class="ui">Register</span>, give it a name and your callsign, and save it.</div></li>
+      <li><div>Go to <span class="ui">Rules</span>, press <span class="ui">New rule</span>, choose what should happen (arrives, leaves, not seen for some hours, battery low, temperature above a value…) and which radio IDs should be told. The preview shows the exact text and its length. Use <span class="ui">Dry run</span> for the first day: Kelly logs what it would have sent and transmits nothing.</div></li>
+    </ol>
+    <p><strong>Phones and watches can't be used.</strong> They change their Bluetooth address every few minutes on purpose, for privacy, so Kelly can't recognise them from one hour to the next. Use a dedicated beacon instead: any iBeacon or Eddystone tag, a Xiaomi LYWSD03MMC thermometer with the free ATC or pvvx firmware, or a BTHome sensor. Kelly only counts other people's phones by maker. It never shows, stores or sends their addresses.</p>
+
+    <h3>Pets</h3>
+    <p>A Bluetooth tag on a collar lets Kelly text you when your pet slips out. Register the tag with type <span class="ui">🐾 Pet</span>; Kelly then waits until the pet has been out of range for 10 minutes before saying so, since pets wander to the edge of the yard and back. On the Devices tab, <span class="ui">🐾 Pet alerts</span> sets up two rules in one go: an alarm when it leaves, repeated every 15 minutes until it's back or you reply <code>ACK</code>, and a text when it comes home. To look for it, <span class="ui">🔍 Find</span> clicks faster as you get closer.</p>
+    <p><strong>Which tags work:</strong> cheap "iTag" key-finder tags, BLE collar beacons, and any tag that sends an iBeacon or Eddystone ID. Kelly shows them in Nearby, ready to register. Some Tile models keep a fixed address and work; others don't. <strong>Apple AirTags, Samsung SmartTags and Google Find My trackers can't be used:</strong> they change their address every few minutes on purpose, as protection against stalking, so only their owner's phone can follow them. Kelly recognises and labels them, but never tracks them.</p>
+
+    <h3>With your PC off</h3>
+    <p>The rules run in whichever Kelly is open: yours while you use it, otherwise the Pi's own Kelly (see <a href="#keeper">Stay on air with your PC off</a>). After setting up your devices and rules, <strong>save your config again and copy it to the Pi</strong> (the same <code>scp</code> command), so the Pi's Kelly has them too. The Pi's Kelly doesn't play sounds.</p>
+
+    <h3>How often it transmits</h3>
+    <p>Each alert is a normal P25 text from your radio, unencrypted and under your own radio ID, sent one at a time. By default alarms can go every 20 s, arrivals and departures every 2 minutes (several waiting for the same radio are joined into one text), routine readings every 10 minutes, and no more than 20 non-alarm alerts an hour. If you start Kelly while a device is already home, it doesn't announce it. Reply <code>ACK</code> from your radio to stop an alert that repeats.</p>
+
+    <h3>A USB Bluetooth dongle</h3>
+    <p>The Pi's built-in Bluetooth shares its radio and aerial with Wi-Fi, so it misses some packets when Wi-Fi is busy, and it doesn't reach far. A USB dongle hears better, especially with a cable to a better spot:</p>
+    <ul>
+      <li><strong>TP-Link UB5A</strong> (Realtek chip): plug it in. If <code>dmesg | grep -i rtl</code> mentions missing firmware, install it with <code>sudo apt install firmware-realtek</code> and replug.</li>
+      <li><strong>Nordic nRF52840 USB dongle</strong>: flash it once with Zephyr's <em>hci_usb</em> sample so it works as an ordinary Bluetooth adapter. On a PC with the Zephyr tools: <code>west build -b nrf52840dongle/nrf52840 zephyr/samples/bluetooth/hci_usb</code>, press the dongle's side button (its red light pulses), then <code>nrfutil nrf5sdk-tools pkg generate --hw-version 52 --sd-req 0x00 --application build/zephyr/zephyr.hex --application-version 1 hci_usb.zip</code> and <code>nrfutil nrf5sdk-tools dfu usb-serial -pkg hci_usb.zip -p COM7</code> (its port).</li>
+    </ul>
+    <p>The dongle shows up as <code>hci1</code> (the built-in one is <code>hci0</code>); <code>ls /sys/class/bluetooth</code> lists them. Scan with the dongle only, or both:</p>
+    <pre class="cmd">sudo bash ~/"Kelly Page/bridge/install-pi.sh" --ble hci1</pre>
+    <p>To switch the built-in Bluetooth off altogether, add <code>dtoverlay=disable-bt</code> to <code>/boot/firmware/config.txt</code> and reboot. The dongle then becomes <code>hci0</code>, so run the installer with <code>--ble hci0</code>.</p>
+
+    <h3>Scanners in other places</h3>
+    <p>Another Pi (a Pi Zero 2 W is plenty) in the shed, at the clubhouse or at a repeater site can scan too, and send what it hears to your Kelly over the network: your home network, Tailscale or 4G. It never uses the radio. Its devices count as being in its own zone, so a rule can say <em>moved Home › Shed</em>.</p>
+    <ol class="steps">
+      <li><div>In Kelly: <span class="ui">BLE Presence › Adapters &amp; nodes › Add a remote node</span>. Give it an id (<code>shed</code>) and a zone (<code>Shed</code>). Kelly shows a token <strong>once</strong>, together with the line to run on the new Pi.</div></li>
+      <li><div>Set the new Pi up as in the first sections of this guide, copy Kelly to it, and run that line, for example:
+        <pre class="cmd">sudo bash ~/"Kelly Page/bridge/install-pi.sh" --ble-node --server kelly.local:8025 --node shed --token <em>the-token</em></pre></div></li>
+      <li><div>The node appears as <em>up</em> in <span class="ui">Adapters &amp; nodes</span>. It only forwards your registered devices. To register a beacon that lives at that site, press <span class="ui">Discover 10 min</span> next to the node and it appears in Nearby.</div></li>
+    </ol>
+    <p>If the node's link drops, the node keeps what it hears and sends it later, in order, so a slow link never makes a device "leave". If a node is off the air for longer than you set in <span class="ui">Settings</span>, Kelly can text you about it.</p>
+    <p><strong>Keeping it safe.</strong> A node is only accepted with its own token. The Pi keeps a scrambled copy of the token, so it can't be read back. Kelly checks everything a node sends and limits how much it may send. A node can't make your radio transmit anything: only your own rules can, within the limits above. <span class="ui">New token</span> or <span class="ui">✕</span> cuts a node off at once. Over the internet, keep the link inside Tailscale, which encrypts it. Why not just share the USB dongle over the network (USB/IP)? It needs a steady, fast link and drops out with the slightest hiccup, while a node keeps working through outages and sends only a few hundred bytes a minute.</p>
+
+    <h3>If something's wrong</h3>
+    <div class="table"><table>
+      <thead><tr><th>You see</th><th>Try this</th></tr></thead>
+      <tbody>
+        <tr><td style="white-space:normal"><em>Bridge not reachable</em> on the BLE page</td><td>The bridge wasn't installed with <code>--ble</code>. Run the installer with <code>--ble</code>.</td></tr>
+        <tr><td style="white-space:normal">hci0 <em>needs attention</em></td><td>The page lists the fix. Most often Bluetooth is blocked (<code>sudo rfkill unblock bluetooth</code>) or switched off in <code>config.txt</code>.</td></tr>
+        <tr><td style="white-space:normal">Under-voltage warnings</td><td>The Pi's power supply is too weak. Use the official one. Bluetooth and USB dongles are the first to suffer.</td></tr>
+        <tr><td style="white-space:normal">A beacon keeps arriving and leaving</td><td>It's on the edge of range. In <span class="ui">Devices › Edit</span>, lower its <em>Depart dBm</em> (say −95) or raise <em>Absence s</em>. Or move the Pi or the dongle closer.</td></tr>
+        <tr><td style="white-space:normal">A node shows a clock warning</td><td>Its clock is wrong: <code>sudo timedatectl set-ntp true</code> on that Pi. Kelly corrects the times meanwhile.</td></tr>
+        <tr><td style="white-space:normal">Logs</td><td><code>journalctl -u kelly-bridge -n 30</code> on the Pi (lines start <code>[ble]</code>), <code>journalctl -u kelly-ble-node -n 30</code> on a node.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section id="everyday">
+    <h2>Everyday use</h2>
+    <ul>
+      <li><strong>Leave the Pi on.</strong> It uses about as much power as a phone charger.</li>
+      <li><strong>Unplugging the radio lead</strong> stops Kelly's link to the radio; plugging it back in starts it again within a few seconds. Reload the Kelly page (<kbd>F5</kbd>) to reconnect.</li>
+      <li><strong>To switch the Pi off</strong>, for example to move it, shut it down first so the SD card isn't damaged. Log in (<code>ssh <em>vk4abc</em>@kelly.local</code>) and type:
+        <pre class="cmd">sudo poweroff</pre>
+        Wait until the green light stops flashing, then unplug it. A power cut is usually harmless, but don't make a habit of pulling the plug.</li>
+      <li><strong>To restart it</strong> instead: <code>sudo reboot</code>.</li>
+    </ul>
+  </section>
+
+  <section id="update">
+    <h2>Moving to a new version</h2>
+    <p>Each version of Kelly works until a set date; this one until the end of <strong>30 April 2027</strong>. After that the Pi still shows the page, but won't connect to the radio until you install a newer version. Your Kelly address and bookmark stay the same.</p>
+    <ol class="steps">
+      <li><div>In Kelly, <span class="ui">Admin › Save config (.xml)</span>, to be safe.</div></li>
+      <li><div>Log in to the Pi and clear away the old copy you unpacked (Kelly keeps running from its installed copy meanwhile):
+        <pre class="cmd">rm -rf ~/"Kelly Page" ~/KellyPage-*.zip</pre>
+        Leave this window open.</div></li>
+      <li><div>Copy the new zip to the Pi exactly as in <a href="#copy">Copy Kelly to the Pi</a>.</div></li>
+      <li><div>Back in the Pi window, unpack it and run the installer again, the same two commands as the first time:
+        <pre class="cmd">python3 -m zipfile -e KellyPage-*.zip ~</pre>
+        <pre class="cmd">sudo bash ~/"Kelly Page/bridge/install-pi.sh"</pre></div></li>
+      <li><div>Open your bookmark and press <kbd>Ctrl</kbd>+<kbd>F5</kbd> once, so the browser loads the new files.</div></li>
+    </ol>
+  </section>
+
+  <section id="trouble">
+    <h2>Troubleshooting</h2>
+    <div class="table"><table>
+      <thead><tr><th>You see</th><th>Try this</th></tr></thead>
+      <tbody>
+        <tr><td style="white-space:normal">ssh says "Connection refused" or "timed out"</td><td>Most often <strong>SSH was never switched on</strong>, usually because the Wi-Fi page was skipped in Imager. Write the card again, carefully following <a href="#card">Prepare the SD card</a>. If you used Wi-Fi, check the network name and password: a Pi that can't join Wi-Fi can't be reached either. A network cable takes Wi-Fi out of the question.</td></tr>
+        <tr><td style="white-space:normal">"Could not resolve hostname"</td><td>Use the Pi's number from your router instead of <code>kelly.local</code>; see <a href="#ssh">Log in to the Pi</a>.</td></tr>
+        <tr><td style="white-space:normal">ssh says "Permission denied"</td><td>Wrong username or password. Both are exactly as typed into Imager, and the username is in small letters.</td></tr>
+        <tr><td style="white-space:normal">"REMOTE HOST IDENTIFICATION HAS CHANGED"</td><td>You rewrote the card, so the Pi has a new identity. On the PC, type <code>ssh-keygen -R kelly.local</code>, then log in again.</td></tr>
+        <tr><td style="white-space:normal">"No such file or directory" during the install</td><td>A typing slip, usually missing quote marks around <code>"Kelly Page/bridge/install-pi.sh"</code>. Type <code>ls</code> to see what's there: you should see the zip and a <code>Kelly Page</code> folder.</td></tr>
+        <tr><td style="white-space:normal">The Kelly page won't open in the browser</td><td>The page only appears while the radio lead is plugged into the Pi. Check the lead, wait ten seconds, and reload. To check the Pi can see the lead, log in and type <code>ls /dev/kelly-radio</code>: an error means the Pi doesn't see it (try another USB socket or lead).</td></tr>
+        <tr><td style="white-space:normal">"Web Serial not available"</td><td>You pressed <span class="ui">Serial</span>. Use your bookmark, which connects through the IP bridge; see <a href="#open">Connect the radio and open Kelly</a>.</td></tr>
+        <tr><td style="white-space:normal">Kelly opens but won't connect</td><td>The token in the address is missing or wrong. Log in to the Pi and type <code>cat ~/kelly-address.txt</code> for the right address.</td></tr>
+        <tr><td style="white-space:normal">Connected but "No CCDI reply"</td><td>The Pi's side is working; the radio isn't answering. Check the radio is on and programmed for 19200 baud with CCDI on (<a href="manual.html#radio">operator's manual</a>), and that the lead goes to the right socket. If the radio was left in Transparent mode, switch it off and on.</td></tr>
+        <tr><td style="white-space:normal">The link drops at random, often when you transmit</td><td>Two usual causes. <strong>Power:</strong> use the official supply; log in and type <code>vcgencmd get_throttled</code>, and anything other than <code>throttled=0x0</code> means the supply is too weak. <strong>RF:</strong> move the Pi and its leads away from the antenna and feedline, and clip a ferrite on the radio's data lead near the Pi.</td></tr>
+        <tr><td style="white-space:normal">Your station still drops off the network with the PC off</td><td>Check the Pi's own Kelly is set up and running: <a href="#keeper">Checking on it</a>. No <code>kelly-keeper</code> at all means <code>kelly-config.xml</code> wasn't on the Pi when you ran the installer (the name must be exact). <em>stepping aside</em> as the last line means a Kelly tab is still open somewhere, perhaps on another PC or a tablet: close it.</td></tr>
+        <tr><td style="white-space:normal">"This version has expired"</td><td>Install a newer version: <a href="#update">Moving to a new version</a>.</td></tr>
+      </tbody>
+    </table></div>
+    <p>Asking someone for help? Log in to the Pi and run this, then send them what it prints:</p>
+    <pre class="cmd">systemctl status kelly-bridge --no-pager; ls -l /dev/kelly-radio; lsusb</pre>
+  </section>
+
+  <section id="safe">
+    <h2>Keeping it safe</h2>
+    <ul>
+      <li>Anyone who opens your Kelly address can key your radio, so <strong>keep the address (with its token) to yourself</strong>, the same as a password.</li>
+      <li><strong>Never</strong> set your router to forward port 8025 to the internet. Kelly is for your home network. For use away from home, ask about a private network such as Tailscale, which the P25X project already uses.</li>
+      <li>Use a proper password for the Pi itself, not <code>raspberry</code> or <code>password</code>.</li>
+      <li>Everything Kelly sends goes out under your licence; see <a href="manual.html#onair">On air</a> in the operator's manual.</li>
+    </ul>
+  </section>
+
+  </main>
+
+  <footer>Kelly Page on a Raspberry Pi · works until 30 April 2027 · for Tait TM9100, TM9400 and TP9400 radios on the P25X network</footer>
+</div>
+</body>
+</html>

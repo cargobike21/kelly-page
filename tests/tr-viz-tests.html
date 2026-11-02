@@ -1,0 +1,229 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>tr-viz tests</title>
+<link rel="stylesheet" href="../css/kelly.css"><link rel="stylesheet" href="../css/tr.css"><link rel="stylesheet" href="../css/tr-viz.css">
+<style>body{font:13px Consolas,monospace;background:#0b0f14;color:#dde;padding:12px;margin:0}.ok{color:#3d8}.bad{color:#f55}#wrap{width:960px}
+body.shot{padding:0}body.shot #out{display:none}body.shot #wrap{width:1000px}</style>
+</head><body>
+<!-- Kelly Page -- Trace Route constellation canvas (js/tr-viz.js) driven with KellyPJ + KellyTR and a fake c whose fxLoop
+     and clock are stepped by hand (headless --virtual-time-budget stalls, so nothing here waits on real time).
+     Run: msedge --headless=new --disable-gpu --allow-file-access-from-files --dump-dom file:///.../tests/tr-viz-tests.html
+     -> the last line is RESULT: ALL PASS / FAIL. ?shot = stop on a finished success frame (for --screenshot). -->
+<div id="wrap"><div class="tr"><div class="card tr-stage"><div id="tr-viz" class="tr-viz"></div></div></div></div>
+<pre id="out"></pre>
+<script src="../js/pj-air.js"></script>
+<script src="../js/pj-core.js"></script>
+<script src="../js/tr-core.js"></script>
+<script src="../js/tr-sound.js"></script>
+<script src="../js/tr-viz.js"></script>
+<script>
+(() => {
+  const out = document.getElementById('out'), fails = [];
+  const log = (ok, name, extra) => { out.innerHTML += `<span class="${ok ? 'ok' : 'bad'}">${ok ? 'PASS' : 'FAIL'} ${name}${extra != null ? ' -- ' + extra : ''}</span>\n`; if (!ok) fails.push(name); };
+  const errs = []; window.addEventListener('error', e => errs.push(String(e.message)));
+  const warns = []; const cw = console.warn; console.warn = (...a) => { warns.push(a.map(String).join(' ')); cw.apply(console, a); };
+  const SHOT = /[?&]shot\b/.test(location.search);
+  if (SHOT) document.body.classList.add('shot');
+
+  // ---- a hand-stepped clock and fxLoop
+  let T = 1000; const BASE = Date.parse('2026-10-24T10:00:00Z');
+  performance.now = () => T; Date.now = () => BASE + T;
+  let loops = [], delays = [];
+  function pump(ms) {
+    const until = T + ms;
+    for (let guard = 0; guard < 200000; guard++) {
+      loops = loops.filter(l => l.due < 1e15);
+      let nx = null; for (const l of loops) if (l.due <= until && (!nx || l.due < nx.due)) nx = l;
+      if (!nx) break;
+      T = Math.max(T, nx.due);
+      const d = nx.draw(T); delays.push(d);
+      nx.due = d >= 1e9 ? 1e16 : T + Math.max(1, d);
+    }
+    T = until;
+  }
+  const alive = () => loops.filter(l => l.due < 1e15).length;
+
+  try {
+    const PJ = window.KellyPJ, TR = window.KellyTR, bus = PJ.createBus();
+    let fxOn = true, vis = true, sel = null, cur = null;
+    const stations = [
+      { id: 'aa11', key: 'aa11', name: 'VK4RBX Rpt', role: 'repeater', lat: -27.61, lon: 152.76 },
+      { id: 'bb22', key: 'bb22', name: 'Mt Coot-tha', role: 'repeater', lat: -27.47, lon: 152.95 },
+      { id: 'cc33', key: 'cc33', name: 'Springbrook', role: 'repeater', lat: -28.19, lon: 153.27 },
+      { id: 'dd44', key: 'dd44', name: 'Toowoomba Room', role: 'room', lat: -27.56, lon: 151.95 },
+      { id: 'ee55', key: 'ee55', name: 'No GPS Rpt', role: 'repeater', lat: null, lon: null },
+    ];
+    let meGps = true;
+    const c = {
+      bus, PJ, TR, esc: s => String(s), store: { m: {}, get(k, d) { return k in this.m ? this.m[k] : d; }, set(k, v) { this.m[k] = v; } },
+      fmtAgo: () => 'now',
+      fxLoop: draw => { loops.push({ draw, due: T }); },
+      fx: () => fxOn, reduced: () => !fxOn, visible: () => vis,
+      radio: () => ({ sf: 8, bwKHz: 62.5, cr: 5 }),
+      me: () => meGps ? { id: 'me', name: 'VK4XXX Home', lat: -27.65, lon: 152.85, hashSize: 1 } : { id: 'me', name: 'VK4XXX Home', lat: null, lon: null, hashSize: 1 },
+      node: id => stations.find(s => s.id === id),
+      nodes: () => stations, selected: () => sel, current: () => cur,
+    };
+    const selects = []; bus.on('select', s => { selects.push(s); sel = s.node; });
+    const mount = document.getElementById('tr-viz');
+    const viz = window.KellyTRViz(mount, c), t = viz._test;
+    log(!!mount.querySelector('canvas.tr-viz-cv'), 'canvas mounted', t.size().join('x'));
+    pump(200);
+    log(t.lastDelay() >= 1000 && !t.running(), 'idle sky goes dormant', t.lastDelay());
+    log(t.view().out.length === 1, 'no selection: only our star');
+
+    // ---- select a target: idle pair
+    bus.emit('select', { node: 'dd44', from: 'picker' }); pump(100);
+    log(t.view().target === 'dd44' && t.view().out.length === 2 && t.view().anim === 'none', 'select -> idle pair');
+    log(t.lastDelay() >= 1000, 'idle pair dormant', t.lastDelay());
+
+    // ---- helpers to build runs
+    let seq = 0;
+    const hop = (s, snr, est) => s === 'me' ? { id: 'me', hash: null, name: 'VK4XXX Home', role: null, lat: -27.65, lon: 152.85, known: true, snr: null, estMs: 0 }
+      : typeof s === 'string' ? { id: 'h:' + s, hash: s, name: 'hash ' + s, role: null, lat: null, lon: null, known: false, snr, estMs: est }
+        : { id: s.id, hash: s.key.slice(0, 2), name: s.name, role: s.role, lat: s.lat, lon: s.lon, known: true, snr, estMs: est };
+    function mkRun(target, mids, opts) {
+      opts = opts || {}; const tg = stations.find(s => s.id === target) || target;
+      const step = 1200, outH = [hop('me'), ...mids.map((m, i) => hop(m, opts.discover ? null : 4.5 - i * 3, step * (i + 1))), hop(tg, opts.discover ? null : -2.25, step * (mids.length + 1))];
+      const backH = opts.noBack ? [] : [hop(tg, null, null), ...mids.slice().reverse().map((m, i) => hop(m, opts.discover ? null : 6 - i * 4, null)), Object.assign(hop('me'), { snr: opts.discover ? null : 1.5 })];
+      return TR.runOf(Object.assign({ id: 'tr-' + (++seq), target: tg.id || tg, targetName: tg.name || 'Unknown', targetRole: tg.role || null,
+        method: opts.discover ? 'discover' : 'trace', via: 'demo', demo: true, status: 'pending', phase: 'outbound', out: outH, back: [], sentAt: Date.now(), timeoutMs: 20000, tries: 2 }, opts.p || {}));
+    }
+    const finish = (r, p) => TR.runOf(Object.assign({}, r, { out: r.out, back: r.back }, p, { endedAt: Date.now() }));
+    function settle(maxMs) { let el = 0; while (el < maxMs) { pump(100); el += 100; if (!alive() || t.lastDelay() >= 1000 && t.view().anim !== 'pending' && ['static', 'none'].includes(t.view().anim)) break; } return el; }
+
+    // ---- pending -> success
+    const r1 = mkRun('dd44', [stations[0], stations[1]]);
+    cur = r1; bus.emit('run', r1); pump(600);
+    log(t.view().anim === 'pending' && t.lastDelay() < 100, 'pending: comet moving', t.lastDelay());
+    pump(5000);
+    log(t.lastDelay() >= 1000, 'pending past the target: 1 Hz listening', t.lastDelay());
+    const r1b = TR.runOf(Object.assign({}, r1, { attempt: 2, sentAt: Date.now() }));
+    bus.emit('run', r1b); pump(300);
+    log(t.lastDelay() < 100, 'retry restarts the comet', t.lastDelay());
+    pump(1000);
+    const done1 = finish(r1b, { status: 'success', phase: 'done', rttMs: 4210, snrMin: -2.25, pathKey: 'aa.bb', changed: true,
+      back: [hop(stations[3], null), hop(stations[1], 6), hop(stations[0], 2), Object.assign(hop('me'), { snr: 1.5 })] });
+    cur = null; bus.emit('done', done1); pump(50);
+    const v1 = t.view();
+    log(v1.anim === 'replay' && v1.segs.length === 6, 'success: replay of 3 out + 3 back', v1.anim + ' ' + v1.segs.length);
+    const pl1 = window.KellyTRSound && KellyTRSound.plan ? KellyTRSound.plan(done1) : null;
+    log(!!pl1 && v1.novaT === pl1.arriveAt && v1.backEnd === pl1.returnAt && v1.segs[0].t1 === pl1.spacing, 'replay on the sound clock (KellyTRSound.plan)', pl1 && `sp ${pl1.spacing} arrive ${v1.novaT}/${pl1.arriveAt} return ${v1.backEnd}/${pl1.returnAt}`);
+    log(v1.mode === 'gps', 'GPS layout used', v1.mode);
+    const inBox = v => [...v.stars.values()].every(s => isFinite(s.x) && isFinite(s.y) && s.x >= 0 && s.x <= t.size()[0] && s.y >= 0 && s.y <= t.size()[1]);
+    log(inBox(v1), 'stars inside the canvas');
+    if (SHOT) { pump(v1.total + 200); out.innerHTML = ''; document.title = 'DONE'; return; }
+    const el1 = settle(12000);
+    log(t.view().anim === 'static' && t.lastDelay() >= 1000, 'replay ends, loop dormant', `${el1} ms, delay ${t.lastDelay()}`);
+    log(t.last.get('dd44') === done1, 'last result kept for the target');
+
+    // ---- click a star -> select (not me, not a bare hash)
+    const vb = t.view(), canvas = mount.querySelector('canvas'), rect = canvas.getBoundingClientRect();
+    const click = s => canvas.dispatchEvent(new MouseEvent('click', { clientX: rect.left + s.x, clientY: rect.top + s.y, bubbles: true }));
+    selects.length = 0; click(vb.stars.get('bb22'));
+    log(selects.length === 1 && selects[0].node === 'bb22' && selects[0].from === 'viz', 'click a star -> select from viz', JSON.stringify(selects[0]));
+    pump(100);
+    log(t.view().target === 'bb22' && t.view().anim === 'none', 'viz select shows that pair idle');
+    bus.emit('select', { node: 'dd44', from: 'history' }); pump(100);
+    log(t.view().run === done1 && t.view().anim === 'static', 'reselect shows the last result statically');
+    selects.length = 0; click(t.view().stars.get('me'));
+    log(selects.length === 0, 'click on our own star does nothing');
+
+    // ---- timeout (fizzle)
+    const r2 = mkRun('cc33', ['7f', stations[1]]); bus.emit('run', r2); pump(1500);
+    bus.emit('done', finish(r2, { status: 'timeout', phase: 'done', attempt: 2, error: null })); pump(50);
+    log(t.view().anim === 'fail', 'timeout: fizzle animation');
+    settle(5000);
+    log(t.view().anim === 'static' && t.lastDelay() >= 1000, 'fizzle ends, dormant', t.lastDelay());
+
+    // ---- no-path / error / cancelled
+    for (const st of ['no-path', 'error', 'cancelled']) {
+      const r = mkRun('aa11', [stations[1]]); bus.emit('run', r); pump(200);
+      bus.emit('done', finish(r, { status: st, error: st === 'error' ? 'not connected to a MeshCore node' : null })); settle(5000);
+      log(t.view().anim === 'static' && t.lastDelay() >= 1000, st + ': ends static', t.view().out.length + ' stars');
+    }
+    log(t.view().run.status === 'cancelled', 'cancelled shown');
+
+    // ---- discovery success: neutral lines (no SNR), return path missing
+    const r3 = mkRun('ee55', ['3c', 'a1'], { discover: true, noBack: true });
+    bus.emit('run', r3); pump(200);
+    const SND = window.KellyTRSound; window.KellyTRSound = { plan() { throw new Error('sound broke'); } };
+    bus.emit('done', finish(r3, { status: 'success', rttMs: 9100, back: [] })); pump(50);
+    window.KellyTRSound = SND;
+    log(t.view().segs[0].t1 === 900 && t.view().novaT === 2700 && t.view().backEnd === 3600, 'sound plan throws: same formula fallback; no back -> return one spacing after arrival', t.view().novaT + '/' + t.view().backEnd);
+    log(t.view().discover && t.view().segs.every(g => g.snr == null), 'discovery: neutral (no SNR) lines');
+    settle(12000);
+    log(t.view().anim === 'static', 'discovery replay ends');
+
+    // ---- 0 hops
+    const r4 = mkRun('aa11', []); bus.emit('run', r4); pump(200);
+    bus.emit('done', finish(r4, { status: 'success', rttMs: 1300, back: [hop(stations[0], null), Object.assign(hop('me'), { snr: 7 })] })); pump(50);
+    log(t.view().segs.length === 2 && t.view().novaT === 900 && t.view().backEnd === 1800, '0 hops: 2 segments at 900 ms spacing', Math.round(t.view().total));
+    settle(12000); log(t.view().anim === 'static', '0 hops replay ends');
+
+    // ---- 80 hops (capped at 64), no positions, no GPS for us -> arc
+    meGps = false;
+    const mids = Array.from({ length: 80 }, (_, i) => (i * 37 % 256).toString(16).padStart(2, '0') + i);
+    const r5 = mkRun('ee55', mids); bus.emit('run', r5); pump(300);
+    const back5 = [hop(stations[4], null), ...mids.slice().reverse().map(m => hop(m, -3)), Object.assign(hop('me'), { snr: 0 })];
+    bus.emit('done', finish(r5, { status: 'success', rttMs: 60000, back: back5 })); pump(50);
+    const v5 = t.view();
+    log(v5.out.length === 66 && v5.back.length === 66 && v5.cut === 16, '80 hops capped at 64', `${v5.out.length}/${v5.back.length} cut ${v5.cut}`);
+    log(v5.mode === 'arc' && inBox(v5), 'no GPS -> arc layout, in the canvas', v5.mode);
+    log(v5.segs[0].t1 === 120 && v5.backEnd === 130 * 120, '64 hops: 120 ms floor spacing', Math.round(v5.backEnd));
+    settle(40000);
+    settle(12000); log(t.view().anim === 'static', '64-hop replay ends');
+    meGps = true;
+
+    // ---- GPS with some hops missing positions
+    const r6 = mkRun('cc33', [stations[4], '9e', stations[1]]); bus.emit('run', r6); pump(200);
+    bus.emit('done', finish(r6, { status: 'success', rttMs: 5200, back: [hop(stations[2], null), hop('5a', -8), hop(stations[1], 1), Object.assign(hop('me'), { snr: 3 })] })); pump(50);
+    log(t.view().mode === 'gps' && inBox(t.view()), 'GPS + null positions placed between neighbours');
+    settle(12000);
+
+    // ---- invisible: nothing drawn; shown again -> the replay plays then
+    vis = false;
+    const r7 = mkRun('bb22', [stations[0]]); bus.emit('run', r7); pump(200);
+    const f0 = t.frames();
+    bus.emit('done', finish(r7, { status: 'success', rttMs: 2500, back: [hop(stations[1], null), hop(stations[0], 2), Object.assign(hop('me'), { snr: 2 })] })); pump(3000);
+    log(t.frames() === f0 && t.lastDelay() >= 1000 && !t.running(), 'invisible: no frames, dormant', `${t.frames() - f0} frames`);
+    vis = true; bus.emit('visible', true); pump(50);
+    log(t.view().anim === 'replay' && t.lastDelay() < 100, 'shown again: the replay starts then');
+    settle(12000); log(t.view().anim === 'static', 'that replay ends');
+
+    // ---- reduced motion: no comet, a short stepped fade
+    fxOn = false;
+    const r8 = mkRun('dd44', [stations[0]]); bus.emit('run', r8); pump(1500);
+    log(t.lastDelay() >= 1000, 'reduced pending: 1 Hz only', t.lastDelay());
+    bus.emit('done', finish(r8, { status: 'success', rttMs: 3000, back: [hop(stations[3], null), hop(stations[0], 2), Object.assign(hop('me'), { snr: 2 })] })); pump(50);
+    log(t.view().anim === 'fade', 'reduced: fade, not replay');
+    const el8 = settle(3000);
+    log(t.view().anim === 'static' && el8 <= 800, 'reduced fade is short', el8 + ' ms');
+    const r9 = mkRun('aa11', [stations[1]]); bus.emit('run', r9); pump(100);
+    bus.emit('done', finish(r9, { status: 'timeout' })); settle(3000);
+    log(t.view().anim === 'static', 'reduced failure ends static');
+    fxOn = true;
+
+    // ---- 320 px wide (phone) and a projector width
+    document.getElementById('wrap').style.width = '320px'; t.measure(); t.kick(); pump(50);
+    log(t.fs() >= 11 && inBox(t.view()), '320 px: text >= 11 px, stars in', t.fs());
+    document.getElementById('wrap').style.width = '1800px'; t.measure(); t.kick(); pump(50);
+    log(t.fs() > 20, 'projector width: bigger text', t.fs());
+    document.getElementById('wrap').style.width = '960px'; t.measure(); t.kick(); pump(50);
+
+    // ---- garbage on the bus
+    const w0 = warns.length;
+    bus.emit('run', null); bus.emit('run', {}); bus.emit('done', { id: 'x', status: 'success' }); bus.emit('select', {}); bus.emit('select', { node: 'nope' });
+    bus.emit('nodes'); bus.emit('demo', true); pump(500);
+    log(warns.length === w0, 'odd bus payloads: no warnings', warns.slice(w0).join(' | '));
+    log(t.view().out.length === 1 && t.last.size === 0, 'demo toggle clears the sky and results');
+
+    viz.destroy(); pump(100);
+    log(!mount.querySelector('canvas') && alive() === 0, 'destroy: canvas gone, loop ended');
+  } catch (e) { log(false, 'exception', e && e.stack); }
+  log(errs.length === 0, 'no page errors', errs.join(' | '));
+  log(true, 'frames', delays.length + ' draw calls');
+  out.innerHTML += `\nRESULT: ${fails.length ? 'FAIL (' + fails.join(', ') + ')' : 'ALL PASS'}\n`;
+  document.title = 'DONE';
+})();
+</script>
+</body></html>

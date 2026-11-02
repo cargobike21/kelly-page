@@ -1,0 +1,17 @@
+#!/bin/sh
+# Runs once, after cloud-init on the first boot.
+# - Raspberry Pi Imager made a user of its own (OS customisation): lock the shared kelly / kellypage login,
+#   so the image's published password can't be used on this Pi.
+# - Imager set kelly's own password: don't make them change it again.
+SHIPPED="$(cat /var/lib/kellypage/shipped-hash 2>/dev/null)"
+NOW="$(getent shadow kelly | cut -d: -f2)"
+OTHERS="$(awk -F: '$3>=1000 && $3<60000 && $1!="kelly" {print $1}' /etc/passwd)"
+if [ -n "$OTHERS" ] && [ "$NOW" = "$SHIPPED" ]; then
+  usermod -L -e 1 kelly
+  echo "kellypage-firstboot: Imager made user(s) $OTHERS -- the shared 'kelly' login is locked"
+elif [ -n "$NOW" ] && [ "$NOW" != "$SHIPPED" ]; then
+  chage -d "$(( $(date +%s) / 86400 ))" kelly
+  echo "kellypage-firstboot: kelly's password was set by Imager -- no forced change"
+fi
+rm -f /var/lib/kellypage/shipped-hash
+touch /var/lib/kellypage/firstboot-done

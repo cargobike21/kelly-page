@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>RTTY tests</title></head>
+<body><pre id="out"></pre>
+<script src="../js/baudot.js"></script>
+<script src="../js/rttyart.js"></script>
+<script>
+// Baudot codec + FSK modem loopback (js/baudot.js). Headless:
+//   msedge --headless=new --allow-file-access-from-files --dump-dom kelly-page/tests/rtty-tests.html  -> "RESULT: ALL PASS"
+(function () {
+  const out = [], B = window.Baudot; let fails = 0;
+  const ok = (c, what) => { out.push(`${c ? 'PASS' : 'FAIL'}  ${what}`); if (!c) fails++; };
+  const dec = (codes, o) => { const d = new B.Decoder(o); return codes.map(c => d.push(typeof c === 'number' ? c : c.code)).join(''); };
+  let seed = 12345; const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const gauss = () => { let u = 0, v = 0; while (!u) u = rnd(); v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+  // character error rate = edit distance / length (a dropped character costs 1, not everything after it)
+  const cer = (a, b) => { let p = Array.from({ length: b.length + 1 }, (_, j) => j); for (let i = 1; i <= a.length; i++) { const q = [i]; for (let j = 1; j <= b.length; j++) q[j] = Math.min(p[j] + 1, q[j - 1] + 1, p[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); p = q; } return p[b.length] / Math.max(1, a.length); };
+  const loop = (text, mo = {}, noise = 0, mangle) => {
+    const codes = B.encode(text, mo), m = B.modulate(codes, { rate: 48000, ...mo });
+    const x = m.samples; if (noise) for (let i = 0; i < x.length; i++) x[i] += noise * gauss();
+    if (mangle) mangle(x);
+    const d = new B.Demod({ rate: 48000, ...mo }), got = [];
+    for (let i = 0; i < x.length; i += 1024) got.push(...d.process(x.subarray(i, i + 1024)));
+    return { text: dec(got, mo).replace(/\r/g, ''), d };
+  };
+
+  // codec
+  ok(B.L[0x0A] === 'R' && B.L[0x15] === 'Y' && (0x0A ^ 0x15) === 31, 'R and Y are complements (RYRY)');
+  const t1 = 'CQ CQ DE VK4XXX VK4XXX K\nUR 599 $1.50? (73) "OK"';
+  ok(dec(B.encode(t1)).replace(/\r/g, '') === t1, 'US-TTY round trip');
+  ok(dec(B.encode('BELL\x07'))[4] === '\x07', 'US-TTY bell = FIGS S');
+  ok(dec(B.encode('A=B+C', { variant: 'ita2' }), { variant: 'ita2' }) === 'A=B+C', 'ITA2 round trip (= and +)');
+  const u = B.encode('1 2', { usos: true }).map(c => c.code);
+  ok(u.filter(c => c === B.FIGS).length === 2, 'USOS: FIGS sent again after a space');
+  ok(B.encode('1 2', { usos: false }).filter(c => c.code === B.FIGS).length === 1, 'no USOS: one FIGS');
+  ok(B.printable('hello [world] @ 50%') === 'HELLO (WORLD) AT 50PCT', `printable: "${B.printable('hello [world] @ 50%')}"`);
+  ok(B.wpm(45.45) === 60 && B.wpm(75) === 100, `45.45 Bd = ${B.wpm(45.45)} WPM, 75 Bd = ${B.wpm(75)}`);
+  ok(B.holes(0x1F).join('') === '11111', 'LTRS = five holes');
+
+  // modem
+  const txt = 'THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG 0123456789 RYRYRYRY DE VK4XXX';
+  let r = loop(txt);
+  ok(r.text === txt, `clean loopback 45.45 Bd: "${r.text.slice(0, 40)}..."`);
+  r = loop(txt, { baud: 50 }); ok(r.text === txt, 'clean 50 Bd');
+  r = loop(txt, { baud: 75 }); ok(r.text === txt, 'clean 75 Bd');
+  r = loop(txt, { reverse: true }); ok(r.text === txt, 'reverse both ends');
+  r = loop('RYRYRYRY', { reverse: true }); const rr = (() => { const codes = B.encode('RYRYRYRY'), m = B.modulate(codes, { rate: 48000, reverse: true }), d = new B.Demod({ rate: 48000 }); return dec(d.process(m.samples)); })();
+  ok(rr !== 'RYRYRYRY', `reverse at one end only garbles ("${rr.slice(0, 12)}")`);
+  r = loop(txt, { shift: 850 }); ok(r.text === txt, '850 Hz shift');
+  r = loop(txt, { amp: 0.01 }); ok(r.text === txt, 'quiet input (amp 0.01)');
+  r = loop(txt, { amp: 0.95 }); ok(r.text === txt, 'loud input (amp 0.95)');
+  r = loop(txt, {}, 0.35); const c1 = cer(txt, r.text); ok(c1 < 0.03, `noisy (σ 0.35 vs tone 0.5): ${(c1 * 100).toFixed(1)} % errors`);
+  r = loop(txt, {}, 0.7); const c2 = cer(txt, r.text); ok(c2 < 0.25, `very noisy (σ 0.7): ${(c2 * 100).toFixed(1)} % errors -- still mostly copy`);
+  // mistuned: the signal 25 Hz high
+  { const codes = B.encode(txt), m = B.modulate(codes, { rate: 48000, mark: 2150 }), d = new B.Demod({ rate: 48000 }); const g = dec(d.process(m.samples)).replace(/\r/g, ''); ok(cer(txt, g) < 0.05, `mistuned 25 Hz: ${(cer(txt, g) * 100).toFixed(1)} % errors`); }
+  // squelch: three seconds of noise prints little
+  { const d = new B.Demod({ rate: 48000 }), x = new Float32Array(48000 * 3); for (let i = 0; i < x.length; i++) x[i] = 0.3 * gauss(); const g = dec(d.process(x)); ok(g.length < 6, `noise alone: ${g.length} characters (squelch)`); }
+  // silence
+  { const d = new B.Demod({ rate: 48000 }); ok(d.process(new Float32Array(48000)).length === 0, 'silence: nothing'); }
+  // scope gets points, tuned indicator rises
+  r = loop(txt); ok(r.d.takeScope().length > 100 && r.d.tuned > 0.2, `scope points + tuning (${r.d.tuned.toFixed(2)})`);
+  // timing: each code's start offset is one character time apart
+  { const m = B.modulate(B.encode('RY', { sync: false }), { rate: 48000 }); const dt = (m.at[1] - m.at[0]) / 48000; ok(Math.abs(dt - B.charTime()) < 0.001, `character time ${(dt * 1000).toFixed(1)} ms`); }
+
+  // AFC pulls in what's left after a click on the waterfall (the one-bit filter's first null is 45 Hz, so ~30 Hz is its reach)
+  // (what's left after a click on the waterfall: the one-bit filter's first null is at 45 Hz, so ~30 Hz is its reach)
+  { const codes = B.encode(txt), m = B.modulate(codes, { rate: 48000, mark: 2157 }), d = new B.Demod({ rate: 48000 }); const g = dec(d.process(m.samples)).replace(/\r/g, ''); ok(Math.abs(d.afc - 32) < 4 && cer(txt.slice(-40), g.slice(-40)) < 0.05, `mistuned 32 Hz: AFC locks at ${d.afc.toFixed(0)} Hz; the first ${Math.round(cer(txt, g) * txt.length)} characters go while it pulls in, then clean copy`); }
+
+  // art (js/rttyart.js): only what Baudot prints, 68 columns
+  const A = window.KellyArt;
+  const bad = A.list.filter(a => a.lines.some(l => B.printable(l.replace(/\{FROM\}/g, 'VK4XXX')) !== l.replace(/\{FROM\}/g, 'VK4XXX').toUpperCase() || l.length > 68));
+  ok(!bad.length, `every art piece is Baudot-printable, <= 68 columns${bad.length ? ` (bad: ${bad.map(a => a.id)})` : ''}`);
+  const bn = A.banner('73 DE VK4KEL');
+  ok(bn.length === 16 && bn[0].startsWith('77777') && bn.every(l => l.length <= 68), `banner: two rows of block letters, word-wrapped (${bn.length} lines)`);
+  const ex = A.expand('HI [ART:SHIP] [QSL:VK4ABC:579] [ART:NOPE]', { from: 'VK4XXX' });
+  ok(/P25X/.test(ex) && /TO RADIO   VK4ABC/.test(ex) && /UR RTTY    579/.test(ex) && /\[ART:NOPE\]/.test(ex), 'tokens expand; unknown ones stay as typed');
+  ok(B.printable(A.qsl('VK4ABC', '599', 'VK4XXX', '2026-10-18', '0100Z').join('\n')) === A.qsl('VK4ABC', '599', 'VK4XXX', '2026-10-18', '0100Z').join('\n'), 'QSL card is Baudot-printable');
+
+  out.push(fails ? `RESULT: ${fails} FAILED` : 'RESULT: ALL PASS');
+  document.getElementById('out').textContent = out.join('\n');
+})();
+</script>
+</body></html>

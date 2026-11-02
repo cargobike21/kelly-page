@@ -1,0 +1,23 @@
+/* Kelly Page -- Drive mode card (js/meshdrive.js) and offline map tiles (js/meshtiles.js) on the LoRa Mesh page.
+   Static styles only: nothing animates. */
+.md-card .md-ctl { align-items: flex-end; margin-bottom: 6px; }
+.md-card .md-help { margin: 4px 0 6px; }
+.md-card .md-why { color: var(--amber); margin: 4px 0; }
+.md-card .md-live { font-family: var(--mono); color: var(--cyan); margin: 6px 0; }
+.md-sum { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
+.md-sum > div { background: var(--raised); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; text-align: center; min-width: 0; }
+.md-sum b { display: block; font-family: var(--display); font-size: 18px; color: var(--lime); }
+.md-sum small { display: block; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 600px) { .md-sum { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* driven cells on the Coverage layer: a dashed edge tells them from "heard direct" */
+#mesh-map path.cov-drive { stroke-linecap: round; }
+
+/* tiles: the "cached map" note and Save this area, top left under the zoom buttons */
+.mt-set { margin-top: 6px; align-items: center; }
+.mt-set .mt-own input { min-width: 260px; }
+.mt-note { background: rgba(6, 11, 24, .85); border: 1px solid var(--line); border-radius: 8px; padding: 3px 8px; font-size: 11px; color: var(--text); }
+.mt-note[hidden] { display: none; }
+.mt-note .mt-cached { color: var(--amber); }
+.mt-note .mt-save { background: var(--raised); color: var(--cyan); border: 1px solid var(--line2); border-radius: 6px; padding: 2px 8px; font: inherit; cursor: pointer; }
+.mt-note .mt-save:disabled { color: var(--dim); cursor: default; }

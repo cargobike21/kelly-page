@@ -1,0 +1,122 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mesh QR tests</title>
+<style>body{font:13px Consolas,monospace;background:#0b0f14;color:#dde}.ok{color:#3d8}.bad{color:#f55}</style>
+</head><body>
+<h3>Kelly Page -- QR contacts (js/meshqr.js): links, encode -> decode, and the node's add-by-key</h3>
+<pre id="out">running…</pre>
+<canvas id="cv"></canvas>
+<script src="../js/meshcore.js"></script>
+<script src="../js/meshcoresim.js"></script>
+<script src="../js/meshqr.js"></script>
+<script>
+// Headless: msedge --headless=new --allow-file-access-from-files --virtual-time-budget=30000 --dump-dom tests/meshqr-tests.html
+// -> RESULT: ALL PASS. The vendored encoder/decoder load lazily, as on the page; jsQR does the decoding (native off).
+const QR = window.KellyMeshQR, MC = window.KellyMeshCore, SIM = window.KellyMeshCoreSim, out = [], fails = [];
+function eq(name, got, want) {
+  if (String(got) === String(want)) out.push(`<span class="ok">PASS ${name}</span>`);
+  else { out.push(`<span class="bad">FAIL ${name}: got ${got} want ${want}</span>`); fails.push(name); }
+}
+const throws = (name, fn, re) => { try { fn(); eq(name, 'no error', `an error like ${re}`); } catch (e) { eq(name, re.test(e.message) ? 'rejected' : e.message, 'rejected'); } };
+const KEY = 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90';
+(async () => {
+  try {
+    QR.native = false;
+    // ---- links
+    const link = QR.contactLink({ key: KEY.toUpperCase(), type: 2, name: 'VK4XXX Veranda Rptr' });
+    eq('the official app form, spaces as +, key lower case', link, `meshcore://contact/add?name=VK4XXX+Veranda+Rptr&public_key=${KEY}&type=2`);
+    const p = QR.parse(link);
+    eq('parse it back', [p.kind, p.key, p.type, p.name].join('|'), `contact|${KEY}|2|VK4XXX Veranda Rptr`);
+    eq('%20 spaces and a missing type (companion) are fine', (q => `${q.name}|${q.type}`)(QR.parse(`meshcore://contact/add?name=Kelly%20VK4XXX&public_key=${KEY}`)), 'Kelly VK4XXX|1');
+    eq('upper-case scheme and padding', QR.parse(`  MESHCORE://contact/add?name=x&public_key=${KEY}&type=3  `).type, 3);
+    const adv = 'meshcore://11' + '00'.repeat(1) + 'ab'.repeat(120);
+    eq('a signed advert link passes through', QR.parse(adv.toUpperCase().replace('MESHCORE://', 'meshcore://')).link, adv);
+    eq('... bare advert hex gets the scheme', QR.parse(adv.slice(11)).kind, 'advert');
+    throws('a channel QR is refused', () => QR.parse('meshcore://channel/add?name=Public&secret=8b3387e9c5cdea6ac9e5edbaa115cd72'), /channel, not a contact/);
+    throws('a short key is refused', () => QR.parse('meshcore://contact/add?name=x&public_key=abcd&type=1'), /public key/);
+    throws('a non-hex key is refused', () => QR.parse(`meshcore://contact/add?name=x&public_key=${'z'.repeat(64)}&type=1`), /public key/);
+    throws('type 9 is refused', () => QR.parse(`meshcore://contact/add?name=x&public_key=${KEY}&type=9`), /unknown type/);
+    throws('type "abc" is refused', () => QR.parse(`meshcore://contact/add?name=x&public_key=${KEY}&type=abc`), /unknown type/);
+    eq('no name is allowed (as the official app)', QR.parse(`meshcore://contact/add?public_key=${KEY}&type=1`).name, '');
+    throws('another app link is refused', () => QR.parse('meshcore://repeater/add?x=1'), /Kelly doesn't know/);
+    throws('a web address is refused', () => QR.parse('https://example.com/'), /web address/);
+    throws('a short advert is refused', () => QR.parse('meshcore://abcd'), /cut short/);
+    throws('odd hex is refused', () => QR.parse('meshcore://' + 'a'.repeat(201)), /cut short/);
+    throws('empty is refused', () => QR.parse('  '), /nothing to add/);
+
+    // ---- encode -> decode (the real vendored libraries, from the rendered canvas)
+    const cv = document.getElementById('cv');
+    const n = await QR.draw(cv, link, 300);
+    eq('vendored encoder loaded lazily', typeof window.qrcode, 'function');
+    eq('drawn: a version 4+ code, about 300 px, white corner', `${n >= 33} ${cv.width >= 250 && cv.width <= 300} ${cv.getContext('2d').getImageData(1, 1, 1, 1).data[0]}`, 'true true 255');
+    eq('jsQR reads the canvas back to the same link', await QR.decode(cv, true), link);
+    eq('vendored decoder loaded lazily', typeof window.jsQR, 'function');
+    eq('... and as a video-frame decode (no inversion pass)', await QR.decode(cv, false), link);
+    await QR.draw(cv, adv, 300);
+    eq('a ~250-character signed advert round-trips too', await QR.decode(cv, true), adv);
+    const named = QR.contactLink({ key: KEY, type: 1, name: 'Kelly 🐕 Öst' });
+    await QR.draw(cv, named, 300);
+    eq('a non-ASCII name survives the trip', QR.parse(await QR.decode(cv, true)).name, 'Kelly 🐕 Öst');
+    const blank = document.createElement('canvas'); blank.width = blank.height = 200; blank.getContext('2d').fillRect(0, 0, 200, 200);
+    eq('no code in a picture -> null', await QR.decode(blank, true), null);
+
+    // ---- From image: a PNG of the code -> readImage -> the link
+    await QR.draw(cv, link, 300);
+    const png = await new Promise(r => cv.toBlob(r, 'image/png'));
+    const ui = QR.ui({ toast: () => {} });
+    eq('From image reads a PNG of the code', await ui.readImage(png), link);
+    let err = ''; try { await ui.readImage(await new Promise(r => blank.toBlob(r, 'image/png'))); } catch (e) { err = e.message; }
+    eq('... a picture with no code says so', /^no QR code found in that picture/.test(err), true);
+
+    // ---- the shared module: ECC Q round trip, channels, SVG for print, dark theme
+    await QR.draw(cv, link, 300, { ecl: 'Q' });
+    eq('ECC Q (print) round-trips', await QR.decode(cv, true), link);
+    const ch = QR.buildChannel({ name: 'Public', secret: QR.PUBLIC_SECRET }).link;
+    await QR.draw(cv, ch, 300);
+    eq('a channel QR round-trips', QR.parse(await QR.decode(cv, true), { accept: ['channel'] }).name, 'Public');
+    const svg = await QR.svg(link, { mm: 40 });
+    eq('svg for print: mm sized, crisp', /^<svg [^>]*width="40mm"[^>]*shape-rendering="crispEdges"/.test(svg), true);
+    const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg.replace('width="40mm" height="40mm"', 'width="600" height="600"')); await img.decode();
+    eq('... and it decodes', await QR.decode(img, true), link);
+    let small = ''; try { await QR.svg(link, { mm: 15 }); } catch (e) { small = e.message; }
+    eq('... too small for paper is refused', /at least \d+ mm/.test(small), true);
+    document.documentElement.dataset.theme = 'dark';
+    await QR.draw(cv, link, 300);
+    eq('dark theme: still black on white', `${cv.getContext('2d').getImageData(1, 1, 1, 1).data[0]}`, '255');
+    delete document.documentElement.dataset.theme;
+    const ui2 = QR.ui({ toast: () => {} });
+    eq('one dialog per page', (await ui2.show({ contact: { key: KEY, type: 2, name: 'R' } }), document.querySelectorAll('#mqr').length), 1);
+    const yes = ui2.confirmCard({ kind: 'contact', key: KEY, type: 2, name: '<b>x</b>', verified: false, warnings: [] });
+    eq('confirmCard escapes the name', document.querySelector('#mqr-body').innerHTML.includes('&lt;b&gt;x&lt;/b&gt;'), true);
+    document.querySelector('[data-mqr="yes"]').click();
+    eq('... and answers true on Add', await yes, true);
+    const no = ui2.confirmCard({ kind: 'contact', key: KEY, type: 1, name: 'y', verified: true, warnings: [] }); ui2.close();
+    eq('... false when closed', await no, false);
+    await ui2.showChannel({ channel: { name: 'Club', secret: 'c'.repeat(32) } });
+    eq('a private channel QR waits for Show QR', document.querySelector('#mqr-body canvas').hidden && !document.querySelector('#mqr-body').textContent.includes('c'.repeat(32)), true);
+    ui2.close();
+
+    // ---- the node: ADD_UPDATE_CONTACT for a QR contact (sim, delays 50x shorter)
+    const sim = SIM.create({ seed: 5, sched: (fn, ms) => { const t = setTimeout(fn, Math.ceil(ms / 50)); return () => clearTimeout(t); } });
+    const nodes = new Map();
+    let session;
+    const framer = new MC.Framer(f => session.onFrame(f));
+    sim.onFrame(f => { const b = new Uint8Array(3 + f.length); b[0] = 0x3e; b[1] = f.length & 255; b[2] = f.length >> 8; b.set(f, 3); framer.push(b); });
+    session = MC.DRIVER.Session({ send: async b => sim.write(b), node: x => nodes.set(x.key, x), self: () => {}, text: () => {}, ack: () => {}, channels: () => {}, status: () => {}, log: () => {}, stat: () => {} });
+    await session.start();
+    const before = nodes.size;
+    const r = await session.addContact(QR.parse(link));
+    eq('a QR contact is added to the node', `${r.name}|${!!r.already}`, 'VK4XXX Veranda Rptr|false');
+    const c = nodes.get(KEY);
+    eq('... and read back from it: name, repeater, no route yet', c ? `${c.longName}|${c.hwLabel}|${c.outPath}` : 'missing', 'VK4XXX Veranda Rptr|Repeater|null');
+    eq('... one more contact in the list', nodes.size, before + 1);
+    eq('adding it again leaves it alone', (await session.addContact(QR.parse(link))).already, true);
+    const known = [...nodes.values()].find(x => x.key !== KEY && x.longName);
+    eq('a contact the node already has is not overwritten', (await session.addContact({ key: known.key, type: 1, name: 'Renamed' })).name, known.longName);
+    let bad = ''; try { await session.addContact({ key: 'abcd', type: 1, name: 'x' }); } catch (e) { bad = e.message; }
+    eq('a bad key never reaches the node', bad, 'a contact needs a 64-digit public key');
+  } catch (e) { out.push(`<span class="bad">FAIL exception: ${e.stack || e}</span>`); fails.push('exception'); }
+  out.push(fails.length ? `<span class="bad">RESULT: FAIL (${fails.length}) ${fails.join(', ')}</span>` : `<span class="ok">RESULT: ALL PASS (${out.length})</span>`);
+  document.getElementById('out').innerHTML = out.join('\n');
+})();
+</script>
+</body></html>

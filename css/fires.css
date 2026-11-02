@@ -1,0 +1,104 @@
+/* Kelly Page -- Fire Watch (js/fires.js). Kelly's neon tokens. Every animation has a fixed count: a new incident's ring
+ * pings 3 times, the radar sweep runs once per new answer, the badge pop plays once. Nothing is `infinite`. */
+#page-fires { --fw0: #ffd34d; --fw1: #ffb020; --fw2: #ff7a1a; --fw3: #ff3b5c; }
+.fw-ctl { margin-top: 8px; }
+.fw-top .tabs { margin-top: 10px; }
+.fw-alert { margin-top: 10px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--fw3); background: rgba(255, 59, 92, .12); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; animation: fw-alert .5s ease-in-out 3; }
+.fw-alert b { color: #fff; font: 800 14px var(--display); letter-spacing: .1em; }
+@keyframes fw-alert { 50% { background: rgba(255, 59, 92, .35); } }
+
+/* ---------------------------------------------------------------- map */
+.fw-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap: 16px; }
+.fw-grid2 { display: grid; grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr); gap: 16px; }
+@media (max-width: 900px) { .fw-grid, .fw-grid2 { grid-template-columns: 1fr; } }
+.fw-mapwrap { position: relative; height: 520px; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); }
+#fw-map { position: absolute; inset: 0; background: #0a1124; }
+.fw-sweep { position: absolute; inset: 0; pointer-events: none; z-index: 500; opacity: 0; }
+.fw-sweep.go { animation: fw-sweep 1.8s ease-out 1; background: conic-gradient(from 0deg at 50% 50%, rgba(57, 255, 136, .28), rgba(57, 255, 136, 0) 18%, transparent 100%); }
+@keyframes fw-sweep { 0% { opacity: 1; transform: rotate(0); } 85% { opacity: 1; } 100% { opacity: 0; transform: rotate(360deg); } }
+.fw-tower { display: flex; flex-direction: column; align-items: center; }
+.fw-tower b { font-size: 18px; filter: drop-shadow(0 0 6px #00e5ff); }
+.fw-tower span { font: 700 10px var(--mono); color: #9fe8ff; background: rgba(5, 9, 18, .8); padding: 0 4px; border-radius: 4px; white-space: nowrap; }
+.fw-inc { position: relative; }
+.fw-inc i { position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--c, var(--fw0)); box-shadow: 0 0 14px var(--c, var(--fw0)), inset 0 0 10px var(--c, var(--fw0)); }
+.fw-inc b { position: absolute; inset: 0; display: grid; place-items: center; font-size: 17px; }
+.fw-inc.l1 { --c: var(--fw1); } .fw-inc.l2 { --c: var(--fw2); } .fw-inc.l3 { --c: var(--fw3); } .fw-inc.kB { opacity: .75; }
+.fw-inc.new i { animation: fw-ping 1.2s ease-out 3; }
+@keyframes fw-ping { 0% { transform: scale(.6); opacity: 1; } 100% { transform: scale(2.4); opacity: 0; } }
+.fw-sum { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.fw-big { font: 900 44px var(--display); } .fw-big.calm { color: var(--lime); } .fw-big.warm { color: var(--fw1); } .fw-big.hot { color: var(--fw3); text-shadow: 0 0 18px var(--fw3); }
+.fw-list { list-style: none; margin: 0; padding: 0; max-height: 470px; overflow: auto; }
+.fw-list li { padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); margin-bottom: 6px; cursor: pointer; border-left: 4px solid var(--fw0); }
+.fw-list li.l1 { border-left-color: var(--fw1); } .fw-list li.l2 { border-left-color: var(--fw2); } .fw-list li.l3 { border-left-color: var(--fw3); }
+.fw-list li:hover { background: rgba(255, 176, 32, .07); }
+.fw-list li b { display: block; color: #fff; } .fw-list li span { display: block; font-size: 13px; color: var(--dim); } .fw-list li small { color: var(--mute); }
+.fw-list li.none { cursor: default; border-left-color: var(--lime); color: var(--dim); }
+
+/* ---------------------------------------------------------------- stream */
+.fw-stream { list-style: none; margin: 8px 0 0; padding: 10px; max-height: 360px; overflow: auto; border-radius: 10px; background: #02060d; border: 1px solid var(--line); font: 12.5px var(--mono); }
+.fw-stream li { display: flex; gap: 10px; padding: 2px 0; color: #7dffb0; white-space: nowrap; }
+.fw-stream li time { color: var(--mute); } .fw-stream li .nac { color: #3b6b52; } .fw-stream li b { min-width: 52px; color: #c8ff3a; }
+.fw-stream code { border: 0; background: none; padding: 0; font: inherit; }
+.fw-stream li.voice code { color: #ffd88a; } .fw-stream li.lrrp code { color: #9fe8ff; } .fw-stream li code { overflow: hidden; text-overflow: ellipsis; }
+.fw-stream li.type code { display: inline-block; overflow: hidden; animation: fw-type .9s steps(40) 1; }
+@keyframes fw-type { from { max-width: 0; } to { max-width: 100%; } }
+.fw-kvs { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.fw-kv { padding: 8px 12px; border-radius: 10px; background: rgba(0, 0, 0, .22); border: 1px solid var(--line); }
+.fw-kv span { display: block; font: 600 10.5px var(--mono); text-transform: uppercase; color: var(--dim); } .fw-kv b { font: 800 18px var(--display); color: #fff; }
+.fw-hex { max-height: 160px; overflow: auto; white-space: pre-wrap; word-break: break-all; font: 12px var(--mono); color: #9fe8ff; background: rgba(0, 0, 0, .3); padding: 10px; border-radius: 10px; }
+.fw-rssi b { font: 800 24px var(--display); color: #fff; display: block; margin-top: 8px; } .fw-rssi small { color: var(--dim); }
+.fw-meter { height: 14px; border-radius: 7px; background: rgba(0, 0, 0, .35); border: 1px solid var(--line); overflow: hidden; }
+.fw-meter i { display: block; height: 100%; background: linear-gradient(90deg, var(--red), var(--amber), var(--lime)); transition: width .6s; }
+
+/* ---------------------------------------------------------------- arcade */
+.fw-rank { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; } .fw-rank b { font: 800 18px var(--display); color: var(--amber); } .fw-rank small { color: var(--dim); }
+.fw-xp { width: 200px; height: 8px; border-radius: 4px; background: rgba(0, 0, 0, .35); overflow: hidden; } .fw-xp i { display: block; height: 100%; background: linear-gradient(90deg, var(--amber), var(--red)); }
+.fw-hud { display: flex; gap: 18px; flex-wrap: wrap; font: 600 14px var(--ui); color: var(--dim); } .fw-hud b { font: 800 20px var(--display); color: #fff; } .fw-hud .low b { color: var(--red); }
+.fw-res { margin: 8px 0; font: 700 15px var(--ui); } .fw-res.ok { color: var(--lime); } .fw-res.bad { color: #ff9cb0; }
+.fw-drill-map { width: 100%; max-width: 720px; display: block; margin: 8px auto; }
+.fw-drill-map .bg { fill: #071022; stroke: var(--line2); } .fw-drill-map .grid { stroke: #10203d; }
+.fw-drill-map .tw { cursor: pointer; } .fw-drill-map .tw circle { fill: rgba(0, 229, 255, .1); stroke: #00e5ff; stroke-width: 2; }
+.fw-drill-map .tw:hover circle, .fw-drill-map .tw:focus circle { fill: rgba(0, 229, 255, .3); outline: none; }
+.fw-drill-map .tw.right circle { fill: rgba(57, 255, 136, .35); stroke: var(--lime); } .fw-drill-map .tw.wrong circle { fill: rgba(255, 59, 92, .35); stroke: var(--red); }
+.fw-drill-map text { font: 14px var(--ui); fill: #fff; } .fw-drill-map .lab { font: 700 11px var(--mono); fill: #9fe8ff; }
+.fw-drill-map .inc .ring { fill: rgba(255, 122, 26, .25); stroke: var(--fw2); stroke-width: 2; }
+.fw-drill-map .inc[data-ping] .ring { animation: fw-ring 1s ease-out 3; transform-box: fill-box; transform-origin: center; }
+@keyframes fw-ring { 0% { transform: scale(.6); } 60% { transform: scale(1.8); opacity: .4; } 100% { transform: scale(1); opacity: 1; } }
+.fw-drill-map .inc .lab { fill: #ffd88a; } .fw-drill-map .inc.live .lab { fill: var(--red); }
+.fw-drill-map .route { stroke-width: 3; stroke-dasharray: 6 6; } .fw-drill-map .route.ok { stroke: var(--lime); } .fw-drill-map .route.bad { stroke: var(--red); }
+.fw-end { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px; } .fw-end b { font: 900 18px var(--display); letter-spacing: .14em; color: var(--lime); } .fw-end span { font: 900 46px var(--display); color: #fff; } .fw-end small { color: var(--dim); }
+.fw-badges { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.fw-b { padding: 10px; border-radius: 12px; border: 1px solid var(--line); text-align: center; opacity: .45; filter: grayscale(1); }
+.fw-b.got { opacity: 1; filter: none; border-color: rgba(255, 176, 32, .55); box-shadow: 0 0 14px rgba(255, 176, 32, .15); }
+.fw-b b { display: block; font-size: 28px; } .fw-b span { display: block; font: 700 13px var(--ui); color: #fff; } .fw-b small { color: var(--dim); font-size: 11.5px; }
+.fw-pop { position: fixed; right: 24px; bottom: 90px; z-index: 900; }
+.fw-badge-pop { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 16px 22px; border-radius: 16px; background: var(--panel-solid); border: 1px solid var(--amber); box-shadow: 0 0 30px rgba(255, 176, 32, .4); animation: fw-pop .5s cubic-bezier(.2, 1.4, .4, 1) 1; }
+.fw-badge-pop b { font-size: 40px; } .fw-badge-pop span { font: 700 10px var(--mono); letter-spacing: .2em; color: var(--amber); } .fw-badge-pop strong { font: 800 16px var(--display); color: #fff; } .fw-badge-pop small { color: var(--dim); }
+@keyframes fw-pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+/* ---------------------------------------------------------------- SEQ Hazard Watch additions (traffic layer, panel, AVL) */
+#page-fires { --rcrit: #ff3b5c; --rwarn: #ffb020; --rflood: #3ba8ff; --rinfo: #a78bfa; }
+.fw-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.fw-card { padding: 10px 14px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); }
+.fw-card span { display: block; font: 600 11px var(--mono); text-transform: uppercase; color: var(--dim); }
+.fw-card b { font: 900 26px var(--display); color: #fff; }
+.fw-card.calm b { color: var(--lime); } .fw-card.warm b { color: var(--fw1); } .fw-card.hot b { color: var(--rcrit); } .fw-card.flood b { color: var(--rflood); }
+.fw-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.fw-dpanel h3 { margin: 6px 0 4px; font: 700 15px var(--ui); color: #fff; }
+.fw-inc.road.crit { --c: var(--rcrit); } .fw-inc.road.warn { --c: var(--rwarn); } .fw-inc.road.flood { --c: var(--rflood); } .fw-inc.road.info { --c: var(--rinfo); }
+.fw-inc.sel i { border-width: 3px; box-shadow: 0 0 20px var(--c), 0 0 0 4px rgba(0, 229, 255, .5); }
+.fw-list li.road { border-left-color: var(--rwarn); } .fw-list li.road.sev2, .fw-list li.road.sev3 { border-left-color: var(--rcrit); }
+.fw-list li.sel { background: rgba(0, 229, 255, .1); border-color: rgba(0, 229, 255, .45); }
+.fw-unit { display: flex; flex-direction: column; align-items: center; }
+.fw-unit b { font-size: 18px; filter: drop-shadow(0 0 6px #39ff88); } .fw-unit span { font: 700 9.5px var(--mono); color: #b8ffcf; background: rgba(5, 9, 18, .85); padding: 0 4px; border-radius: 4px; white-space: nowrap; }
+.fw-stream li.avl code { color: #b8ffcf; } .fw-stream li.sdm code { color: #ffb3e6; } .fw-stream li.status code { color: #9fe8ff; }
+.fw-lamps { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.fw-lamp { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); }
+.fw-lamp i { width: 14px; height: 14px; border-radius: 50%; background: #2a3550; flex: none; }
+.fw-lamp.ok i { background: var(--lime); box-shadow: 0 0 10px var(--lime); } .fw-lamp.warn i { background: var(--amber); box-shadow: 0 0 10px var(--amber); } .fw-lamp.bad i { background: var(--red); box-shadow: 0 0 10px var(--red); }
+.fw-lamp span { flex: 1; font: 600 13px var(--ui); } .fw-lamp small { font: 700 9.5px var(--mono); color: var(--mute); }
+.fw-steps { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 4px; }
+.fw-steps span { padding: 5px 12px; border-radius: 9px; border: 1px solid var(--line2); font: 700 13px var(--ui); color: var(--dim); }
+.fw-steps span.on { color: #fff; border-color: var(--cyan); background: rgba(0, 229, 255, .12); } .fw-steps span.done { color: var(--lime); border-color: rgba(57, 255, 136, .5); }
+.fw-tgs { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0; }
+.fw-drill-map .tw.picked circle { fill: rgba(0, 229, 255, .35); stroke: #fff; }

@@ -1,0 +1,27 @@
+/* Kelly Page -- LoRa Mesh > Set up a node over USB (js/meshsetup.js). Same neon tokens as kelly.css. No animations. */
+.msu-card { border-color: rgba(0, 229, 255, .3); }
+.msu-who { align-items: center; margin: 4px 0 10px; }
+.msu-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px 14px; margin: 8px 0; }
+.msu-form .fld input, .msu-form .fld select { width: 100%; }
+.msu-form .fld small { font-size: 11.5px; }
+.msu-radio { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px 12px;
+  border: 1px solid var(--line2); border-radius: 12px; padding: 8px 12px 10px; margin: 0; }
+.msu-radio legend { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; padding: 0 6px; }
+.msu-radio > .msu-e { grid-column: 1 / -1; }
+.msu-e { color: var(--bad); min-height: 0; }
+.msu-e:empty { display: none; }
+.msu-f.bad input, .msu-f.bad select { border-color: var(--bad); box-shadow: 0 0 8px rgba(255, 59, 92, .3); }
+.msu-warn { color: var(--warn); font-size: 13px; }
+.msu-warn p { margin: 4px 0; }
+.msu-note { color: var(--good); }
+.msu-btns { margin: 6px 0 4px; }
+.msu-diff { width: 100%; border-collapse: collapse; font-size: 13px; margin: 4px 0 10px; }
+.msu-diff th { text-align: left; font: 700 10.5px var(--mono); letter-spacing: .06em; color: var(--dim); padding: 5px 8px; border-bottom: 1px solid var(--line2); }
+.msu-diff td { padding: 5px 8px; border-bottom: 1px solid var(--line); font-family: var(--mono); overflow-wrap: anywhere; }
+.msu-diff tr.ok td:last-child { color: var(--good); }
+.msu-diff tr.bad td { color: var(--bad); }
+.msu-flash, .msu-logd { margin-top: 10px; }
+.msu-flash summary, .msu-logd summary { cursor: pointer; }
+.msu-flash li { margin: 4px 0; }
+.msu-flash code { overflow-wrap: anywhere; }
+#msu-log { max-height: 220px; overflow: auto; }

@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kelly Page -- Ham Contacts for MeshCore</title>
+<meta name="description" content="Put other hams' MeshCore nodes on your radio in one go: Kelly Page's Ham Contacts, from your browser.">
+<link rel="icon" href="assets/kelly-favicon.svg" type="image/svg+xml">
+<!-- kellypage.app/mesh (upgrade Track E / F1, 2026-11-02): a launcher for Kelly's LoRa Mesh > Ham Contacts. Self-contained: no
+     third-party scripts, fonts or CDNs. The only scripts are this page's own and js/meshqr.js (+ its vendored QR encoder).
+     Served beside index.html (kelly-page/ -> kellypage.app/app/); kellypage.app/mesh should serve or redirect to this file. -->
+<style>
+  :root { color-scheme: dark; --bg: #050912; --card: #0e1730; --line: #22305a; --fg: #e6ecff; --dim: #93a0c8; --ok: #5be0a0; --warn: #ffcf5c; --bad: #ff7b7b; --acc: #6aa8ff; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 46rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+  h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.1rem; margin: 0 0 .5rem; }
+  p { margin: .4rem 0; }
+  .dim { color: var(--dim); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: .75rem; padding: 1rem; margin: 1rem 0; }
+  .banner { border-radius: .75rem; padding: .8rem 1rem; margin: 1rem 0; border: 1px solid; }
+  .banner.ok { border-color: var(--ok); background: #0c2a1e; }
+  .banner.warn { border-color: var(--warn); background: #2c2408; }
+  .banner.bad { border-color: var(--bad); background: #2e1111; }
+  .banner[hidden] { display: none; }
+  a.btn, button { display: inline-block; font: inherit; color: #04101f; background: var(--acc); border: 0; border-radius: .5rem; padding: .6rem 1rem; text-decoration: none; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--fg); border: 1px solid var(--line); }
+  label { display: block; margin: .6rem 0 .2rem; color: var(--dim); font-size: .9rem; }
+  input, select { width: 100%; font: inherit; color: var(--fg); background: #081022; border: 1px solid var(--line); border-radius: .4rem; padding: .5rem; }
+  ul { padding-left: 1.2rem; margin: .4rem 0; }
+  #qr svg { max-width: 16rem; width: 100%; height: auto; background: #fff; padding: .5rem; border-radius: .5rem; }
+  .mono { font-family: ui-monospace, Consolas, monospace; word-break: break-all; }
+  footer { color: var(--dim); font-size: .85rem; margin-top: 2rem; }
+</style></head>
+<body><main>
+  <h1>Kelly Page for MeshCore</h1>
+  <p class="dim">Put other hams' MeshCore nodes on your radio in one go, and list yours so they can add you.</p>
+
+  <div id="b-ok" class="banner ok" hidden></div>
+  <div id="b-warn" class="banner warn" hidden></div>
+  <div id="b-bad" class="banner bad" hidden></div>
+
+  <div class="card" id="c-open">
+    <h2>Open Ham Contacts</h2>
+    <p>Kelly Page runs in your browser. It talks to your MeshCore node over USB (Web Serial) or Bluetooth, so nothing needs installing.</p>
+    <p><a class="btn" id="open" href="index.html#mesh-contacts">Open Kelly &rsaquo; LoRa Mesh &rsaquo; Ham Contacts</a></p>
+    <p class="dim">Then: connect your node, turn on <b>Use the P25X ham directory</b>, and press <b>Add all not yet on my radio</b>.</p>
+  </div>
+
+  <div class="card" id="c-ios" hidden>
+    <h2>On an iPhone or iPad</h2>
+    <p>Safari on iOS cannot talk to a MeshCore node, so use the official <b>MeshCore</b> app and import contacts by QR code:</p>
+    <ul>
+      <li>On a computer or Android phone, open Kelly &rsaquo; Ham Contacts, and press the QR button on a ham's row -- or make one below from a name and public key.</li>
+      <li>In the MeshCore app: <b>Contacts</b> &rsaquo; <b>Add contact</b> &rsaquo; <b>Scan QR</b>.</li>
+    </ul>
+  </div>
+
+  <div class="card" id="c-qr">
+    <h2>Make a contact QR</h2>
+    <p class="dim">For the official MeshCore app: a node's name, public key and type become a <span class="mono">meshcore://contact/add</span> QR. Public keys only -- never type a private key.</p>
+    <label for="q-name">Node name (31 bytes at most)</label><input id="q-name" autocomplete="off" placeholder="VK4ABC Home">
+    <label for="q-key">Public key (64 hex digits)</label><input id="q-key" class="mono" autocomplete="off" spellcheck="false" placeholder="64 hex digits">
+    <label for="q-type">Type</label>
+    <select id="q-type"><option value="1">Companion</option><option value="2">Repeater</option><option value="3">Room server</option><option value="4">Sensor</option></select>
+    <p><button id="q-go">Make the QR</button></p>
+    <p id="q-msg" class="dim" aria-live="polite"></p>
+    <div id="qr"></div>
+  </div>
+
+  <footer>Free software for hams. No ads, no trackers, no third-party scripts: this page loads only files from this site.</footer>
+</main>
+<script src="js/meshqr.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var ua = navigator.userAgent || '';
+  var iOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  var hasSerial = 'serial' in navigator, hasBle = 'bluetooth' in navigator;
+  var show = function (id, html) { var e = $(id); e.innerHTML = html; e.hidden = false; };
+
+  if (iOS) {
+    show('b-warn', '<b>iPhone / iPad:</b> this browser cannot connect to a MeshCore node. Use the MeshCore app and import contacts by QR (below).');
+    $('c-ios').hidden = false;
+    $('open').textContent = 'Open Kelly anyway (to browse the directory and make QR codes)';
+  } else if (!hasSerial && !hasBle) {
+    // Firefox / desktop Safari: neither API exists
+    show('b-bad', '<b>This browser cannot connect to a node.</b> Use <b>Chrome or Edge</b> on a desktop computer, or Chrome on Android. (Firefox and Safari do not support Web Serial or Web Bluetooth.) You can still open Kelly to browse the directory and make QR codes.');
+  } else if (hasSerial && hasBle) {
+    show('b-ok', 'This browser can connect by <b>USB (Web Serial)</b> and <b>Bluetooth</b>.');
+  } else if (hasSerial) {
+    show('b-ok', 'This browser can connect by <b>USB (Web Serial)</b>. Bluetooth is not available here -- for a Bluetooth node use Chrome on Android.');
+  } else {
+    show('b-ok', 'This browser can connect by <b>Bluetooth</b>. USB (Web Serial) is not available here -- on a desktop use Chrome or Edge.');
+  }
+  if (!iOS && (hasSerial || hasBle) && !window.isSecureContext) show('b-warn', 'Open this page over <b>https://</b>: browsers only allow USB and Bluetooth on secure pages.');
+
+  $('q-go').onclick = function () {
+    var msg = $('q-msg'), box = $('qr'); box.innerHTML = ''; msg.textContent = '';
+    var Q = window.KellyMeshQR;
+    if (!Q) { msg.textContent = 'The QR code module did not load -- reload the page.'; return; }
+    try {
+      var link = Q.contactLink({ name: $('q-name').value.trim(), key: $('q-key').value.trim().toLowerCase(), type: +$('q-type').value });
+      msg.textContent = 'Scan it in the MeshCore app: Contacts > Add contact > Scan QR.';
+      Q.svg(link, { ecl: 'Q', quiet: 4, mm: 40 }).then(function (s) { box.innerHTML = s; }, function (e) { msg.textContent = String(e && e.message || e); });
+    } catch (e) { msg.textContent = String(e && e.message || e); }
+  };
+})();
+</script>
+</body></html>

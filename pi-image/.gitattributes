@@ -1,0 +1,2 @@
+# Everything here ends up on a Pi: LF line endings, always.
+* text=auto eol=lf

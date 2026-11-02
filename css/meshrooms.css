@@ -1,0 +1,19 @@
+/* Kelly Page -- LoRa Mesh > Rooms card (js/meshrooms.js). Reuses .rp-card / .rp-chip / .rp-busy from the repeater card. */
+.rm-rooms { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 8px; }
+.rm-room { background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 255, 255, .12); color: inherit; border-radius: 14px; padding: 4px 10px; cursor: pointer; font: inherit; font-size: 13px; }
+.rm-room.on { border-color: var(--accent, #3cf); background: rgba(60, 200, 255, .12); }
+.rm-room small { opacity: .65; }
+.rm-badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--bad, #f55); color: #fff; font-size: 11px; text-align: center; }
+.rm-hint { margin: 2px 0 6px; }
+.rm-thread { max-height: 360px; overflow-y: auto; margin: 8px 0; padding: 4px; border: 1px solid rgba(255, 255, 255, .08); border-radius: 8px; }
+.rm-older { display: block; margin: 2px auto 8px; }
+.rm-post { padding: 5px 8px; margin: 4px 0; border-radius: 8px; background: rgba(255, 255, 255, .03); }
+.rm-post.rm-me { background: rgba(60, 200, 255, .08); margin-left: 12%; }
+.rm-post.rm-room { border-left: 3px solid var(--warn, #fc3); }
+.rm-post.rm-unknown .rm-meta b { font-family: Consolas, monospace; opacity: .8; }
+.rm-meta { font-size: 12px; }
+.rm-text { white-space: pre-wrap; word-break: break-word; }
+.rm-st.delivered { color: var(--good, #3d8); }
+.rm-st.failed { color: var(--bad, #f55); }
+.rm-send input:disabled { opacity: .5; }
+.rm-head { align-items: center; margin: 2px 0 4px; }

@@ -1,0 +1,21 @@
+#!/bin/sh
+# Login message: where Kelly is, with this Pi's token, and what's plugged in.
+ENV=/etc/kelly-bridge.env
+TOKEN="$(sed -n 's/^KELLY_BRIDGE_TOKEN=//p' $ENV 2>/dev/null)"
+CALL="$(sed -n 's/^KELLY_CALLSIGN=//p' $ENV 2>/dev/null)"
+VER="$(sed -n "s/.*KELLY_VERSION = '\([^']*\)'.*/\1/p" /opt/kelly-page/js/version.js 2>/dev/null)"
+EXP="$(sed -n 's/^EXPIRES_ON = datetime.date(\([0-9]*\), \([0-9]*\), \([0-9]*\)).*/\1-\2-\3/p' /opt/kelly-page/bridge/kelly_bridge.py 2>/dev/null)"
+H="$(hostname)"
+IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+Q="${TOKEN:+?connect=ip&token=$TOKEN}"
+echo "  Kelly Page $VER${CALL:+ -- $CALL}   ($(systemctl is-active kelly-bridge.service))"
+echo "  Open in Chrome or Edge and bookmark it:"
+echo "    http://$H.local:8025/$Q"
+[ -n "$IP" ] && echo "    http://$IP:8025/$Q"
+if [ -e /dev/kelly-radio ]; then echo "  Radio lead: $(readlink -f /dev/kelly-radio)"; else echo "  Radio lead: not plugged in (the page works without it)"; fi
+[ -e /dev/kelly-mesh ] && echo "  LoRa node:  $(readlink -f /dev/kelly-mesh)"
+if [ -n "$EXP" ] && [ "$(date +%F)" \> "$(date -d "$EXP" +%F 2>/dev/null || echo 9999)" ]; then
+  echo "  !! This Kelly build stopped opening the radio after $EXP -- get the latest release: sudo kellypage-update <zip>"
+fi
+echo "  sudo kellypage-setup  (callsign, LoRa node, Bluetooth)   kellypage-qr  (phone QR)   sudo kellypage-update <zip>"
+echo

@@ -1,0 +1,13 @@
+[Unit]
+Description=Kelly Page automatic update (signed release, rolls back if it won't run)
+After=network-online.target kelly-bridge.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# /run/kellypage (root, 0755) holds the lock file
+RuntimeDirectory=kellypage
+RuntimeDirectoryPreserve=yes
+ExecStart=/usr/local/sbin/kellypage-autoupdate
+# download + restart + 90 s health check fit well inside this
+TimeoutStartSec=900

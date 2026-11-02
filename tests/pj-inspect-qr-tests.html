@@ -1,0 +1,50 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Packet Journey inspect QR tests</title>
+<style>#out{font:13px Consolas,monospace;white-space:pre-wrap}.ok{color:#3d8}.bad{color:#f55}</style>
+</head><body>
+<h3>Kelly Page -- Packet Journey inspector: ▦ the selected node's contact QR (js/pj-inspect.js)</h3>
+<pre id="out">running…</pre>
+<div id="pj-inspect"></div>
+<script src="../js/mcdecode.js"></script>
+<script src="../js/pj-core.js"></script>
+<script src="../js/pj-inspect.js"></script>
+<script>
+// msedge --headless=new --allow-file-access-from-files --virtual-time-budget=20000 --dump-dom tests/pj-inspect-qr-tests.html -> RESULT: ALL PASS
+// ▦ only when the registry holds the node's full 32-byte key and a known role; never for a hash-only hop or a name.
+const PJ = window.KellyPJ, D = window.KellyMcDecode, out = [], fails = [];
+const eq = (name, got, want) => { if (JSON.stringify(got) === JSON.stringify(want)) out.push(`<span class="ok">PASS ${name}</span>`); else { out.push(`<span class="bad">FAIL ${name}: got ${JSON.stringify(got)} want ${JSON.stringify(want)}</span>`); fails.push(name); } };
+const shown = []; window.KellyMeshQR = { ui: () => ({ show: o => { shown.push(o); } }) };   // stand-in for js/meshqr.js
+const bus = PJ.createBus(), reg = PJ.createRegistry();
+const c = { bus, PJ, D, reg, $: s => document.querySelector(s), esc: s => String(s).replace(/[&<>"']/g, x => '&#' + x.charCodeAt(0) + ';'),
+  store: { get: (k, d) => d, set() {} }, toast() {}, fmtAgo: ms => ms + ' ms', fxLoop() {}, audioCtx: () => null, fx: () => true, reduced: () => false, visible: () => true, root: () => document.body };
+(async () => {
+  try {
+    const mount = document.getElementById('pj-inspect');
+    window.KellyPJInspect(mount, c);
+    const KR = 'a1'.repeat(32), KS = 'b2'.repeat(32), KX = 'c3'.repeat(32);
+    reg.upsertKey(KR, { name: 'VK4XXX · Coot-tha <Rpt>', raw: 'Coot-tha <Rpt>', role: 'repeater' });
+    reg.upsertKey(KS, { name: 'Ipswich Room', role: 'room server' });
+    reg.upsertKey(KX, { name: 'No role yet' });
+    const hop = reg.resolve('d4e5').id, named = reg.byName('Just A Name').id;
+    const qr = () => mount.querySelector('.pj-insp-filter .pj-insp-qr');
+    bus.emit('select', { node: KR, from: 'net' });
+    eq('▦ for a node with a full key', !!qr(), true);
+    eq('... names escaped in the chip', mount.querySelector('.pj-insp-filter').innerHTML.includes('Coot-tha &lt;Rpt&gt;'), true);
+    qr().click();
+    eq('▦ shows key + type 2 (repeater) + its own name', shown[0] && shown[0].contact, { key: KR, type: 2, name: 'Coot-tha <Rpt>' });
+    bus.emit('select', { node: KS, from: 'net' }); qr().click();
+    eq('room server = type 3', shown[1] && shown[1].contact.type, 3);
+    bus.emit('select', { node: KX, from: 'net' });
+    eq('no ▦ when the role is unknown', !!qr(), false);
+    bus.emit('select', { node: hop, from: 'net' });
+    eq('no ▦ for a hash-only hop', !!qr(), false);
+    bus.emit('select', { node: named, from: 'net' });
+    eq('no ▦ for a name-only sender', !!qr(), false);
+    bus.emit('select', { node: null, from: 'net' });
+    eq('filter cleared: no ▦', !!qr(), false);
+  } catch (e) { out.push(`<span class="bad">FAIL exception ${e && e.stack || e}</span>`); fails.push('exception'); }
+  out.push(fails.length ? `RESULT: ${fails.length} FAILED` : 'RESULT: ALL PASS');
+  document.getElementById('out').innerHTML = out.join('\n');
+})();
+</script>
+</body></html>

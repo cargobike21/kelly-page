@@ -1,0 +1,198 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>tr-history + tr-sound tests</title>
+<link rel="stylesheet" href="../css/kelly.css"><link rel="stylesheet" href="../css/tr.css">
+<link rel="stylesheet" href="../css/tr-history.css"><link rel="stylesheet" href="../css/tr-sound.css">
+</head><body>
+<!-- Trace Route history (js/tr-history.js) and sound (js/tr-sound.js) with KellyPJ's bus, KellyTR and a fake context `c`
+     (in-memory store). Synchronous on purpose (headless virtual time stalls ~3 s in).
+     Run: msedge --headless=new --disable-gpu --allow-file-access-from-files --user-data-dir=<tmp> --dump-dom
+          file:///.../kelly-page/tests/tr-history-tests.html   -> RESULT: ALL PASS -->
+<div class="tr" style="width:1200px"><div id="tr-sound" class="tr-sound"></div><div id="tr-history" class="tr-history"></div></div>
+<pre id="out"></pre>
+<script src="../js/mcdecode.js"></script><script src="../js/pj-core.js"></script><script src="../js/pj-air.js"></script>
+<script src="../js/tr-core.js"></script><script src="../js/tr-history.js"></script><script src="../js/tr-sound.js"></script>
+<script>
+(function () {
+  const out = [], PJ = KellyPJ, TR = KellyTR; let fails = 0;
+  const eq = (name, got, want) => { const ok = JSON.stringify(got) === JSON.stringify(want); if (!ok) fails++; out.push(`${ok ? 'PASS' : 'FAIL'} ${name}${ok ? '' : ` -- got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`}`); };
+  try {
+    const mem = {};
+    const store = { get(k, d) { return k in mem ? JSON.parse(mem[k]) : d; }, set(k, v) { mem[k] = JSON.stringify(v); } };
+    let vis = true, demoOn = false, sel = null;
+    const bus = PJ.createBus();
+    const esc = s => String(s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    let actx = null;
+    const c = { bus, PJ, TR, esc, store, fmtAgo: t => t ? Math.round((Date.now() - t) / 1000) + 's ago' : 'never', visible: () => vis, demo: () => demoOn,
+      selected: () => sel, node: id => id === 'kz' ? { id: 'kz', name: 'Known but untraced' } : undefined, audioCtx: () => actx, fx: () => false, reduced: () => true };
+    const sels = []; bus.on('select', s => { sels.push(s); if (s && s.node) sel = s.node; });
+    let seq = 0;
+    const hop = (id, snr, est) => ({ id, hash: id.slice(0, 2), name: id, role: 'repeater', lat: null, lon: null, known: true, snr, estMs: est });
+    // a run to `target` with `n` repeaters each way
+    function mk(target, n, p) {
+      const rpt = Array.from({ length: n }, (_, i) => hop('r' + i + 'aa', -3 + i * 1.37, (i + 1) * 1000));
+      const out = [{ id: 'me', hash: null, name: 'me', snr: null, estMs: 0 }, ...rpt, hop(target, 4.37, (n + 1) * 1000)];
+      const back = [hop(target, null, 0), ...rpt.slice().reverse().map(h => Object.assign({}, h, { snr: h.snr - 1.1 })), { id: 'me', hash: null, name: 'me', snr: 2.6, estMs: 0 }];
+      return TR.runOf(Object.assign({ id: 'tr-' + (++seq), target, targetName: 'Stn ' + target, targetRole: 'repeater', status: 'success', phase: 'done', via: 'live', demo: false,
+        out, back, sentAt: Date.now() - 3000, endedAt: Date.now() + seq, rttMs: 2345.6, pathKey: rpt.map(h => h.hash).join('.'), changed: seq % 3 === 0 }, p || {}));
+    }
+    const $ = s => document.querySelector(s), hm = $('#tr-history');
+
+    // ---------------------------------------------------------------- history
+    let H = KellyTRHistory(hm, c);
+    eq('history: factory returns destroy()', typeof H.destroy, 'function');
+    eq('history: empty state drawn', !!hm.querySelector('.tr-hist-none'), true);
+    bus.emit('done', mk('aa11', 2));
+    const d0 = H._test.data().s.aa11;
+    eq('one done -> one stored station', Object.keys(H._test.data().s), ['aa11']);
+    eq('record keys are the compact set', Object.keys(d0.runs[0]).sort(), ['changed', 'hops', 'method', 'pathKey', 'rtt', 'snrs', 'status', 't', 'via']);
+    eq('record: hops = out repeaters', d0.runs[0].hops, 2);
+    eq('record: snrs rounded to 0.25 (out then back)', d0.runs[0].snrs, [-3, -1.75, 4.25, -2.75, -4, 2.5]);
+    eq('record: rtt rounded ms', d0.runs[0].rtt, 2346);
+    eq('record: station name / role kept', [d0.n, d0.r], ['Stn aa11', 'repeater']);
+    eq('saved to store trHistory', !!mem.trHistory && JSON.parse(mem.trHistory).s.aa11.runs.length, 1);
+    eq('nothing redrawn synchronously (throttled to 1/s)', H._test.dirty(), true);
+    H._test.flush();
+    eq('DOM: station row', hm.querySelectorAll('.tr-hist-st').length, 1);
+    eq('DOM: selected = newest run station', H._test.selected(), 'aa11');
+    eq('DOM: table row', hm.querySelectorAll('.tr-hist-table tbody tr').length, 1);
+    eq('DOM: weakest SNR shown', hm.querySelector('.tr-hist-table tbody td:nth-child(5)').textContent, '-4 dB');
+    eq('DOM: chart canvas sized', hm.querySelector('canvas').width > 0, true);
+
+    // failures + missing fields never throw
+    bus.emit('done', mk('aa11', 1, { status: 'timeout', rttMs: null, changed: null }));
+    bus.emit('done', null); bus.emit('done', {}); bus.emit('done', { target: 'bb22', status: 'success' }); bus.emit('done', { target: 'cc33', status: 'pending' });
+    bus.emit('select', null); bus.emit('select', {});
+    eq('tolerates missing fields (bb22 kept, pending ignored)', Object.keys(H._test.data().s).sort(), ['aa11', 'bb22']);
+    eq('timeout record has rtt null', H._test.data().s.aa11.runs[1].rtt, null);
+    H._test.flush();
+    eq('DOM: table newest first', hm.querySelector('.tr-hist-table tbody tr').className, 'tr-hist-r-timeout');
+
+    // caps: 50 stations x 30 runs
+    for (let s = 0; s < 50; s++) for (let r = 0; r < 30; r++) bus.emit('done', mk('st' + String(s).padStart(2, '0'), 3));
+    let D = H._test.data();
+    eq('cap: at most 40 stations', Object.keys(D.s).length, 40);
+    eq('cap: at most 25 runs each', Math.max(...Object.values(D.s).map(x => x.runs.length)) <= 25, true);
+    eq('cap: the 40 most recent stations kept', Object.keys(D.s).sort()[0], 'st10');
+    eq('size: under the 100 000-char budget', H._test.size() <= 100000, true);
+    eq('size: stored copy under 150 KB', mem.trHistory.length < 150000, true);
+    // long routes: 64 hops each way
+    for (let s = 0; s < 40; s++) for (let r = 0; r < 25; r++) bus.emit('done', mk('lg' + s, 64));
+    D = H._test.data();
+    eq('long routes: snrs capped at 40', Math.max(...Object.values(D.s).flatMap(x => x.runs.map(r => r.snrs.length))), 40);
+    eq('long routes: pathKey capped', Math.max(...Object.values(D.s).flatMap(x => x.runs.map(r => r.pathKey.length))) <= 160, true);
+    eq('long routes: still under budget', H._test.size() <= 100000 && mem.trHistory.length <= 100000, true);
+    eq('long routes: stations still capped', Object.keys(D.s).length <= 40, true);
+
+    // clear all (confirm cancelled, then accepted)
+    window.confirm = () => false; H._test.flush(); hm.querySelector('.tr-hist-clrall').click();
+    eq('clear all: confirm no -> kept', Object.keys(H._test.data().s).length > 0, true);
+    window.confirm = () => true; hm.querySelector('.tr-hist-clrall').click();
+    eq('clear all: confirm yes -> empty', Object.keys(H._test.data().s).length, 0);
+    eq('clear all: store emptied', JSON.parse(mem.trHistory).s, {});
+
+    // select emission + following select
+    bus.emit('done', mk('x1', 1)); bus.emit('done', mk('x2', 0)); bus.emit('done', mk('x3', 2));
+    sel = null; H._test.flush();
+    const rows = hm.querySelectorAll('.tr-hist-st');
+    eq('list newest first', [...rows].map(r => r.dataset.id), ['x3', 'x2', 'x1']);
+    sels.length = 0; rows[2].click();
+    eq('click station emits select from history', sels[0], { node: 'x1', from: 'history' });
+    H._test.flush();
+    eq('clicked station is selected + highlighted', [H._test.selected(), hm.querySelector('.tr-hist-on').dataset.id], ['x1', 'x1']);
+    bus.emit('select', { node: 'x2', from: 'picker' }); H._test.flush();
+    eq('follows select from the picker', H._test.selected(), 'x2');
+    bus.emit('select', { node: 'kz', from: 'viz' }); H._test.flush();
+    eq('selected but untraced station: empty table, its name', [hm.querySelector('.tr-hist-name').textContent, hm.querySelector('.tr-hist-sum').textContent], ['Known but untraced', 'not traced yet']);
+
+    // clear one station
+    bus.emit('select', { node: 'x2', from: 'picker' }); H._test.flush();
+    hm.querySelector('.tr-hist-clr').click();
+    eq('clear station removes only it', Object.keys(H._test.data().s).sort(), ['x1', 'x3']);
+
+    // persistence across a new instance
+    H.destroy();
+    eq('destroy empties the mount', hm.innerHTML, '');
+    H = KellyTRHistory(hm, c);
+    eq('new instance reads the stored history', Object.keys(H._test.data().s).sort(), ['x1', 'x3']);
+    eq('new instance draws at once when visible', hm.querySelectorAll('.tr-hist-st').length, 2);
+
+    // demo separation
+    const before = mem.trHistory;
+    demoOn = true; bus.emit('demo', true);
+    bus.emit('done', mk('dm1', 2, { via: 'demo', demo: true })); bus.emit('done', mk('dm2', 1, { via: 'demo', demo: true }));
+    eq('demo runs not stored', mem.trHistory, before);
+    eq('demo runs in memory', Object.keys(H._test.mem().s).sort(), ['dm1', 'dm2']);
+    eq('demo view shows only demo runs', Object.keys(H._test.view()).sort(), ['dm1', 'dm2']);
+    H._test.flush(); eq('DOM: set tag says demo', hm.querySelector('.tr-hist-set').textContent, 'demo');
+    demoOn = false; bus.emit('demo', false);
+    eq('demo off drops the demo runs', Object.keys(H._test.mem().s).length, 0);
+    eq('live view back', Object.keys(H._test.view()).sort(), ['x1', 'x3']);
+    bus.emit('done', mk('sl1', 1, { via: 'sim-link', demo: true }));
+    eq('sim-link run kept in memory, shown in the live view', [mem.trHistory === before, Object.keys(H._test.view()).includes('sl1')], [true, true]);
+
+    // throttle / visibility
+    vis = false; bus.emit('visible', false);
+    const dr = H._test.draws(); bus.emit('done', mk('x1', 1));
+    eq('hidden: no redraw scheduled', [H._test.draws(), H._test.dirty()], [dr, true]);
+    vis = true; bus.emit('visible', true);
+    H.destroy();
+
+    // ---------------------------------------------------------------- sound
+    const sm = $('#tr-sound');
+    const AC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    actx = AC ? new AC(2, 44100 * 2, 44100) : null;
+    let S = KellyTRSound(sm, c);
+    eq('sound: factory returns destroy()', typeof S.destroy, 'function');
+    eq('sound: off by default', S._test.stats().on, false);
+    eq('sound: toggle button says off', sm.querySelector('.tr-snd-tog').getAttribute('aria-pressed'), 'false');
+    const q1 = TR.runOf({ id: 'tr-s1', target: 'aa', status: 'pending', phase: 'queued' });
+    S._test.handle('run', q1);
+    eq('sound: off -> no launch', S._test.stats().launches, 0);
+    sm.querySelector('.tr-snd-tog').click();
+    eq('sound: click turns it on', [S._test.stats().on, sm.querySelector('.tr-snd-tog').getAttribute('aria-pressed')], [true, 'true']);
+    const vol = sm.querySelector('.tr-snd-vol'); vol.value = 30; vol.oninput(); vol.onchange();
+    eq('sound: volume remembered in trSound', JSON.parse(mem.trSound).vol, 0.3);
+    const q2 = TR.runOf({ id: 'tr-s2', target: 'aa', status: 'pending', phase: 'queued' });
+    S._test.handle('run', q2); S._test.handle('run', q2);
+    eq('sound: one launch per run', S._test.stats().launches, actx ? 1 : 0);
+    const r = mk('aa', 2, { id: 'tr-s2', status: 'pending', phase: 'outbound', sentAt: Date.now() });
+    S._test.handle('run', r); S._test.handle('run', r);
+    eq('sound: one pending tone per out hop (once per attempt)', [S._test.stats().pending, S._test.stats().timers], [3, 3]);
+    const P = KellyTRSound.plan(mk('aa', 2));
+    eq('plan: 6 legs, spacing 900, arrive 2700, return 5400', [P.n, P.spacing, P.arriveAt, P.returnAt], [6, 900, 2700, 5400]);
+    eq('plan: event kinds', P.events.map(e => e.type), ['hop', 'hop', 'arrive', 'hop', 'hop', 'return']);
+    eq('plan: pitch follows snrNorm', P.events.map(e => e.deg), [3, 3, 5, 3, 2, 4]);
+    eq('plan: spacing clamps (1 -> 900, 20 -> 300, 60 -> 120)', [KellyTRSound.spacing(1), KellyTRSound.spacing(20), KellyTRSound.spacing(60)], [900, 300, 120]);
+    const P0 = KellyTRSound.plan(TR.runOf({ out: [{ id: 'me' }, { id: 'aa', snr: 3 }], back: [] }));
+    eq('plan: no back leg -> return one spacing after arrival', [P0.arriveAt, P0.returnAt, P0.events.length], [900, 1800, 2]);
+    S._test.handle('done', mk('aa', 2, { id: 'tr-s2' }));
+    eq('sound: done success cancels pending, schedules the replay', [S._test.stats().replays, S._test.stats().timers], [1, 6]);
+    S._test.handle('run', TR.runOf({ id: 'tr-s3', target: 'bb', status: 'pending', phase: 'queued' }));
+    eq('sound: a new run cancels the replay', S._test.stats().timers, 0);
+    S._test.handle('done', mk('bb', 1, { id: 'tr-s3', status: 'timeout' }));
+    eq('sound: failure plays the fall + fizzle', S._test.stats().fails, actx ? 1 : 0);
+    S._test.handle('done', mk('bb', 1, { id: 'tr-s4', status: 'cancelled' }));
+    eq('sound: cancelled is silent', [S._test.stats().fails, S._test.stats().timers], [actx ? 1 : 0, 0]);
+    S._test.handle('done', mk('aa', 3, { id: 'tr-s5' }));
+    vis = false; bus.emit('visible', false);
+    eq('sound: hidden cancels everything', S._test.stats().timers, 0);
+    S._test.handle('done', mk('aa', 3, { id: 'tr-s6' }));
+    eq('sound: hidden schedules nothing', S._test.stats().timers, 0);
+    vis = true; bus.emit('visible', true);
+    for (let i = 0; i < 12; i++) S._test.play('hop', { deg: i, leg: 'out' });
+    eq('sound: at most 8 voices', actx ? [S._test.stats().active <= 8, S._test.stats().dropped > 0] : [true, true], [true, true]);
+    S._test.handle('run', null); S._test.handle('done', {}); S._test.handle('run', { id: 'z', status: 'pending', phase: 'outbound', sentAt: 1, out: null });
+    eq('sound: tolerates junk runs', true, true);
+    S._test.handle('done', mk('aa', 3, { id: 'tr-s7' }));
+    S.destroy();
+    eq('sound: destroy cancels + empties', [S._test.stats().timers, sm.innerHTML], [0, '']);
+    S = KellyTRSound(sm, c);
+    eq('sound: a new instance starts off, keeps the volume', [S._test.stats().on, S._test.stats().vol], [false, 0.3]);
+    S.destroy();
+    out.push(`(audio context: ${actx ? 'OfflineAudioContext' : 'none'})`);
+  } catch (e) { fails++; out.push('FAIL exception ' + (e && e.stack || e)); }
+  out.push(fails ? `RESULT: ${fails} FAILED` : 'RESULT: ALL PASS');
+  document.getElementById('out').textContent = out.join('\n');
+})();
+</script>
+</body></html>

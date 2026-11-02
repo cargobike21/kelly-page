@@ -1,0 +1,120 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mesh contacts import tests</title>
+<style>body{font:13px Consolas,monospace;background:#0b0f14;color:#dde}.ok{color:#3d8}.bad{color:#f55}</style>
+</head><body>
+<h3>Kelly Page -- 📇 Contacts card import (js/meshcontacts.js): preview before any write (QR_REVIEW.md S1, S5, S17, C10)</h3>
+<pre id="out">running…</pre>
+<div class="card rp-card" id="mc-card" hidden><span id="mc-tag"></span><div id="mc-body"></div></div>
+<script src="../vendor/tweetnacl-1.0.3/nacl-fast.min.js"></script>
+<script src="../js/meshqr.js"></script>
+<script src="../js/hc-core.js"></script>
+<script src="../js/meshcontacts.js"></script>
+<script>
+// The real card with a stub k and a stub session that records every write. Signed adverts are made here with TweetNaCl
+// (the MeshCore advert layout), so the signature check in js/hc-core.js parseCard runs for real.
+// Headless: msedge --headless=new --allow-file-access-from-files --virtual-time-budget=30000 --dump-dom tests/meshcontacts-tests.html
+// -> RESULT: ALL PASS
+const out = [], fails = [];
+const tick = (ms = 0) => new Promise(r => setTimeout(r, ms));
+const until = async (fn, ms = 4000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = fn(); if (v) return v; await tick(10); } return fn(); };
+function eq(name, got, want) {
+  const g = JSON.stringify(got), w = JSON.stringify(want);
+  if (g === w) out.push(`<span class="ok">PASS ${name}</span>`); else { out.push(`<span class="bad">FAIL ${name}: got ${g} want ${w}</span>`); fails.push(name); }
+}
+const $ = s => document.querySelector(s), esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const hex = b => [...b].map(x => x.toString(16).padStart(2, '0')).join('');
+const mem = {}, store = { get: (key, d) => key in mem ? JSON.parse(mem[key]) : d, set: (key, v) => { mem[key] = JSON.stringify(v); } };
+// a signed MeshCore advert: header (type 4 << 2 | route 1), path_len + path, key 32, ts u32, sig 64, flags (0x80 name | type), name
+function advert(kp, name, type, path = []) {
+  const ts = Math.floor(Date.now() / 1000) - 60, t = [ts & 255, (ts >> 8) & 255, (ts >> 16) & 255, ts >>> 24];
+  const app = [0x80 | type, ...new TextEncoder().encode(name)];
+  const sig = nacl.sign.detached(Uint8Array.from([...kp.publicKey, ...t, ...app]), kp.secretKey);
+  return 'meshcore://' + hex([0x11, path.length, ...path, ...kp.publicKey, ...t, ...sig, ...app]);
+}
+const K = c => c.repeat(64);
+const me = { key: K('e'), longName: 'VK4XXX Shack' };
+let nodes = [], sess, writes, toasts = [], claims = [];
+window.KellyHamCalls = { qrClaim: (key, name) => claims.push(`${key.slice(0, 4)} ${name}`) };
+function session(o = {}) {
+  writes = [];
+  return Object.assign({ removeContact: async () => {}, shareContact: async () => {}, exportContact: async () => '',
+    addContact: async c => { writes.push(`add ${c.key.slice(0, 4)} ${c.type} ${c.name}`); return { key: c.key, name: c.name }; },
+    importContact: async l => { writes.push(`import ${l}`); return { name: 'x', key: '' }; },
+    hasContact: async () => false, maxContacts: () => 350, listContacts: async () => nodes, autoAdd: async () => ({ all: true, bits: 0x1e, maxHops: 0 }) }, o);
+}
+const k = { $, esc, store, toast: (i, t, d) => toasts.push(`${t} | ${d}`), dirty: () => ctc.render(), currentPage: () => 'mesh', session: () => sess, caps: () => ({ contacts: true }),
+  nodes: () => nodes, myNum: () => 0, me: () => me, online: () => true, qrOn: () => true };
+const ctc = window.KellyMeshContacts(k);
+const msg = () => (($('#mc-body p.small:last-child') || {}).textContent || '');
+const paste = async t => { $('#mc-imp').value = t; $('[data-mc="import"]').click(); return until(() => $('#mqr') && !$('#mqr').hidden && $('#mqr [data-mqr="yes"]')); };
+const body = () => $('#mqr-body').textContent;
+const yes = () => $('#mqr [data-mqr="yes"]').click(), no = () => $('#mqr [data-mqr="no"]').click();
+(async () => {
+  try {
+    ctc.init(); sess = session(); nodes = [{ num: 1, key: K('1'), longName: 'Old name VK4XYZ', hwLabel: 'Companion', role: 1 }]; ctc.render();
+    const app = (key, name, type = 1) => `meshcore://contact/add?${new URLSearchParams({ name, public_key: key, type: String(type) })}`;
+
+    // ---- S1: an unsigned app card -> preview -> Cancel writes nothing; Add writes it + qrClaim
+    eq('paste an app card -> the preview, before anything is written', [!!(await paste(app(K('2'), 'Bob VK4BOB'))), writes], [true, []]);
+    eq('... new contact, unsigned, its name', [/New contact/.test(body()), /unsigned app QR/.test(body()), /Bob VK4BOB/.test(body())], [true, true, true]);
+    no(); await until(() => /Nothing was added/.test(msg()));
+    eq('Cancel: nothing written, nothing claimed', [writes, claims, msg()], [[], [], 'Nothing was added.']);
+    await paste(app(K('2'), 'Bob VK4BOB')); yes(); await until(() => /Added/.test(msg()));
+    eq('Add: ADD_UPDATE_CONTACT with its key, type and name', writes, [`add 2222 1 Bob VK4BOB`]);
+    eq('... and the name is only a CLAIM (KellyHamCalls.qrClaim)', claims, ['2222 Bob VK4BOB']);
+    eq('... the box is cleared', $('#mc-imp').value, '');
+
+    // ---- S5: already on the radio under another name
+    await paste(app(K('1'), 'New name VK4XYZ'));
+    eq('a card for a contact you have: "Already on your radio as" its name there', /Already on your radio as "Old name VK4XYZ"/.test(body()) && /never renames/.test(body()), true);
+    no(); await tick(20);
+
+    // ---- S17: the count is re-read near the limit; overwrite-oldest is said out loud
+    sess = session({ maxContacts: () => 10, listContacts: async () => Array.from({ length: 10 }, (_, i) => ({ key: K('abcdf012345678'[i]) })), autoAdd: async () => ({ all: true, bits: 0x1f, maxHops: 0 }) });
+    nodes = Array.from({ length: 8 }, (_, i) => ({ num: i + 1, key: K('abcdf012345678'[i]), longName: `N${i}`, hwLabel: 'Companion', role: 1 }));
+    await paste(app(K('9'), 'Ninth'));
+    eq('near full: the count is read afresh (10, not the cached 8); overwrite on -> it pushes out the oldest non-favourite', /table is full \(10 of 10\): adding this pushes out your oldest non-favourite/.test(body()), true);
+    no(); await tick(20);
+    sess = session({ maxContacts: () => 10, listContacts: async () => nodes, autoAdd: async () => ({ all: true, bits: 0x1e, maxHops: 0 }) });
+    await paste(app(K('9'), 'Ninth'));
+    eq('8 of 10, overwrite off: "brings your node to 9 of its 10"', [/brings your node to 9 of its 10 contacts\./.test(body()), /pushes out/.test(body())], [true, false]);
+    no(); await tick(20);
+    sess = session({ maxContacts: () => 10, listContacts: async () => [...nodes, { key: K('8') }, { key: K('7') }], autoAdd: async () => ({ all: true, bits: 0x1e, maxHops: 0 }) });
+    await paste(app(K('9'), 'Ninth'));
+    eq('full, overwrite off: "remove a contact first"', /table is full \(10 of 10\): remove a contact first/.test(body()), true);
+    no(); await tick(20);
+    nodes = []; sess = session();
+
+    // ---- signed adverts: signature checked BEFORE the preview; written with IMPORT_CONTACT, path stripped; no claim
+    const kp = nacl.sign.keyPair(), kp2 = nacl.sign.keyPair();
+    claims = [];
+    const withPath = advert(kp, 'Carol VK4CC', 1, [0xa1, 0xb2, 0xc3]), bare = advert(kp, 'Carol VK4CC', 1).replace('meshcore://', '');
+    await paste(withPath);
+    eq('a signed advert -> the preview says signed', [/Name and position signed by this radio/.test(body()), /Carol VK4CC/.test(body()), writes], [true, true, []]);
+    yes(); await until(() => /Added/.test(msg()));
+    eq('Add: IMPORT_CONTACT with the advert re-made without its path (C10)', writes, [`import meshcore://${bare}`]);
+    eq('... a signed card is not a QR claim', claims, []);
+    const bad = advert(kp2, 'Mallory', 1).replace(/(.{140})(.)/, (m, a, c) => a + (c === '0' ? '1' : '0'));   // a byte of the signature changed
+    $('#mc-imp').value = bad; $('[data-mc="import"]').click(); await tick(30);
+    eq('a tampered advert: refused before any preview, nothing written', [/signature does not check out/.test(msg()), $('#mqr').hidden, writes.length], [true, true, 1]);
+
+    // ---- your own card: nothing to add
+    $('#mc-imp').value = app(me.key, 'VK4XXX Shack'); $('[data-mc="import"]').click(); await tick(30);
+    eq('your own card: "your own node", nothing written', [/your own node/.test(msg()), writes.length], [true, 1]);
+    $('#mqr [data-mqr="close"]') && $('#mqr [data-mqr="close"]').click();
+
+    // ---- names are text, never HTML
+    await paste(app(K('3'), '<img src=x onerror=alert(1)>'));
+    eq('a name with markup is shown as text in the preview', [!$('#mqr-body img'), body().includes('<img src=x')], [true, true]);
+    no(); await tick(20);
+
+    // ---- bareAdvert (the local path strip, used when the signature can't be checked)
+    const B = window.KellyMeshContacts.bareAdvert;
+    eq('bareAdvert: path removed, key read', [B(withPath.slice(11)).bare === bare, B(withPath.slice(11)).key === hex(kp.publicKey)], [true, true]);
+    eq('bareAdvert: not an advert -> null', [B('0100'), B('zz'), B('')], [null, null, null]);
+  } catch (e) { out.push(`<span class="bad">ERROR ${e.stack}</span>`); fails.push('exception'); }
+  out.push(`RESULT: ${fails.length ? 'FAIL ' + fails.join(', ') : 'ALL PASS'}`);
+  document.getElementById('out').innerHTML = out.join('\n');
+})();
+</script>
+</body></html>

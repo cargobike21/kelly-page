@@ -1,0 +1,231 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>hc-share tests</title>
+<link rel="stylesheet" href="../css/kelly.css">
+<link rel="stylesheet" href="../css/hc.css">
+<link rel="stylesheet" href="../css/hc-share.css">
+<script src="../vendor/tweetnacl-1.0.3/nacl-fast.min.js"></script>
+<script src="../js/secure.js"></script>
+<script src="../js/meshqr.js"></script>
+<script src="../js/hc-core.js"></script>
+<script src="../js/hc-service.js"></script>
+<script src="../js/hc-demo.js"></script>
+<script src="../js/hc-share.js"></script>
+</head><body style="width:420px">
+<!-- Ham Contacts > contact cards (js/hc-share.js) against the demo service, as js/hc-ui.js setDemo builds it.
+     Run: msedge --headless=new --allow-file-access-from-files --virtual-time-budget=20000 --dump-dom file:///.../kelly-page/tests/hc-share-tests.html -->
+<div class="hc"><div id="hc-share"></div></div>
+<pre id="out">running…</pre>
+<script>
+(async function () {
+  const out = [], ok = (cond, name, extra) => out.push((cond ? 'PASS ' : 'FAIL ') + name + (cond || extra === undefined ? '' : ` -- ${typeof extra === 'string' ? extra : JSON.stringify(extra)}`));
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const until = async (fn, ms = 6000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (fn()) return true; } catch { /* not yet */ } await wait(50); } return false; };
+  const warns = []; const cw = console.warn; console.warn = (...a) => { warns.push(a.join(' ')); cw.apply(console, a); };
+  let part = null;
+  try {
+    const HC = KellyHC, ed = HC.naclEd(nacl);
+    const mem = new Map(), store = { get: (k, d) => (mem.has(k) ? JSON.parse(mem.get(k)) : d), set: (k, v) => mem.set(k, JSON.stringify(v)) };
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    const bus = HC.createBus(), world = KellyHamDemo({ nacl });
+    const svc = KellyHamContactsService({ backend: world.backend, bus, store, ed, myCall: () => 'VK4ZZA', distKm: () => 1, myPos: () => ({ lat: world.me.lat, lon: world.me.lon }), demo: true, active: () => true });
+    const facade = {};
+    ['state', 'contacts', 'heard', 'get', 'refresh', 'add', 'remove', 'resetPath', 'setFav', 'share', 'shareWait', 'allowDiscover', 'setTelemetryBase', 'advert', 'advertWait', 'setAutoAdd', 'myCard', 'signEntry', 'room', 'forgetHeard', 'demo']
+      .forEach(fn => { facade[fn] = (...a) => svc[fn](...a); });
+    const toasts = [];
+    const c = { bus, HC, svc: facade, $: s => document.querySelector(s), esc, store, toast: (...a) => toasts.push(a), fmtAgo: ms => `${Math.round((Date.now() - ms) / 1000)} s`,
+      ed, myCall: () => 'VK4ZZA', reduced: () => true, root: () => document.body, visible: () => true, demo: () => true, setDemo: () => {}, demoWorld: () => world,
+      openTrace: () => ({ ok: false, reason: 'test' }), openChat: () => {}, kfRequest: () => null, onGateway: () => () => {}, say: () => {} };
+    // a stand-in callsign registry (js/hc-calls.js is another part)
+    const callSet = new Map();
+    window.KellyHamCalls = { set: (key, call, name) => callSet.set(key, { call, name }), callOf: key => (callSet.has(key) ? { call: callSet.get(key).call, src: 'mine' } : null), label: (k, n) => n };
+    world.start(svc);
+    await wait(100);
+
+    const mount = document.getElementById('hc-share');
+    const cardEv = []; bus.on('card', p => cardEv.push(p));
+    part = KellyHCShare(mount, c);
+    const $ = s => mount.querySelector(s);
+    ok(part && typeof part.destroy === 'function', 'factory returns { destroy }');
+    ok(!!$('[data-sh="get"]') && !!$('[data-sh="paste"]'), 'skeleton drawn');
+    const why = KellySecure.why('camera');
+    ok($('[data-sh="scan"]').disabled === !!why, `scan button ${why ? 'disabled: ' + why : 'enabled (secure page)'}`);
+
+    // retry a click-driven op past the demo's 3 % lost answers
+    const clickRetry = async (sel, done, failed) => {
+      for (let i = 0; i < 6; i++) {
+        await until(() => $(sel) && !$(sel).disabled, 3000);
+        $(sel).click();
+        if (!(await until(() => done() || failed(), 25000))) return false;
+        if (done()) return true;
+      }
+      return false;
+    };
+
+    // ---- export
+    const gotCard = await clickRetry('[data-sh="get"]', () => !!part._card(), () => /did not answer|seconds/.test($('[data-sh="get-msg"]').textContent));
+    const card = part._card();
+    ok(gotCard && card, 'my card fetched', $('[data-sh="get-msg"]').textContent);
+    if (card) {
+      const back = HC.parseCard(card.link, { ed });
+      ok(back.verified && back.key === world.me.key && /^meshcore:\/\/[0-9a-f]+$/.test(card.link), 'link is the signed advert and verifies');
+      ok(card.qr === HC.qrLink({ key: card.key, type: card.type, name: card.name }), 'QR text = HC.qrLink (official app form)');
+      ok($('[data-sh="link"]').value === card.link && $('[data-sh="link"]').readOnly, 'link shown read-only');
+      ok(/VK4ZZA/.test($('.hc-sh-call').textContent) && mount.textContent.includes(card.key.slice(0, 8)), 'name / callsign / short key shown');
+      ok(/public/i.test(mount.textContent) && /private/i.test(mount.textContent), 'public-key-only note');
+      const cv = $('[data-sh="qr"]');
+      await until(() => cv.width > 100 && cv.width !== 220, 4000);
+      KellyMeshQR.native = false;
+      let text = null; try { text = await KellyMeshQR.decode(cv, true); } catch (e) { text = 'decode error ' + e.message; }
+      ok(text === card.qr, 'drawn QR decodes to the app form', text);
+      ok(cardEv.length === 0, 'no card event when the card merely draws', JSON.stringify(cardEv));
+      // download: the blob holds just the link
+      const orig = URL.createObjectURL; let blob = null;
+      URL.createObjectURL = b => { blob = b; return orig.call(URL, b); };
+      $('[data-sh="dl"]').click(); URL.createObjectURL = orig;
+      ok(blob && (await blob.text()).trim() === card.link, 'download .txt holds only the link');
+      ok(cardEv.length === 1 && cardEv[0].how === 'download' && Math.abs(cardEv[0].at - Date.now()) < 5000, 'download emits card {how: download, at}', JSON.stringify(cardEv));
+      $('[data-sh="copy-msg"]').textContent = '';
+      $('[data-sh="copy"]').click(); await until(() => $('[data-sh="copy-msg"]').textContent, 2000);
+      ok(!!$('[data-sh="copy-msg"]').textContent, 'copy reports', $('[data-sh="copy-msg"]').textContent);
+      const copied = /Copied/.test($('[data-sh="copy-msg"]').textContent), nCopy = cardEv.filter(e => e.how === 'copy').length;
+      ok(copied ? nCopy === 1 : nCopy === 0, `copy emits card {how: copy} only when it worked (${copied ? 'copied' : 'browser refused'})`, JSON.stringify(cardEv));
+      { // a clipboard that works: exactly one 'copy'
+        const nc = cardEv.filter(e => e.how === 'copy').length;
+        try { Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => {} } }); } catch { /* */ }
+        $('[data-sh="copy-msg"]').textContent = ''; $('[data-sh="copy"]').click(); await until(() => /Copied/.test($('[data-sh="copy-msg"]').textContent), 2000);
+        ok(/Copied/.test($('[data-sh="copy-msg"]').textContent) && cardEv.filter(e => e.how === 'copy').length === nc + 1, 'a copy that worked emits card {how: copy}', JSON.stringify(cardEv));
+      }
+      const n1 = cardEv.length;
+      $('[data-sh="bigqr"]').click(); await wait(50);
+      ok(cardEv.length === n1 + 1 && cardEv[n1].how === 'qr', 'big QR shown emits card {how: qr}', JSON.stringify(cardEv));
+      try { const x = document.querySelector('[data-mqr="close"]'); if (x) x.click(); } catch { /* */ }
+    }
+
+    const paste = $('[data-sh="paste"]');
+    const type = t => { paste.value = t; paste.dispatchEvent(new Event('input', { bubbles: true })); };
+    const nContacts = () => svc.contacts().length;
+
+    // ---- junk + oversized + tampered: an error and nothing added
+    let n0 = nContacts();
+    type('hello there, 73');
+    ok(/no contact card found/i.test($('[data-sh="prev"]').textContent) && !$('[data-sh="add"]'), 'junk text: plain error, no Add', $('[data-sh="prev"]').textContent);
+    type('meshcore://' + 'ab'.repeat(2100));
+    ok(/far too long/i.test($('[data-sh="prev"]').textContent) && !$('[data-sh="add"]'), 'oversized paste refused');
+    const good = world.cardOf('VK4ZZF Redbank');
+    const bad = good.slice(0, -4) + (good.slice(-4) === '6b61' ? '6b62' : '6b61');
+    type(`Here's mine: ${bad} 73`);
+    ok(/signature does not check out/i.test($('[data-sh="prev"]').textContent) && !$('[data-sh="add"]'), 'tampered card refused', $('[data-sh="prev"]').textContent);
+    part._file(new File(['x'.repeat(5000)], 'card.txt', { type: 'text/plain' }));
+    ok(/too big/i.test($('[data-sh="in-msg"]').textContent) && !$('[data-sh="add"]'), 'oversized file refused', $('[data-sh="in-msg"]').textContent);
+    part._file(new File(['PK'], 'card.zip', { type: 'application/zip' }));
+    ok(/not a \.txt/i.test($('[data-sh="in-msg"]').textContent), 'non-text file refused');
+    ok(nContacts() === n0, 'nothing added by bad input');
+
+    // ---- a good signed card, from a .txt file
+    part._file(new File([`Hi! ${good}\n73 de VK4ZZF`], 'vk4zzf.txt', { type: 'text/plain' }));
+    await until(() => part._parsed(), 2000);
+    const p = part._parsed(), prev = () => $('[data-sh="prev"]').textContent;
+    ok(p && p.verified && p.call === 'VK4ZZF', 'good card read from a file');
+    ok(prev().includes('name and position signed by this radio (callsign not checked)') && /VK4ZZF/.test($('[data-sh="pcall"]').textContent) && /Companion/.test(prev()) && prev().includes(p.key.slice(0, 8)), 'preview: signed, callsign, type, key');
+    ok(/-27\.6000, 152\.8700/.test(prev()), 'preview: position', prev());
+    ok(/Not on your radio yet|Heard, not added/.test($('[data-sh="onradio"]').textContent), 'preview: not on radio yet', $('[data-sh="onradio"]').textContent);
+    ok(!$('[data-sh="callin"]'), 'no callsign box when the name has one');
+    ok(/both radios/i.test(prev()), 'tells them to add my card too');
+    n0 = nContacts();
+    const added = await clickRetry('[data-sh="add"]', () => !!svc.get(p.key) && svc.get(p.key).onRadio && /✅/.test($('[data-sh="add-msg"]').textContent), () => /⏱️/.test($('[data-sh="add-msg"]').textContent));
+    ok(added && nContacts() === n0 + 1, 'Add to my radio adds it', $('[data-sh="add-msg"]').textContent);
+    await until(() => $('[data-sh="add"]').disabled, 2000);
+    ok($('[data-sh="add"]').disabled && /Already on your radio/.test($('[data-sh="onradio"]').textContent), 'then shows it is on the radio (re-render)');
+    let r = await svc.add(p);
+    ok(r.ok && r.value.already, 'adding again = already there');
+
+    // ---- the official app's QR form (unsigned)
+    const appQr = HC.qrLink({ key: world.keyOf('VK4ZZH Logan'), type: 1, name: 'VK4ZZH Logan' });
+    type(appQr);
+    ok(part._parsed() && !part._parsed().verified && /unsigned app QR/.test(prev()), 'app QR form: unsigned warning');
+    const k2 = part._parsed().key;
+    const added2 = await clickRetry('[data-sh="add"]', () => !!svc.get(k2) && svc.get(k2).onRadio, () => /⏱️/.test($('[data-sh="add-msg"]').textContent));
+    ok(added2, 'app QR card added', $('[data-sh="add-msg"]').textContent);
+    ok(!cardEv.some(e => e.how === 'scan'), 'a pasted / file card emits no card {how: scan}', JSON.stringify(cardEv));
+
+    // ---- S4: a 16-hex fingerprint (first 8 + last 8) + the 1- / 2-byte path hash; the whole key on demand
+    type(appQr);
+    ok($('.hc-sh-prev .hc-sh-fp').textContent.replace(/ /g, '') === KellyMeshQR.fingerprint(k2) && KellyMeshQR.fingerprint(k2).replace('…', '').length === 16, 'fingerprint: 16 hex', $('.hc-sh-prev .hc-sh-fp').textContent);
+    ok(/path hash/.test(prev()) && prev().includes(k2.slice(0, 4)) && $('.hc-sh-full code').textContent === k2, 'path hash + the whole key behind "whole key"');
+    // ---- S5: on the radio under another name -> "on your radio as X -- this card says Y"; an unsigned card never renames
+    const kZZB = world.keyOf('VK4ZZB Springfield');
+    type(HC.qrLink({ key: kZZB, type: 1, name: 'Not Springfield' }));
+    ok(/On your radio as "VK4ZZB Springfield" -- this card says "Not Springfield"/.test($('[data-sh="onradio"]').textContent) && /never renames/.test($('[data-sh="onradio"]').textContent) && $('[data-sh="add"]').disabled, 'S5: on your radio as X, card says Y', $('[data-sh="onradio"]').textContent);
+    // ---- the reader's warnings: no type given, a shortened name
+    type(`meshcore://contact/add?name=${encodeURIComponent('VK4ZZY ' + 'x'.repeat(40))}&public_key=${'ab'.repeat(32)}`);
+    ok(/assumed/.test(prev()) && /shortened/i.test($('.hc-sh-warns').textContent), 'warnings: type assumed, name shortened', prev());
+    // ---- S6: several cards in one text: the signed one previewed, every other listed with its own Add
+    const multi = `Mine: ${world.cardOf('VK4ZZJ Caboolture')}\nand my mate's: ${HC.qrLink({ key: world.keyOf('VK4ZZG Gold Coast'), type: 1, name: 'VK4ZZG Gold Coast' })}\nand mine again: ${HC.qrLink({ key: world.keyOf('VK4ZZJ Caboolture'), type: 1, name: 'VK4ZZJ Caboolture' })}`;
+    type(multi);
+    ok(part._parsed() && part._parsed().verified && part._parsed().name === 'VK4ZZJ Caboolture', 'S6: the signed card wins');
+    ok(part._more().length === 1 && part._more()[0].card.name === 'VK4ZZG Gold Coast' && !!$('[data-sh="more-add"][data-i="0"]'), 'S6: the other card listed once (same key dropped), with Add', part._more().map(m => m.card && m.card.name));
+    ok(/1 more card in that text/.test(prev()) && !/one at a time/.test(prev()), 'S6: says how many more', prev());
+    const kZZG = world.keyOf('VK4ZZG Gold Coast');
+    let addedG = false;
+    for (let i = 0; i < 6 && !addedG; i++) { $('[data-sh="more-add"][data-i="0"]').click(); await until(() => !part._more()[0].busy && part._more()[0].res, 20000); addedG = !!(svc.get(kZZG) && svc.get(kZZG).onRadio); }
+    await wait(1100);
+    ok(addedG && /On your radio/.test($('[data-sh="more-add"][data-i="0"]').textContent), 'S6: its Add adds that card', $('[data-sh="more-add"][data-i="0"]').textContent);
+    ok(!(svc.get(part._parsed().key) || {}).onRadio, 'S6: the main card was not added by it');
+    // ---- a card READ IN (camera / picture / the Scan button) and added: card {how: scan, key} (Calling Card window)
+    const kZZL = world.keyOf('VK4ZZL Bundamba');
+    part._setText(HC.qrLink({ key: kZZL, type: 1, name: 'VK4ZZL Bundamba' }), 'scan');
+    const nEv = cardEv.length;
+    const added3 = await clickRetry('[data-sh="add"]', () => !!svc.get(kZZL) && svc.get(kZZL).onRadio, () => /⏱️/.test($('[data-sh="add-msg"]').textContent));
+    ok(added3 && cardEv.length === nEv + 1 && cardEv[nEv].how === 'scan' && cardEv[nEv].key === kZZL, 'scanned card added -> card {how: scan, key}', JSON.stringify(cardEv.slice(nEv)));
+    // ---- importText (the LoRa Mesh 📷 Scan hook): preview only, nothing added
+    const kZZK = world.keyOf('VK4ZZK Beaudesert'), nC = nContacts();
+    part.importText(HC.qrLink({ key: kZZK, type: 1, name: 'VK4ZZK Beaudesert' }));
+    await wait(300);
+    ok(paste.value.includes(kZZK) && part._parsed() && part._parsed().key === kZZK && /LoRa Mesh Scan/.test($('[data-sh="in-msg"]').textContent) && nContacts() === nC, 'importText: preview shown, nothing added');
+
+    // ---- no callsign in the name: the callsign box
+    const bobCard = world.cardOf('Bob in Brisbane');
+    type(bobCard);
+    ok(part._parsed() && !part._parsed().call && /none in its name/.test($('[data-sh="pcallsrc"]').textContent), 'no callsign: says none');
+    ok(/Already on your radio/.test($('[data-sh="onradio"]').textContent), 'a card already on the radio says so');
+    const ci = $('[data-sh="callin"]');
+    ok(!!ci, 'callsign box offered');
+    ci.value = 'not a call'; $('[data-sh="callsave"]').click();
+    ok(/not a callsign/.test($('[data-sh="call-msg"]').textContent) && callSet.size === 0, 'bad callsign refused');
+    ci.value = 'vk4zzq-7'; $('[data-sh="callsave"]').click();
+    ok(callSet.get(part._parsed().key) && callSet.get(part._parsed().key).call === 'VK4ZZQ' && callSet.get(part._parsed().key).name === 'Bob in Brisbane', 'KellyHamCalls.set(key, call, name)');
+    ci.value = 'VK4ZZQ typed';   // typed text survives a re-render
+    bus.emit('calls'); await wait(1100);
+    ok($('[data-sh="callin"]') === ci && ci.value === 'VK4ZZQ typed', 'typed text kept across re-renders');
+
+    // ---- Result display: full / offline / refused (a stand-in add)
+    const realAdd = facade.add;
+    type(world.cardOf('VK4ZZK Beaudesert'));
+    for (const [res, re] of [[HC.fail('full', 'Your node holds at most 32 contacts.'), /⛔ Your node holds/], [HC.fail('offline', 'The node is not connected.'), /🔌.*Connect your node/],
+      [HC.fail('refused', 'kept it only as a heard advert'), /⚠️ kept it only/]]) {
+      facade.add = () => Promise.resolve(res);
+      $('[data-sh="add"]').click(); await until(() => re.test($('[data-sh="add-msg"]').textContent), 1500);
+      ok(re.test($('[data-sh="add-msg"]').textContent), `result shown: ${res.code}`, $('[data-sh="add-msg"]').textContent);
+    }
+    facade.add = () => { throw new Error('boom'); };
+    $('[data-sh="add"]').click(); await wait(50);
+    ok(/boom/i.test($('[data-sh="add-msg"]').textContent), 'a throwing service is caught');
+    facade.add = realAdd;
+
+    // ---- own card, clear, destroy
+    type(card ? card.link : '');
+    ok(!card || (/your own card/.test($('[data-sh="onradio"]').textContent) && $('[data-sh="add"]').disabled), 'own card: refused');
+    $('[data-sh="clear"]').click();
+    ok(paste.value === '' && !$('[data-sh="prev"]').textContent.trim(), 'clear empties the box');
+    part.destroy(); part = null;
+    ok(mount.innerHTML === '', 'destroy empties the mount');
+    bus.emit('state', svc.state()); bus.emit('contacts', []); await wait(1100);
+    ok(!warns.some(w => /share/.test(w)), 'no handler errors after destroy', warns);
+    world.stop();
+  } catch (e) { out.push('FAIL exception ' + (e && e.stack || e)); }
+  try { if (part) part.destroy(); } catch { /* */ }
+  const fails = out.filter(l => l.startsWith('FAIL'));
+  document.getElementById('out').textContent = out.join('\n') + '\n' + (fails.length ? `RESULT: FAIL ${fails.length} of ${out.length}` : 'RESULT: ALL PASS');
+})();
+</script>
+</body></html>

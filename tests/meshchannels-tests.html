@@ -1,0 +1,139 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mesh channels tests</title>
+<style>body{font:13px Consolas,monospace;background:#0b0f14;color:#dde}.ok{color:#3d8}.bad{color:#f55}</style>
+</head><body>
+<h3>Kelly Page -- 📻 Channels card (js/meshchannels.js + meshcore.js setChannel + js/mtshare.js) against the simulated node</h3>
+<pre id="out">running…</pre>
+<div class="card" id="mch-card" hidden><span class="tag" id="mch-tag"></span><div id="mch-body"></div></div>
+<script src="../js/meshcore.js"></script>
+<script src="../js/meshcoresim.js"></script>
+<script src="../js/mcdecode.js"></script>
+<script src="../js/meshqr.js"></script>
+<script src="../js/mtshare.js"></script>
+<script src="../js/meshchannels.js"></script>
+<script>
+// The real card, a stub Kelly (k) and a real meshcore.js Session wired to the sim (delays 50x shorter).
+// Headless: msedge --headless=new --allow-file-access-from-files --virtual-time-budget=40000 --dump-dom tests/meshchannels-tests.html
+// -> RESULT: ALL PASS
+const MC = window.KellyMeshCore, SIM = window.KellyMeshCoreSim, QR = window.KellyMeshQR, CH = window.KellyMeshChannels, out = [], fails = [];
+const tick = (ms = 0) => new Promise(r => setTimeout(r, ms));
+const until = async (fn, ms = 4000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = fn(); if (v) return v; await tick(10); } return fn(); };
+function eq(name, got, want) {
+  if (String(got) === String(want)) out.push(`<span class="ok">PASS ${name}</span>`);
+  else { out.push(`<span class="bad">FAIL ${name}: got ${got} want ${want}</span>`); fails.push(name); }
+}
+const $ = s => document.querySelector(s), esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const txt = s => ($(s) || {}).textContent || '';
+const rows = () => [...document.querySelectorAll('.mch-row')].map(r => `${r.querySelector('.mch-slot').textContent}:${r.querySelector('.mch-name').textContent}:${r.querySelector('.mch-kind').textContent}:${r.querySelector('[data-mch-qr]') ? 'qr' : '-'}`).join('|');
+// everything Kelly drew (the card + the shared QR dialog), not this page's own script text
+const html = () => [$('#mch-card'), $('#mqr')].filter(Boolean).map(e => e.outerHTML + [...e.querySelectorAll('input')].map(i => i.value).join(' ')).join('');
+const toasts = [];
+(async () => {
+  try {
+    const PRIV = '00112233445566778899aabbccddeeff', test = QR.hashtagSecret('#test');
+    // ---- statics
+    eq('kindOf: Public secret -> public', CH.kindOf({ name: 'Public', secretHex: QR.PUBLIC_SECRET }), 'public');
+    eq('kindOf: sha256(#name) -> hashtag', CH.kindOf({ name: '#test', secretHex: test }), 'hashtag');
+    eq('kindOf: anything else -> private', CH.kindOf({ name: '#test', secretHex: PRIV }), 'private');
+    const sl = { max: 3, list: [{ index: 0, name: 'Public', secretHex: QR.PUBLIC_SECRET }, { index: 1, name: '#test', secretHex: PRIV }] };
+    let pl = CH.plan({ name: '#test', secret: test, hashtag: true }, sl);
+    eq('plan: same name, different secret -> clash, first free slot 2', `${pl.kind} ${pl.already} ${pl.clash && pl.clash.index} ${pl.free} ${pl.full}`, 'hashtag null 1 2 false');
+    pl = CH.plan({ name: 'Mine', secret: PRIV }, sl);
+    eq('plan: same secret -> already in slot 1', `${pl.kind} ${pl.already} ${pl.clash}`, 'private 1 null');
+    sl.list.push({ index: 2, name: 'X', secretHex: 'ff'.repeat(16) });
+    eq('plan: every slot used -> full, no free slot', `${CH.plan({ name: 'New', secret: 'ee'.repeat(16) }, sl).full} ${CH.plan({ name: 'New', secret: 'ee'.repeat(16) }, sl).free}`, 'true null');
+
+    // ---- the card against the sim
+    const sim = SIM.create({ seed: 5, sched: (fn, ms) => { const t = setTimeout(fn, Math.ceil(ms / 50)); return () => clearTimeout(t); } });
+    let session, card, dev = 'meshcore', online = true;
+    const framer = new MC.Framer(f => session.onFrame(f));
+    sim.onFrame(f => { const b = new Uint8Array(3 + f.length); b[0] = 0x3e; b[1] = f.length & 255; b[2] = f.length >> 8; b.set(f, 3); framer.push(b); });
+    session = MC.DRIVER.Session({ send: async b => sim.write(b), node: () => {}, self: () => {}, text: () => {}, ack: () => {}, channels: () => { if (card) card.render(); }, status: () => {}, log: () => {}, stat: () => {} });
+    await session.start();
+    const logs = []; const oLog = console.log, oWarn = console.warn, oInfo = console.info;
+    console.log = (...a) => { logs.push(a.join(' ')); oLog(...a); }; console.warn = (...a) => { logs.push(a.join(' ')); oWarn(...a); }; console.info = (...a) => { logs.push(a.join(' ')); oInfo(...a); };
+    card = CH({ $, esc, toast: (i, t, d, c) => toasts.push(`${t} | ${d}`), addEvent: () => {}, dirty: () => {}, currentPage: () => 'mesh',
+      session: () => session, online: () => online, dev: () => dev, showTab: () => {} });
+    card.init(); card.render();
+    eq('card shown for MeshCore; tag = slots used', `${$('#mch-card').hidden} ${txt('#mch-tag')}`, 'false 2 of 8 slots');
+    eq('slots listed: Public (no QR), P25X private (QR)', rows(), '0:Public:🌐 Public:-|1:P25X:🔐 private:qr');
+    eq('no #Public QR: one-line note', /No QR for Public/.test(txt('#mch-body')), true);
+
+    // a hashtag join -> preview (never added by itself)
+    $('#mch-hash').value = 'test'; $('#mch-join').click();
+    eq('join #test: input cleared, preview shows hashtag + 4 hex only', `${$('#mch-hash').value === ''} ${txt('.mch-pv-h')} ${/Secret [0-9a-f]{4}…/.test(txt('.mch-pv'))}`, 'true #test #️⃣ hashtag (public) true');
+    eq('join #test: first free slot (2) picked', $('#mch-slot').value, '2');
+    eq('join #test: nothing written yet', sim.state().channels[2], '');
+    $('#mch-add').click();
+    await until(() => !$('.mch-pv') && /#test/.test(rows()));
+    eq('➕ Add: written to slot 2, re-read, listed as hashtag with a QR', rows(), '0:Public:🌐 Public:-|1:P25X:🔐 private:qr|2:#test:#️⃣ hashtag (public):qr');
+    eq('➕ Add: sim holds it', sim.state().channels.slice(0, 3).join(','), 'Public,P25X,#test');
+    eq('➕ Add: toast', toasts.slice(-1)[0], 'Channel added | #test is in slot 2.');
+
+    // the same channel again -> already have it
+    $('#mch-paste').value = QR.buildChannel({ name: '#test', secret: test }).link; $('#mch-go').click();
+    eq('paste the same channel: box emptied, "already have it in slot 2", no Add', `${$('#mch-paste').value === ''} ${/already have it in slot 2/.test(txt('.mch-pv'))} ${!!$('#mch-add')}`, 'true true false');
+    $('#mch-cancel').click();
+
+    // a private channel QR with the same name as P25X -> warning, region scope shown, secret never in the DOM
+    window.kellyChannelImport(QR.buildChannel({ name: 'P25X', secret: PRIV, regionScope: 'au-qld' }).link);
+    eq('kellyChannelImport: preview open, private wording', /anyone with this code can read and post on it/.test(txt('.mch-pv')), true);
+    eq('same name, different secret -> ⚠️ a different channel with the same name', /different channel with the same name is in slot 1/.test(txt('.mch-pv')), true);
+    eq('region scope shown, not applied', /Region scope au-qld: Kelly shows it but doesn't apply it \(app 1\.47\+\)/.test(txt('.mch-pv')), true);
+    eq('secret: only 4 hex in the DOM, never the whole', `${html().includes(PRIV)} ${html().includes(PRIV.slice(4, 12))} ${/0011…/.test(txt('.mch-pv'))}`, 'false false true');
+    eq('slot 0 never offered for replacing', [...$('#mch-slot').options].map(o => o.value).includes('0'), false);
+    // pick slot 1 (in use) -> separate danger confirm; Cancel leaves it alone
+    $('#mch-slot').value = '1'; $('#mch-slot').dispatchEvent(new Event('change', { bubbles: true }));
+    $('#mch-add').click();
+    await until(() => document.querySelector('#mqr:not([hidden]) [data-mqr="yes"]'));
+    eq('replace: a danger confirm "Replace slot 1 (P25X)"', `${txt('#mqr-title')} | ${txt('#mqr [data-mqr="yes"]')} ${$('#mqr [data-mqr="yes"]').classList.contains('danger')}`, 'Replace slot 1 (P25X)? | Replace slot 1 (P25X) true');
+    $('#mqr [data-mqr="no"]').click(); await tick(50);
+    eq('replace cancelled: slot 1 still P25X', sim.state().channels[1], 'P25X');
+    $('#mch-add').click();
+    await until(() => document.querySelector('#mqr:not([hidden]) [data-mqr="yes"]'));
+    $('#mqr [data-mqr="yes"]').click();
+    await until(() => !$('.mch-pv'));
+    eq('replace confirmed: slot 1 now the new P25X (private), sim agrees', `${rows().split('|')[1]} ${session.channelSlots().list.find(c => c.index === 1).secretHex === PRIV}`, '1:P25X:🔐 private:qr true');
+
+    // ▦ on a private channel: the dialog holds the QR back behind Show QR, no secret text
+    document.querySelector('[data-mch-qr="1"]').click();
+    eq('▦ private: "Show QR" gate, canvas hidden, secret not in the DOM', `${!!$('#mqr [data-mqr="reveal"]')} ${$('#mqr canvas').hidden} ${html().includes(PRIV)}`, 'true true false');
+    $('#mqr [data-mqr="close"]').click();
+
+    // fill every slot, then a new one is refused
+    for (let i = 3; i < 8; i++) await session.setChannel(i, `#f${i}`, QR.hashtagSecret(`#f${i}`));
+    card.render();
+    $('#mch-hash').value = '#another'; $('#mch-join').click();
+    eq('all 8 slots in use: refused, Add disabled', `${/All 8 channel slots are in use: not added/.test(txt('.mch-pv'))} ${$('#mch-add').disabled}`, 'true true');
+    $('#mch-cancel').click();
+
+    // bad input -> plain error, nothing echoed
+    $('#mch-paste').value = 'meshcore://channel/add?name=X&secret=zz' + PRIV; $('#mch-go').click();
+    eq('a broken channel link: an error, the text not echoed', `${!!$('.rp-err')} ${html().includes('zz' + PRIV)} ${$('#mch-paste').value}`, 'true false ');
+    eq('a contact QR is not a channel: refused', window.kellyChannelImport('meshcore://contact/add?name=A&public_key=' + 'ab'.repeat(32) + '&type=1'), false);
+    eq('nothing logged to the console', logs.filter(l => l.includes(PRIV) || l.includes(test)).length, 0);
+    eq('no localStorage written', (() => { try { return Object.keys(localStorage).filter(x => /mch|chan/i.test(x)).length; } catch { return 0; } })(), 0);
+
+    // offline: no slots, preview says connect
+    online = false; card.online();
+    eq('offline: "not connected"', txt('#mch-tag'), 'not connected');
+    window.kellyChannelImport(QR.buildChannel({ name: '#ping', secret: QR.hashtagSecret('#ping') }).link);
+    eq('offline preview: connect first, no Add', `${/Connect your MeshCore node to add it/.test(txt('.mch-pv'))} ${!!$('#mch-add')}`, 'true false');
+    online = true;
+
+    // Meshtastic: one button + the note; the QR behind a REPLACES warning
+    dev = 'meshtastic'; card.online();
+    eq('Meshtastic: the SEQ button + "Kelly can\'t change" note', `${!!$('#mch-seq')} ${/Kelly can't change a Meshtastic node's channels/.test(txt('#mch-body'))} ${!!$('.mch-row')}`, 'true true false');
+    $('#mch-hop').value = '7'; $('#mch-hop').dispatchEvent(new Event('change', { bubbles: true }));
+    $('#mch-seq').click();
+    eq('SEQ QR: REPLACES warning gate, the link = mtshare seq(hop 7)', `${/REPLACES the channels/.test(txt('#mqr-body'))} ${$('#mqr .mqr-link').value === KellyMtShare.seq({ hopLimit: 7 }).url}`, 'true true');
+    $('#mqr [data-mqr="close"]').click();
+    dev = 'aprs'; card.online();
+    eq('LoRa APRS device: card hidden', $('#mch-card').hidden, true);
+    sim.stop();
+  } catch (e) { out.push(`<span class="bad">ERROR ${esc(e.stack)}</span>`); fails.push('exception'); }
+  out.push(`RESULT: ${fails.length ? 'FAIL ' + fails.join(', ') : 'ALL PASS'}`);
+  $('#out').innerHTML = out.join('\n');
+})();
+</script>
+</body></html>

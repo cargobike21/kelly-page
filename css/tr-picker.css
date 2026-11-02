@@ -1,0 +1,90 @@
+/* Kelly Page -- LoRa Mesh > Trace Route: the station picker (js/tr-picker.js, 2026-10-24). Steady glows only: nothing
+ * here animates (kelly-page/CLAUDE.md "Rules that bite"). Tokens: css/kelly.css + the --tr-* set on .tr (css/tr.css). */
+.tr-pk { display: flex; flex-direction: column; gap: 10px; min-width: 0;
+  --tr-pk-out: var(--tr-out, #7df9ff); --tr-pk-back: var(--tr-back, #ffd36b); }
+.tr-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* search + chips */
+.tr-pk-find { display: flex; flex-direction: column; gap: 8px; }
+.tr-pk-q { width: 100%; }
+.tr-pk-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.tr-pk-chip { cursor: pointer; padding: 4px 11px; border-radius: 999px; background: var(--raised); border: 1px solid var(--line2); color: var(--dim);
+  font: 700 12px var(--display); letter-spacing: .05em; }
+.tr-pk-chip:hover { border-color: var(--tr-pk-out); color: var(--text); }
+.tr-pk-chip[aria-pressed="true"] { color: var(--tr-pk-out); border-color: var(--tr-pk-out); box-shadow: 0 0 10px rgba(125, 249, 255, .3); }
+.tr-pk-n { font: 700 11px var(--mono); color: var(--text); margin-left: 3px; } .tr-pk-n:empty { display: none; }
+
+/* map (collapsible) */
+.tr-pk-mapwrap { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--tr-sky, #03060f); }
+.tr-pk-maptog { width: 100%; text-align: left; cursor: pointer; background: var(--raised); border: 0; border-bottom: 1px solid var(--line); color: var(--dim);
+  padding: 6px 10px; font: 700 12px var(--display); letter-spacing: .05em; }
+.tr-pk-maptog:hover { color: var(--text); }
+.tr-pk-maptog::after { content: '▾'; float: right; }
+.tr-pk-mapcount { font: 500 11px var(--mono); color: var(--mute); }
+.tr-pk-map { height: 190px; }
+.tr-pk-mapwrap.tr-closed .tr-pk-map { display: none; }
+.tr-pk-mapwrap.tr-closed .tr-pk-maptog { border-bottom: 0; } .tr-pk-mapwrap.tr-closed .tr-pk-maptog::after { content: '▸'; }
+
+/* action panel: selected station, method, the big Trace button, progress, limits */
+.tr-pk-act { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 12px; border: 1px solid rgba(125, 249, 255, .28);
+  background: linear-gradient(180deg, rgba(10, 20, 48, .85), rgba(3, 6, 15, .85)); box-shadow: 0 0 18px rgba(125, 249, 255, .08) inset; }
+.tr-pk-sel { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.tr-pk-seln { display: flex; flex-direction: column; min-width: 0; } .tr-pk-seln b { color: var(--tr-pk-out); font: 700 15px var(--display); overflow-wrap: anywhere; }
+.tr-pk-qr { margin-left: auto; flex: 0 0 auto; min-width: 36px; min-height: 36px; font-size: 18px; line-height: 1; }
+.tr-pk-meth { display: flex; border: 1px solid var(--line2); border-radius: 10px; overflow: hidden; }
+.tr-pk-m { flex: 1; cursor: pointer; padding: 6px 4px; background: transparent; border: 0; border-left: 1px solid var(--line2); color: var(--dim); font: 700 12px var(--display); letter-spacing: .05em; }
+.tr-pk-m:first-child { border-left: 0; } .tr-pk-m:hover { color: var(--text); }
+.tr-pk-m.tr-on { background: rgba(125, 249, 255, .14); color: var(--tr-pk-out); }
+.tr-pk-go { width: 100%; padding: 12px 14px; font: 700 16px var(--display); letter-spacing: .08em; }
+.tr-pk-go:disabled { cursor: not-allowed; opacity: .45; filter: grayscale(.6); box-shadow: none; }
+.tr-pk-why { font-size: 13px; color: var(--dim); min-height: 0; } .tr-pk-why:empty { display: none; } .tr-pk-why.tr-no { color: var(--amber); }
+.tr-pk-hint { font-size: 13px; }
+.tr-pk-run { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: space-between; padding: 8px 10px; border-radius: 10px;
+  border: 1px solid rgba(255, 211, 107, .45); background: rgba(255, 211, 107, .07); }
+.tr-pk-runh { display: flex; gap: 10px; align-items: center; min-width: 0; font-size: 13px; } .tr-pk-runh b { color: var(--tr-pk-back); }
+.tr-pk-runic { font-size: 22px; }
+.tr-pk-cd { font-family: var(--mono); color: var(--text) !important; }
+.tr-pk-limit { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; color: var(--dim); }
+.tr-pk-limit b { color: var(--amber); font-family: var(--mono); } .tr-pk-limit.tr-blocked > span:first-child { color: var(--amber); }
+.tr-pk-used { font: 500 11px var(--mono); color: var(--mute); }
+
+/* the list */
+.tr-pk-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 46vh; overflow: auto; overscroll-behavior: contain; }
+.tr-pk-row { display: flex; align-items: stretch; gap: 4px; border-radius: 10px; border: 1px solid var(--line); background: rgba(19, 30, 58, .55); }
+.tr-pk-row:hover { border-color: var(--line2); }
+.tr-pk-row.tr-on { border-color: var(--tr-pk-out); background: rgba(125, 249, 255, .09); box-shadow: 0 0 12px rgba(125, 249, 255, .22); }
+.tr-pk-row.tr-fav { border-left: 3px solid var(--tr-pk-back); }
+.tr-pk-pick { flex: 1; min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 4px 10px; cursor: pointer;
+  background: transparent; border: 0; color: var(--text); text-align: left; padding: 7px 4px 7px 9px; border-radius: 10px; }
+.tr-pk-pick:focus-visible, .tr-pk-star:focus-visible, .tr-pk-chip:focus-visible, .tr-pk-m:focus-visible, .tr-pk-maptog:focus-visible { outline: 2px solid var(--tr-pk-out); outline-offset: -2px; }
+.tr-pk-ic { font-size: 18px; width: 24px; text-align: center; }
+.tr-pk-main { display: flex; flex-direction: column; min-width: 0; }
+.tr-pk-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tr-pk-meta { font: 500 11.5px var(--mono); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tr-pk-snr { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font: 600 11px var(--mono); color: var(--dim); min-width: 62px; }
+.tr-pk-bar { display: block; width: 58px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.tr-pk-bar > i { display: block; height: 100%; border-radius: 3px; }
+.tr-pk-can { white-space: nowrap; font-size: 10px; padding: 2px 6px; }
+.tr-pk-star { cursor: pointer; background: transparent; border: 0; color: var(--mute); font-size: 18px; padding: 0 9px; border-radius: 10px; }
+.tr-pk-star:hover { color: var(--tr-pk-back); } .tr-pk-star[aria-pressed="true"] { color: var(--tr-pk-back); text-shadow: 0 0 8px rgba(255, 211, 107, .6); }
+.tr-pk-empty { padding: 14px 10px; text-align: center; border: 1px dashed var(--line2); border-radius: 10px; }
+.tr-pk-empty p { margin: 0 0 8px; }
+.tr-pk-more:empty { display: none; }
+
+/* map markers (Leaflet circle markers; the SVG path carries the class) */
+.tr-pk-mk { cursor: pointer; }
+
+/* phone: compact rows (no SNR text, smaller bar), a shorter map */
+@media (max-width: 600px) {
+  .tr-pk-list { max-height: 60vh; }
+  .tr-pk-pick { grid-template-columns: auto minmax(0, 1fr) auto; padding: 6px 2px 6px 7px; gap: 2px 8px; }
+  .tr-pk-snr { min-width: 0; } .tr-pk-snr > span { display: none; } .tr-pk-bar { width: 36px; }
+  .tr-pk-can { grid-column: 2 / -1; justify-self: start; }
+  .tr-pk-map { height: 160px; }
+}
+/* full screen: the picker is a strip beside the sky; give the list the height */
+.tr:fullscreen .tr-pk-list, .tr.tr-fs .tr-pk-list { max-height: 48vh; }
+
+/* a station that sends 1-byte path hashes (js/mchashcheck.js): a quiet badge, not a pop-up (feedback: no hash pop-ups) */
+.tr-pk-1b { font-size: 10px; margin-right: 4px; }
+.tr-pk-1bnote { display: block; margin-top: 4px; font-size: 12px; color: var(--dim); line-height: 1.35; }

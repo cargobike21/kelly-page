@@ -1,0 +1,40 @@
+/* Kelly Page -- Trace Route: tr-history (#tr-history): station list | chart + runs table. Static styles only. */
+.tr-hist-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tr-hist-h h2 { margin: 0; }
+.tr-hist-grow { flex: 1; }
+.tr-hist-body { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(0, 2.4fr); gap: 14px; margin-top: 10px; }
+.tr-hist-list { display: flex; flex-direction: column; gap: 4px; max-height: 360px; overflow: auto; min-width: 0; }
+.tr-hist-st { display: flex; flex-direction: column; align-items: stretch; gap: 2px; text-align: left; cursor: pointer; padding: 7px 10px;
+  border-radius: 10px; border: 1px solid var(--line); background: var(--raised); color: var(--text); font: inherit; min-width: 0; }
+.tr-hist-st:hover { border-color: var(--line2); }
+.tr-hist-st.tr-hist-on { border-color: var(--tr-out, #7df9ff); box-shadow: 0 0 10px rgba(125, 249, 255, .2); }
+.tr-hist-st:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.tr-hist-stn { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tr-hist-stm { display: flex; gap: 10px; align-items: center; font: 600 12px var(--mono); color: var(--dim); flex-wrap: wrap; }
+.tr-hist-res { font-weight: 700; }
+.tr-hist-success { color: var(--tr-great, #39ff88); }
+.tr-hist-timeout, .tr-hist-no-path, .tr-hist-error { color: var(--tr-fail, #ff3b5c); }
+.tr-hist-cancelled { color: var(--dim); }
+.tr-hist-chg { color: var(--amber); font-weight: 700; }
+.tr-hist-none { padding: 10px 2px; }
+.tr-hist-detail { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.tr-hist-dh { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tr-hist-name { font-family: var(--display, inherit); font-size: 16px; color: var(--tr-star, #eaf6ff); }
+.tr-hist-chartw { background: var(--tr-sky, #03060f); border: 1px solid var(--line); border-radius: 10px; padding: 6px 6px 4px; }
+.tr-hist-chart { display: block; width: 100%; height: 150px; }
+.tr-hist-leg { display: flex; gap: 14px; flex-wrap: wrap; font-family: var(--mono); padding: 2px 4px; }
+.tr-hist-lrtt { color: var(--tr-back, #ffd36b); } .tr-hist-lsnr { color: var(--tr-out, #7df9ff); } .tr-hist-lfail { color: var(--tr-fail, #ff3b5c); }
+.tr-hist-tw { max-height: 300px; overflow: auto; }
+.tr-hist-table { width: 100%; border-collapse: collapse; font: 13px var(--mono); }
+.tr-hist-table th { text-align: left; color: var(--dim); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+  padding: 4px 8px; border-bottom: 1px solid var(--line2); position: sticky; top: 0; background: var(--panel-solid, #0d152a); }
+.tr-hist-table td { padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.tr-hist-tag { font-size: 10px; padding: 1px 6px; }
+.tr-hist-snr-great { color: var(--tr-great, #39ff88); } .tr-hist-snr-good { color: var(--tr-good, #00e5ff); }
+.tr-hist-snr-fair { color: var(--tr-fair, #ffb020); } .tr-hist-snr-poor { color: var(--tr-poor, #ff3b5c); } .tr-hist-snr-none { color: var(--dim); }
+@media (max-width: 900px) {
+  .tr-hist-body { grid-template-columns: 1fr; }
+  .tr-hist-list { flex-direction: row; overflow-x: auto; max-height: none; padding-bottom: 4px; }
+  .tr-hist-st { flex: 0 0 auto; max-width: 220px; }
+  .tr-hist-table { font-size: 12px; } .tr-hist-table th, .tr-hist-table td { padding: 4px 5px; }
+}

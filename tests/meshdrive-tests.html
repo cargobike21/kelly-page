@@ -1,0 +1,154 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Drive mode tests</title>
+<style>body{font:13px Consolas,monospace;background:#0b0f14;color:#dde}.ok{color:#3d8}.bad{color:#f55}</style>
+</head><body>
+<h3>Kelly Page -- Drive mode (js/meshdrive.js) and offline tiles (js/meshtiles.js): gate, capping, GeoJSON, repeat matching</h3>
+<pre id="out">running…</pre>
+<label><input type="checkbox" id="ms-cov"></label>
+<div class="card" id="mp-card"></div>
+<script src="../js/mesh-bridge-rules.js"></script>
+<script src="../js/meshdrive.js"></script>
+<script src="../js/meshtiles.js"></script>
+<script>
+// Pure helpers, then the real module with a stub Kelly (k) in demo mode (points in memory only, never IndexedDB) and
+// the demo track off, driven fix by fix on a made-up clock, with hand-made LOG_RX repeats.
+// Headless: msedge --headless=new --allow-file-access-from-files --virtual-time-budget=20000 --dump-dom tests/meshdrive-tests.html
+// -> RESULT: ALL PASS
+const D = window.KellyMeshDrive, T = window.KellyMeshTiles, out = [], fails = [];
+const tick = (ms = 0) => new Promise(r => setTimeout(r, ms));
+function eq(name, got, want) {
+  if (JSON.stringify(got) === JSON.stringify(want)) out.push(`<span class="ok">PASS ${name}</span>`);
+  else { out.push(`<span class="bad">FAIL ${name}: got ${JSON.stringify(got)} want ${JSON.stringify(want)}</span>`); fails.push(name); }
+}
+const $ = s => document.querySelector(s), esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+// metres north of a point
+const north = (p, m) => ({ lat: p.lat + m / 111320, lon: p.lon });
+(async () => {
+  try {
+    // ---- the gate: 500 m AND 60 s
+    const A = { lat: -27.6, lon: 152.76 }, t0 = 1.7e12;
+    eq('gate: first fix pings', D.gate(null, A, t0).ok, true);
+    eq('gate: no fix, no ping', D.gate(null, null, t0).ok, false);
+    const last = { ...A, t: t0 };
+    eq('gate: 600 m but 30 s -> no (time)', [D.gate(last, north(A, 600), t0 + 30000).ok, D.gate(last, north(A, 600), t0 + 30000).why], [false, 'time']);
+    eq('gate: 90 s but 300 m -> no (distance)', [D.gate(last, north(A, 300), t0 + 90000).ok, D.gate(last, north(A, 300), t0 + 90000).why], [false, 'distance']);
+    eq('gate: 499 m and 59 s -> no (both)', D.gate(last, north(A, 499), t0 + 59000).why, 'distance and time');
+    eq('gate: 501 m and 61 s -> yes', D.gate(last, north(A, 501), t0 + 61000).ok, true);
+    eq('gate: says what is still needed', (g => [Math.round(g.needM), Math.round(g.needS)])(D.gate(last, north(A, 200), t0 + 20000)), [300, 40]);
+
+    // ---- capping: the newest kept
+    const many = Array.from({ length: 12 }, (_, i) => ({ t: 1000 + ((i * 7) % 12), i }));
+    const c = D.capPoints(many, 5);
+    eq('cap: 12 -> 5, the newest by time', [c.kept.length, c.dropped.length, c.kept.map(p => p.t)], [5, 7, [1007, 1008, 1009, 1010, 1011]]);
+    eq('cap: under the cap untouched', D.capPoints(many.slice(0, 3), 5).kept.length, 3);
+    eq('cap: the default is 5000', D.MAX_PTS, 5000);
+
+    // ---- GeoJSON
+    const pts = [{ ping: 'a:1', lat: -27.6, lon: 152.76, t: Date.UTC(2026, 9, 23, 1, 2, 3), repeater: 'Mt Coot-tha Rptr', hash: 'ab', snr: 3.25, rssi: -96, hops: 1, km: 25.123 },
+      { ping: 'a:2', lat: -27.59, lon: 152.77, t: Date.UTC(2026, 9, 23, 1, 3, 3), repeater: null, hash: null, snr: null, rssi: null, hops: null, km: null, via: 'advert' }];
+    const gj = D.toGeoJSON(pts);
+    eq('GeoJSON: a FeatureCollection of Points, [lon, lat]', [gj.type, gj.features.length, gj.features[0].geometry.type, gj.features[0].geometry.coordinates], ['FeatureCollection', 2, 'Point', [152.76, -27.6]]);
+    eq('GeoJSON: properties', gj.features[0].properties, { time: '2026-10-23T01:02:03.000Z', ping: 'a:1', repeater: 'Mt Coot-tha Rptr', hash: 'ab', snr: 3.25, rxSnr: null, rssi: -96, hops: 1, km: 25.12, via: null });
+    eq('GeoJSON: a ping nobody repeated has nulls', [gj.features[1].properties.repeater, gj.features[1].properties.snr, gj.features[1].properties.via], [null, null, 'advert']);
+    eq('GeoJSON: round-trips as JSON', JSON.parse(JSON.stringify(gj)).features.length, 2);
+    eq('summary: pings, repeaters, best DX', (s => [s.pings, s.repeaters, s.best && s.best.km])(D.summarise(pts)), [2, ['Mt Coot-tha Rptr'], 25.123]);
+
+    // ---- raw packet helpers
+    eq('lastHash: the repeater we heard is the last on the path', [D.lastHash({ h: ['aa', 'bb', 'cc'] }), D.lastHash({ h: [] })], ['cc', null]);
+    eq('payloadHex: after header, path_len and the path (flood)', D.payloadHex(Uint8Array.of(0x15, 2, 0xaa, 0xbb, 0x5a, 1, 2)), '5a0102');
+    eq('payloadHex: transport codes skipped (route 0)', D.payloadHex(Uint8Array.of(0x14, 9, 9, 9, 9, 1, 0xaa, 0x5a, 7)), '5a07');
+    eq('payloadHex: 2-byte hashes', D.payloadHex(Uint8Array.of(0x15, 0x41, 0xaa, 0xbb, 0x5a)), '5a');
+
+    // ---- tiles: ranges and estimates
+    const B = { n: -27.4, s: -27.7, e: 153.1, w: 152.7 };
+    const r10 = T.tileRange(B, 10);
+    eq('tiles: zoom 10 range over Brisbane-Ipswich', [r10.x1 - r10.x0 + 1, r10.y1 - r10.y0 + 1], [2, 2]);
+    eq('tiles: count over zooms = sum of each', T.countTiles(B, 10, 12), [10, 11, 12].reduce((a, z) => { const r = T.tileRange(B, z); return a + (r.x1 - r.x0 + 1) * (r.y1 - r.y0 + 1); }, 0));
+    eq('tiles: estimate uses the average tile size', T.estimate(100, 20000), 2000000);
+    eq('tiles: the cache cap is 50 MB', T.CAP, 50 * 1024 * 1024);
+
+    // ---- the module: stub Kelly in demo mode (no IndexedDB), track off, driven by hand
+    const ms = { drive: true, dev: 'meshcore', driveCh: null, coverage: false };
+    const sent = [], fx = [], toasts = [];
+    const K64 = h => (h + '0'.repeat(64)).slice(0, 64);
+    const nodes = [{ num: 1, key: K64('aa11'), longName: 'VK4XXX Kelly Sim', role: 1 },
+      { num: 2, key: K64('ab22'), longName: 'Mt Coot-tha Rptr', role: 2, lat: -27.4762, lon: 152.9520 },
+      { num: 3, key: K64('cd33'), longName: 'Veranda Rptr', role: 2, lat: -27.6257, lon: 152.7666 },
+      { num: 4, key: K64('ab99'), longName: 'Some Companion', role: 1 }];
+    const session = { sendText: async (t, text) => { sent.push({ ch: t.ch, text }); return 'sent'; }, advert: async flood => { sent.push({ advert: flood }); }, discoverNear: async tag => { sent.push({ discover: tag }); } };
+    const k = { $, esc, ms, store: { get: (a, d) => d, set: () => {} }, toast: (...a) => toasts.push(a), addEvent: () => {}, dirty: () => {}, save: () => {}, currentPage: () => 'mesh',
+      isSim: () => true, demoTrack: false, dev: () => ms.dev, online: () => true, session: () => session, channels: () => [{ index: 0, name: 'Public' }, { index: 1, name: '#wardriving' }],
+      nodes: () => nodes, myNum: () => 1, me: () => nodes[0], F: (fn, x) => fx.push([fn, x]), sfx: () => {}, setCoverage: () => {}, rulesLimiter: () => null };
+    const dv = D(k);
+    dv.init(); dv.render();
+    eq('card + switch injected', [!!$('#md-card'), !!$('#ms-drive'), $('#md-card').hidden], [true, true, false]);
+    eq('default ping: a zero-hop advert, Start enabled, Ask who heard me off', [ms.drivePing, $('#md-ping').value, $('#md-go').disabled, $('#md-ask').checked], ['advert', 'advert', false, false]);
+    ms.drivePing = 'channel'; dv.render();
+    eq('channel type, no channel yet: still disabled; Public not offered', [$('#md-go').disabled, [...$('#md-ch').options].map(o => o.textContent)], [true, ['-- pick --', '#wardriving']]);
+    ms.driveCh = 1; dv.render();
+    eq('channel picked: Start enabled', $('#md-go').disabled, false);
+
+    dv.start();
+    eq('started', dv.running(), true);
+    let vt = 1.7e12; const P0 = { lat: -27.6255, lon: 152.7663 };
+    const rep = (h, snr, pay = [0x5a, 1, 2, 3]) => dv.rx({ kind: 'rx', snr, rssi: -80, raw: Uint8Array.of(0x15, 1, parseInt(h, 16), ...pay), pkt: { route: 'flood', type: 5, ch: '5a', path: { sz: 1, h: [h] } } });
+    dv._fix(P0, vt); await tick(5);
+    eq('first fix: one ping on #wardriving', sent, [{ ch: 1, text: 'ping (drive test)' }]);
+    rep('cd', 11.5); rep('ab', 3.25); rep('cd', 10);   // the Veranda twice: counted once
+    rep('ee', 2, [0x5a, 9, 9, 9]);                     // someone else's post in the window: a different payload
+    dv.rx({ kind: 'rx', snr: 1, rssi: -90, raw: Uint8Array.of(0x09, 1, 0xcd, 1, 2), pkt: { route: 'flood', type: 2, path: { sz: 1, h: ['cd'] } } });   // a DM, not a channel post
+    const p1 = dv.points().filter(p => p.ping === dv.points()[0].ping);
+    eq('repeats -> one point per repeater, named from contacts (repeaters first)', p1.map(p => [p.repeater, p.snr, p.hops]), [['Veranda Rptr', 11.5, 1], ['Mt Coot-tha Rptr', 3.25, 1]]);
+    eq('... distance to the repeater kept (best DX)', Math.round(p1[1].km), 25);
+    dv._close();
+    eq('Mesh Quest hook: drive({heard: 2})', fx.filter(f => f[0] === 'drive').map(f => f[1]), [{ heard: 2 }]);
+
+    // inside the gate: no pings
+    dv._fix(north(P0, 300), vt += 30000); dv._fix(north(P0, 700), vt += 20000); await tick(5);
+    eq('700 m but 50 s: no ping yet', sent.length, 1);
+    dv._fix(north(P0, 900), vt += 15000); await tick(5);
+    eq('900 m and 65 s: ping 2', sent.length, 2);
+    dv._close();
+    eq('a ping nobody repeated: a point with no repeater', (p => [p.repeater, p.snr])(dv.points()[dv.points().length - 1]), [null, null]);
+    dv._fix(north(P0, 950), vt += 120000); await tick(5);
+    eq('then standing still for 2 min: no ping', sent.length, 2);
+    // the airtime budget: a long fast drive, one fix a minute, 1 km apart -- the routine limiter caps it
+    for (let i = 1; i <= 80; i++) { dv._fix(north(P0, 950 + i * 1000), vt += 61000); await tick(2); dv._close(); }
+    const n80 = sent.length - 2;
+    eq('80 gated chances in 80 min: the routine budget (0.5 % = 18 s/h) holds some back', n80 >= 40 && n80 < 80, true);
+    const s = dv.summary();
+    eq('summary: km driven, pings, repeaters', [Math.round(s.km), s.pings, s.repeaters.sort()], [81, sent.length, ['Mt Coot-tha Rptr', 'Veranda Rptr']]);
+    dv.stop();
+    dv.render();
+    eq('stopped; the card shows the summary', [dv.running(), /repeaters heard/.test(($('#md-body .md-sum') || {}).textContent || '')], [false, true]);
+    eq('GeoJSON of the session', dv.geojson().features.length, dv.points().length);
+
+    // zero-hop advert: sends SEND_SELF_ADVERT 0 (flood false); repeats aren't matched
+    ms.drivePing = 'advert'; dv.start(); vt += 3600e3; dv._fix(P0, vt); await tick(5);
+    eq('advert type: a zero-hop advert, nothing else', sent[sent.length - 1], { advert: false });
+    rep('cd', 9); dv._close();
+    eq('... no repeater attributed (zero-hop adverts are not repeated or answered)', (p => [p.repeater, p.via])(dv.points()[dv.points().length - 1]), [null, 'advert']);
+    // Ask who heard me: a discover request after the advert; DISCOVER_RESP answers matched by tag, keyed to contacts
+    ms.driveAsk = true; vt += 3600e3; dv._fix(north(P0, 5000), vt); await tick(5);
+    const dq = sent[sent.length - 1];
+    eq('Ask who heard me: advert then a discover request with a tag', [sent[sent.length - 2], typeof dq.discover], [{ advert: false }, 'number']);
+    const ans = (keyHex, snrUp, tag, rxSnr) => dv.rx({ kind: 'control', snr: rxSnr, rssi: -77, pathLen: 0, data: Uint8Array.of(0x92, (snrUp * 4 + 256) & 255, tag & 255, tag >> 8 & 255, tag >> 16 & 255, tag >>> 24, ...K64(keyHex).match(/../g).map(x => parseInt(x, 16))) });
+    ans('cd33', -2.5, dq.discover, 4); ans('ab22', 6, dq.discover, 7.25); ans('cd33', -2, dq.discover, 4);   // Veranda twice: once
+    ans('ab22', 9, (dq.discover + 1) >>> 0, 1);    // another station's discovery (other tag)
+    dv.rx({ kind: 'control', snr: 1, rssi: -90, pathLen: 0, data: Uint8Array.of(0x91, 0, 1, 2, 3, 4) });   // a companion's answer / too short
+    const pa = dv.points().filter(p => p.via === 'discover');
+    eq('... one point per answering repeater: their SNR of us, ours of them', pa.map(p => [p.repeater, p.snr, p.rxSnr, p.hops]), [['Veranda Rptr', -2.5, 4, 0], ['Mt Coot-tha Rptr', 6, 7.25, 0]]);
+    dv._close();
+    eq('... Mesh Quest hook counts them', fx.filter(f => f[0] === 'drive').pop()[1], { heard: 2 });
+    dv.stop(); ms.driveAsk = false;
+
+
+    // not MeshCore
+    ms.dev = 'meshtastic'; dv.render();
+    eq('Meshtastic: says it needs a MeshCore node', /needs a MeshCore node/.test($('#md-body').textContent), true);
+  } catch (e) { out.push(`<span class="bad">FAIL exception: ${esc(e.stack || e)}</span>`); fails.push('exception'); }
+  out.push(`RESULT: ${fails.length ? 'FAIL ' + fails.join(', ') : 'ALL PASS'}`);
+  $('#out').innerHTML = out.join('\n');
+})();
+</script>
+</body></html>

@@ -1,0 +1,97 @@
+/* Kelly Page -- LoRa Mesh > Packet Journey: live stats + ticker (js/pj-stats.js, 2026-10-24). SCADA control-room look:
+ * big neon numbers readable across a room, cards stack on a phone. Only the ticker's newest item and nothing else
+ * animates, once (kelly-page/CLAUDE.md "Rules that bite"). */
+.pj-stats-wrap { display: grid; gap: 14px; }
+.pj-stats-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pj-stats-title { margin: 0; font: 700 15px var(--display); letter-spacing: .16em; text-transform: uppercase; color: var(--cyan); }
+.pj-stats-since { font: 600 12px var(--mono); color: var(--dim); }
+
+/* big-number tiles */
+.pj-stats-tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+.pj-stats-tile { --c: var(--cyan); position: relative; display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 14px 16px 12px;
+  background: linear-gradient(180deg, rgba(13, 21, 42, .92), rgba(8, 13, 28, .92)); border: 1px solid var(--line); border-left: 4px solid var(--c);
+  border-radius: 14px; box-shadow: inset 0 0 24px rgba(0, 0, 0, .35), 0 0 18px color-mix(in srgb, var(--c) 12%, transparent); }
+.pj-stats-tl { font: 700 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+.pj-stats-tv { font: 800 clamp(26px, 2.8vw, 44px) / 1.05 var(--display); color: var(--c); text-shadow: 0 0 14px color-mix(in srgb, var(--c) 55%, transparent);
+  font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pj-stats-t-busy .pj-stats-tv { font-size: clamp(18px, 1.8vw, 28px); line-height: 1.5; }
+.pj-stats-ts { font: 600 11px var(--mono); color: var(--mute, var(--dim)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pj-stats-t-total { --c: var(--cyan); } .pj-stats-t-rate { --c: var(--lime); } .pj-stats-t-uniq { --c: #b06bff; }
+.pj-stats-t-busy { --c: var(--amber); } .pj-stats-t-flood { --c: #3ba8ff; } .pj-stats-t-dec { --c: #ff2bd6; }
+.pj-stats-split { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--raised); margin-top: 2px; }
+.pj-stats-split i { display: block; height: 100%; transition: width .6s ease; }
+.pj-stats-split i:first-child { background: #3ba8ff; box-shadow: 0 0 8px #3ba8ff; } .pj-stats-split i:last-child { background: var(--amber); }
+
+/* cards */
+.pj-stats-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px; }
+.pj-stats-grid > .card { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.pj-stats-board { grid-column: span 8; } .pj-stats-donut { grid-column: span 4; }
+.pj-stats-time { grid-column: span 6; } .pj-stats-hops { grid-column: span 3; } .pj-stats-sig { grid-column: span 3; }
+.pj-stats-grid canvas { display: block; width: 100%; }
+
+/* leaderboard */
+.pj-stats-tbl { overflow-x: auto; }
+.pj-stats-tbl table { width: 100%; border-collapse: collapse; font-size: 15px; }
+.pj-stats-tbl th { color: var(--dim); font: 600 11px var(--mono); text-transform: uppercase; letter-spacing: .06em; text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line2); white-space: nowrap; }
+.pj-stats-tbl td { padding: 6px 8px; border-top: 1px solid var(--line); white-space: nowrap; font-family: var(--mono); font-size: 14px; }
+.pj-stats-tbl tbody tr { cursor: pointer; }
+.pj-stats-tbl tbody tr:hover td { background: rgba(0, 229, 255, .06); }
+.pj-stats-tbl tr.pj-stats-sel td { background: rgba(0, 229, 255, .16); }
+.pj-stats-tbl tr.pj-stats-sel td:first-child { box-shadow: inset 3px 0 0 var(--cyan); }
+.pj-stats-rk { color: var(--amber); font-weight: 800; width: 2em; }
+.pj-stats-tbl tbody tr:nth-child(1) .pj-stats-rk { color: #ffd166; text-shadow: 0 0 10px rgba(255, 209, 102, .6); }
+.pj-stats-nm { font-family: var(--ui) !important; font-size: 16px !important; font-weight: 700; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+.pj-stats-n { color: var(--lime); font-weight: 800; }
+.pj-stats-ago { color: var(--dim); }
+.pj-stats-mix { display: flex; width: 90px; height: 8px; border-radius: 4px; overflow: hidden; background: var(--raised); }
+.pj-stats-mix i { display: block; height: 100%; }
+.pj-stats-empty { color: var(--dim); font-family: var(--ui) !important; white-space: normal !important; padding: 14px 8px !important; }
+
+/* donut */
+.pj-stats-dwrap { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.pj-stats-dwrap canvas { width: 170px; flex: 0 0 170px; }
+.pj-stats-dleg { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; flex: 1; min-width: 150px; font-size: 14px; }
+.pj-stats-dleg li { display: grid; grid-template-columns: 12px 1fr auto 3.2em; align-items: center; gap: 8px; }
+.pj-stats-dleg i { width: 10px; height: 10px; border-radius: 50%; }
+.pj-stats-dleg b { font: 700 13px var(--mono); } .pj-stats-dleg small { font: 600 11px var(--mono); color: var(--dim); text-align: right; }
+
+/* hop histogram */
+.pj-stats-hist { display: flex; align-items: stretch; gap: 4px; height: 150px; }
+.pj-stats-hb { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 3px; min-width: 0; }
+.pj-stats-hb i { display: block; width: 100%; min-height: 2px; border-radius: 4px 4px 0 0; background: hsl(var(--hue) 100% 58%); box-shadow: 0 0 10px hsl(var(--hue) 100% 58% / .45); transition: height .6s ease; }
+.pj-stats-hb b { font: 700 10px var(--mono); color: var(--text); white-space: nowrap; }
+.pj-stats-hb span { font: 700 11px var(--mono); color: var(--dim); }
+
+/* signal */
+.pj-stats-pick select { max-width: 190px; background: var(--raised); color: var(--text); border: 1px solid var(--line2); border-radius: 8px; padding: 4px 6px; font: 600 12px var(--mono); }
+.pj-stats-sleg { display: flex; gap: 12px; flex-wrap: wrap; font: 600 11px var(--mono); }
+.pj-stats-snr { color: var(--lime); } .pj-stats-rssi { color: var(--cyan); }
+
+@media (max-width: 1400px) {
+  .pj-stats-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .pj-stats-board { grid-column: span 12; } .pj-stats-donut { grid-column: span 5; } .pj-stats-time { grid-column: span 7; }
+  .pj-stats-hops { grid-column: span 5; } .pj-stats-sig { grid-column: span 7; }
+}
+@media (max-width: 800px) {
+  .pj-stats-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .pj-stats-grid > .card { grid-column: span 12; }
+  .pj-stats-tile { padding: 10px 12px; }
+}
+
+/* ticker: newest first, each item slides in once; older ones are pushed right and clipped -- no marquee */
+.pj-tick { display: flex; align-items: center; gap: 10px; height: 100%; min-height: 34px; padding: 0 10px; overflow: hidden; background: rgba(5, 9, 18, .7); }
+.pj-tick-h { flex: 0 0 auto; font: 800 10px var(--display); letter-spacing: .18em; color: var(--lime); text-shadow: 0 0 8px rgba(57, 255, 136, .6); }
+.pj-tick-list { list-style: none; margin: 0; padding: 0; display: flex; gap: 18px; overflow: hidden; white-space: nowrap; flex: 1; min-width: 0;
+  mask-image: linear-gradient(90deg, #000 85%, transparent); -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); }
+.pj-tick-list li { flex: 0 0 auto; display: flex; align-items: baseline; gap: 6px; font-size: 14px; max-width: 520px; overflow: hidden; text-overflow: ellipsis; }
+.pj-tick-list li[data-id] { cursor: pointer; }
+.pj-tick-list time { font: 600 11px var(--mono); color: var(--mute, var(--dim)); }
+.pj-tick-list em { font: 700 10px var(--mono); font-style: normal; padding: 1px 6px; border-radius: 6px; text-transform: uppercase; }
+.pj-tick-list b { font-weight: 700; }
+.pj-tick-list span { overflow: hidden; text-overflow: ellipsis; }
+.pj-tick-chat em { color: var(--pj-chat, #39ff88); border: 1px solid rgba(57, 255, 136, .45); } .pj-tick-chat b { color: var(--pj-chat, #39ff88); }
+.pj-tick-adv em { color: #08101f; background: var(--pj-advert, #00e5ff); } .pj-tick-adv b { color: var(--pj-advert, #00e5ff); } .pj-tick-adv span { color: var(--dim); }
+.pj-tick-idle { color: var(--dim); font-size: 13px !important; }
+.pj-tick-new { animation: pj-tick-in .6s ease-out 1 both; }
+@keyframes pj-tick-in { from { transform: translateX(-40px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .pj-tick-new { animation: none; } .pj-stats-split i, .pj-stats-hb i { transition: none; } }

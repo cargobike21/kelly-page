@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kelly Page Manual</title>
+<link rel="icon" href="assets/kelly-favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&family=Rajdhani:wght@600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+  /* Layout: one reading column with a sticky contents rail on wide screens; the app's own navy +
+     amber brand, its display face for the name only, a book face for reading, mono for what you type. */
+  :root {
+    --paper: #f6f3ec; --ink: #16202e; --muted: #5b6b7c; --rule: #d9d2c4; --panel: #ece6da;
+    --amber: #b5701a; --navy: #0f1d31; --key-bg: #fffdf8; --warn: #a6402e;
+    --display: 'Orbitron', 'Segoe UI', sans-serif;
+    --head: 'Rajdhani', 'Segoe UI', system-ui, sans-serif;
+    --body: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+    --mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+    --paper: #0d1726; --ink: #e8ecf2; --muted: #9aa8b8; --rule: #233650; --panel: #13223a;
+    --amber: #e8a33a; --navy: #0f1d31; --key-bg: #0f1d31; --warn: #ff8a73; color-scheme: dark; } }
+  :root[data-theme="dark"] {
+    --paper: #0d1726; --ink: #e8ecf2; --muted: #9aa8b8; --rule: #233650; --panel: #13223a;
+    --amber: #e8a33a; --navy: #0f1d31; --key-bg: #0f1d31; --warn: #ff8a73; color-scheme: dark; }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.62 var(--body); padding-inline: 16px; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding-block: 28px 64px; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; }
+  @media (max-width: 860px) { .wrap { grid-template-columns: minmax(0, 1fr); gap: 8px; } }
+
+  /* masthead */
+  .mast { grid-column: 1 / -1; display: flex; align-items: center; gap: 20px; padding-bottom: 22px; border-bottom: 2px solid var(--ink); flex-wrap: wrap; }
+  .mast img { width: 76px; height: 76px; }
+  .mast h1 { font: 700 clamp(26px, 4.6vw, 40px)/1.05 var(--display); letter-spacing: .06em; margin: 0; text-transform: uppercase; }
+  .mast h1 span { color: var(--amber); }
+  .mast p { margin: 6px 0 0; font: 600 15px/1.3 var(--head); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .mast .ver { margin-left: auto; font: 500 13px/1.6 var(--mono); color: var(--muted); text-align: right; }
+  @media (max-width: 600px) { .mast .ver { margin-left: 0; text-align: left; } }
+
+  /* contents rail */
+  nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; font: 600 15px/1.35 var(--head); }
+  nav.toc b { display: block; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+  nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; counter-reset: toc; }
+  nav.toc li { counter-increment: toc; display: grid; grid-template-columns: 26px 1fr; }
+  nav.toc li::before { content: counter(toc, decimal-leading-zero); color: var(--amber); font: 500 12px/1.9 var(--mono); }
+  nav.toc a { color: var(--ink); text-decoration: none; }
+  nav.toc a:hover, nav.toc a:focus-visible { color: var(--amber); text-decoration: underline; outline: none; }
+  @media (max-width: 860px) { nav.toc { position: static; padding: 14px 0 6px; border-bottom: 1px solid var(--rule); } nav.toc ol { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); } }
+
+  /* reading column */
+  main { min-width: 0; max-width: 68ch; counter-reset: sec; }
+  section { padding-top: 34px; scroll-margin-top: 16px; }
+  h2 { counter-increment: sec; font: 700 28px/1.15 var(--head); letter-spacing: .02em; margin: 0 0 12px; text-wrap: balance; display: flex; gap: 12px; align-items: baseline; }
+  h2::before { content: counter(sec, decimal-leading-zero); font: 500 15px/1 var(--mono); color: var(--amber); }
+  h3 { font: 700 20px/1.25 var(--head); letter-spacing: .02em; margin: 26px 0 6px; text-wrap: balance; }
+  p, li { text-wrap: pretty; }
+  p { margin: 0 0 14px; }
+  ul, ol { margin: 0 0 14px; padding-left: 1.3em; }
+  li { margin: 4px 0; }
+  a { color: var(--amber); }
+  strong { font-weight: 600; }
+  code, kbd { font: 500 .84em var(--mono); }
+  kbd { border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px; background: var(--key-bg); white-space: nowrap; }
+  .ui { font: 700 .95em var(--head); letter-spacing: .02em; white-space: nowrap; border-bottom: 1px dotted var(--muted); }
+  .lede { font-size: 19px; }
+  .note { border-left: 3px solid var(--amber); background: var(--panel); padding: 12px 16px; margin: 16px 0; border-radius: 0 6px 6px 0; }
+  .note.warn { border-left-color: var(--warn); }
+  .note b:first-child { font: 700 14px var(--head); letter-spacing: .1em; text-transform: uppercase; display: block; margin-bottom: 2px; }
+  .note p:last-child, .note ul:last-child { margin-bottom: 0; }
+  ol.steps { counter-reset: step; list-style: none; padding: 0; }
+  ol.steps > li { counter-increment: step; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 4px; margin: 10px 0; }
+  ol.steps > li::before { content: counter(step); width: 24px; height: 24px; border-radius: 50%; background: var(--navy); color: #f2f4f7; font: 700 13px/24px var(--head); text-align: center; margin-top: 3px; }
+
+  /* tables */
+  .table { overflow-x: auto; margin: 10px 0 18px; border: 1px solid var(--rule); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 15.5px; line-height: 1.45; }
+  th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--rule); }
+  tr:last-child td { border-bottom: 0; }
+  th { font: 700 13px var(--head); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); background: var(--panel); }
+  td:first-child { font: 700 16px var(--head); white-space: nowrap; }
+
+  .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 12px 0 16px; }
+  .pick { border: 1px solid var(--rule); border-radius: 8px; padding: 14px 16px; min-width: 0; }
+  .pick h4 { margin: 0 0 4px; font: 700 19px var(--head); }
+  .pick h4 small { font: 600 12px var(--head); letter-spacing: .12em; text-transform: uppercase; color: var(--amber); margin-left: 6px; }
+  .pick p { margin: 0; font-size: 15.5px; }
+
+  figure.shot { margin: 18px 0; }
+  figure.shot img { display: block; max-width: 100%; height: auto; border: 1px solid var(--rule); border-radius: 6px; background: #fff; }
+  .settings h4 { margin: 14px 0 4px; font: 600 15px var(--head); }
+  figure.shot figcaption { margin-top: 6px; font: 600 14px var(--head); letter-spacing: .02em; color: var(--muted); }
+  footer { grid-column: 1 / -1; border-top: 1px solid var(--rule); padding-top: 16px; font: 500 13px/1.6 var(--mono); color: var(--muted); }
+
+  @media print {
+    body { background: #fff; color: #000; font-size: 11pt; padding: 0; }
+    nav.toc { display: none; } .wrap { display: block; padding: 0; } main { max-width: none; }
+    section { break-inside: auto; padding-top: 18px; } h2, h3 { break-after: avoid; }
+    a { color: inherit; } .note { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="mast">
+    <img src="assets/kelly-logo.svg" alt="">
+    <div>
+      <h1>Kelly <span>Page</span></h1>
+      <p>Operator's manual · P25 console for Tait radios</p>
+    </div>
+    <div class="ver">Version 0.4.33 · October 2026<br>This version works until 28 Nov 2026</div>
+  </header>
+
+  <nav class="toc" aria-label="Contents">
+    <b>Contents</b>
+    <ol>
+      <li><a href="#about">What Kelly Page does</a></li>
+      <li><a href="#need">What you need</a></li>
+      <li><a href="#install">Installing</a></li>
+      <li><a href="#radio">Setting up the radio</a></li>
+      <li><a href="#first">First start</a></li>
+      <li><a href="#tour">The pages</a></li>
+      <li><a href="#everyday">Everyday use</a></li>
+      <li><a href="#gps">GPS, Locate and APRS</a></li>
+      <li><a href="#bulletins">Bulletins</a></li>
+      <li><a href="#pbbs">PBBS: packet mail and bulletins</a></li>
+      <li><a href="#share">P25X Transfer: bigger files overnight</a></li>
+      <li><a href="#web">Web: web pages as text</a></li>
+      <li><a href="#mesh">LoRa Mesh</a></li>
+      <li><a href="#igate">APRS iGate</a></li>
+      <li><a href="#dnp3">DNP3 Demo, the Wivenhoe and Mackay gas turbine trainers</a></li>
+      <li><a href="#sounds">Alerts and sounds</a></li>
+      <li><a href="#config">Saving your set-up</a></li>
+      <li><a href="#updates">Updates and expiry</a></li>
+      <li><a href="#trouble">Troubleshooting</a></li>
+      <li><a href="#onair">On air</a></li>
+    </ol>
+  </nav>
+
+  <main>
+
+  <section id="about">
+    <h2>What Kelly Page does</h2>
+    <p class="lede">Kelly Page turns your PC into a big screen for your Tait P25 radio on the P25X network. It sends and receives status updates, preset messages and texts, shows other radios on a map, keeps the network's bulletins, and can send your position to APRS. Your radio stays a radio: in the usual set-up you still talk on its own microphone.</p>
+    <p>Kelly talks to the radio through the radio's data port, using Tait's radio interface (called CCDI). Everything runs in your web browser. Nothing is installed on the radio and nothing is sent anywhere except over the air and, for maps and callsign look-ups, the internet.</p>
+  </section>
+
+  <section id="need">
+    <h2>What you need</h2>
+    <ul>
+      <li><strong>A Windows PC</strong> (Windows 7 or later) with <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong> (version 109 or later; 109 is the newest on Windows 7). Other browsers can't open a serial port.</li>
+      <li><strong>A Tait radio programmed for Kelly</strong>: a TM9100 mobile (the usual shack radio), or a TM9400 / TP9400. See <a href="#radio">Setting up the radio</a>.</li>
+      <li><strong>A data lead</strong> from the radio's data port to a USB port on the PC (a USB-serial lead, which shows up in Windows as a <code>COM</code> port).</li>
+      <li><strong>Optional: Python 3.8 or later</strong> (3.8 is the newest on Windows 7), only if you use the IP bridge (<code>start-kelly.bat</code>) instead of opening Kelly directly.</li>
+      <li><strong>Optional: internet</strong>, for the map pictures and callsign look-ups. Everything to do with the radio works without it.</li>
+    </ul>
+  </section>
+
+  <section id="install">
+    <h2>Installing</h2>
+    <ol class="steps">
+      <li><div>Right-click the zip and choose <strong>Extract All&hellip;</strong>, putting the Kelly Page folder somewhere it can stay, for example <code>Documents\Kelly Page</code>. Keep everything in the folder together. Don't open <code>index.html</code> straight from inside the zip: Windows only unpacks that one file, and you get a plain page of black text with no buttons working.</div></li>
+      <li><div>Plug in the radio's data lead and switch the radio on.</div></li>
+      <li><div>Start Kelly one of two ways:
+        <ul>
+          <li><strong>Directly (simplest):</strong> open <code>index.html</code> in Chrome or Edge. Kelly asks which COM port to use when you connect.</li>
+          <li><strong>Through the IP bridge:</strong> double-click <code>start-kelly.bat</code> (radio on COM5) or run <code>start-kelly.bat COM7</code> for another port. It opens Kelly in your browser already connected. Leave its black window open; closing it frees the COM port. The first time, it installs the small serial-port library Python needs.</li>
+        </ul></div></li>
+    </ol>
+    <p>Rather keep the radio away from the PC? A small Raspberry Pi beside the radio can run the IP bridge for you, and you open Kelly from any PC on your home network: see <a href="install-pi.html">Kelly Page on a Raspberry Pi</a>.</p>
+    <div class="note"><b>Your settings live in the browser</b><p>Kelly keeps your settings, radio list and messages in the browser you use. Opening it directly and opening it through the bridge count as two different places, each with its own settings. Pick one way and stick to it, or move your set-up with a <a href="#config">configuration file</a>.</p></div>
+  </section>
+
+  <section id="radio">
+    <h2>Setting up the radio</h2>
+    <p>Whoever programs your radio sets this up once, in the Tait programming application. If you're not sure, ask for the P25X code plug.</p>
+    <ul>
+      <li><strong>Tait Radio API › Port Setup</strong>, set as in the first picture below:
+        <ul>
+          <li><strong>CCDI Enabled:</strong> on.</li>
+          <li><strong>Command Mode</strong> and <strong>Transparent Mode:</strong> Baud Rate <strong>19200</strong>, Flow Control <strong>None</strong> in both.</li>
+          <li><strong>CCDI UART Port:</strong> the socket your data lead plugs into. The picture shows <strong>Mic</strong>, for a lead in the microphone socket. With the lead there, the radio's own microphone can't be plugged in, so for Shack mode (talking on the radio's microphone) use the radio's auxiliary connector and choose that port instead.</li>
+        </ul></li>
+      <li><strong>Tait Radio API › DTE/DCE Operation</strong>, set as in the second picture:
+        <ul>
+          <li><strong>Powerup State:</strong> Transparent Mode, so the radio starts up ready for Kelly's Shack mode.</li>
+          <li><strong>Append LF To Messages:</strong> off.</li>
+          <li><strong>Output Progress Messages:</strong> on. Kelly uses these to see calls and to tell when the channel is busy.</li>
+          <li><strong>Transparent Mode Enabled:</strong> on.</li>
+          <li><strong>Ignore Escape Sequence In T-Mode:</strong> off. Kelly needs to step the radio out of Transparent mode for some commands; with this ticked the radio gets stuck and only switching it off and on recovers it.</li>
+        </ul></li>
+      <li><strong>Tait Radio API › RF Modems</strong>, the P25 Packet box, set as in the third picture:
+        <ul>
+          <li><strong>CAI Type:</strong> <strong>Unconfirmed</strong>. Kelly checks every packet itself and asks again for anything missing. With Confirmed, the radio waits for an over-the-air confirmation the P25X network doesn't send, and other radios on the repeater answer "undeliverable".</li>
+          <li><strong>SAP:</strong> <code>00</code>.</li>
+          <li><strong>Destination Address:</strong> <code>5059999</code>, the P25X gateway. Not <code>FFFFFF</code> (everyone).</li>
+          <li><strong>P25 CAI Lead-In Delay:</strong> <code>30</code>. Longer makes no difference on P25X.</li>
+        </ul></li>
+      <li><strong>The P25X status and preset lists.</strong> Statuses and presets travel as numbers, so every radio must have the same lists. They're on Kelly's <span class="ui">Code Plugs</span> page, ready to copy into the programming application.</li>
+      <li><strong>Radios with GPS:</strong> set the location report format to <strong>Tait SDM</strong>. That's what lets other people locate your radio.</li>
+    </ul>
+    <div class="settings">
+      <h4>1. Tait Radio API › Port Setup</h4>
+      <ul><li>CCDI Enabled: <strong>on</strong></li><li>Command Mode and Transparent Mode: Baud Rate <strong>19200</strong>, Flow Control <strong>None</strong></li>
+        <li>CCDI UART Port: <strong>Mic</strong> (this radio's data lead is in the microphone socket)</li><li>Software and hardware flow control: not used</li></ul>
+      <h4>2. Tait Radio API › DTE/DCE Operation</h4>
+      <ul><li>Powerup State: <strong>Transparent Mode</strong></li><li>Append LF To Messages: <strong>off</strong></li><li>Output Progress Messages: <strong>on</strong></li>
+        <li>Transparent Mode Enabled: <strong>on</strong></li><li>Ignore Escape Sequence In T-Mode: <strong>off</strong></li></ul>
+      <h4>3. Tait Radio API › RF Modems, P25 Packet</h4>
+      <ul><li>CAI Type: <strong>Unconfirmed</strong></li><li>SAP: <strong>00</strong></li><li>Destination Address: <strong>5059999</strong></li><li>P25 CAI Lead-In Delay: <strong>30</strong></li></ul>
+    </div>
+    <div class="note warn"><b>Use the right lead</b><p>A Tait radio's data port and its programming port can be the same socket. Close the programming application before starting Kelly; only one program can use a COM port at a time.</p></div>
+  </section>
+
+  <section id="first">
+    <h2>First start</h2>
+    <h3>Choose how you use your radio</h3>
+    <p>The first time Kelly opens it asks one question. You can change the answer later in <span class="ui">Admin › Personality</span>.</p>
+    <div class="two">
+      <div class="pick"><h4>Shack <small>Mic in hand</small></h4><p>You talk on the radio's own microphone and Kelly is the big screen for messages. The radio's PTT, channel knob and scan stay yours. This is the right choice for a TM9100 at home.</p></div>
+      <div class="pick"><h4>Console <small>Kelly at the controls</small></h4><p>Kelly is the radio's control head: it keys up, changes channel and shows signal strength and a live P25 monitor. For a radio with no microphone, a remote radio, or bench testing.</p></div>
+    </div>
+    <h3>Connect</h3>
+    <ol class="steps">
+      <li><div>Open <span class="ui">Admin</span> and find <span class="ui">Connection</span>.</div></li>
+      <li><div>Choose <span class="ui">Serial</span>, check the baud rate is 19200, press <span class="ui">Connect</span> and pick your radio's COM port in the browser's list. (Using the bridge? Choose <span class="ui">IP bridge</span> instead, or just use <code>start-kelly.bat</code>.) A blue <em>Waking up the radio dog…</em> bar appears straight away and counts the seconds while Kelly wakes the radio; that can take about 10 seconds, longer if the radio was left in Transparent mode. It goes away once the radio answers.</div></li>
+      <li><div>Kelly finds the radio, shows its model and serial number, and in Shack mode parks it ready for messages. The P25X gateway answers with your radio's ID.</div></li>
+    </ol>
+    <p>No radio handy? <span class="ui">Demo radio</span> starts a make-believe radio with traffic, so you can look around. Anything the demo makes up disappears when you disconnect.</p>
+    <h3>Your station</h3>
+    <p>Under <span class="ui">Admin › My station</span>, put in your <strong>radio ID</strong> and <strong>callsign</strong>. Leave <strong>Group relay ID</strong> at <code>5059999</code>, the P25X gateway.</p>
+  </section>
+
+  <section id="tour">
+    <h2>The pages</h2>
+    <p>The menu down the left side. In Shack mode the messaging pages come first.</p>
+    <div class="table"><table>
+      <thead><tr><th>Page</th><th>What it's for</th></tr></thead>
+      <tbody>
+        <tr><td>Dashboard</td><td>Quick send (statuses, presets, a text, APRS, a picture), the radio at a glance, a small map, and the latest bulletin.</td></tr>
+        <tr><td>Messages</td><td>Text conversations, one per radio, plus the preset buttons.</td></tr>
+        <tr><td>Bulletins</td><td>Notices sent to every radio on the network.</td></tr>
+        <tr><td>RTTY</td><td>An old-school teleprinter round table over P25, with a logbook, the RTTY Quest game, the weekly sprint and an HF sound-card modem. See <a href="#rtty">RTTY</a>.</td></tr>
+        <tr><td>Status</td><td>Send your status, see everyone else's, and the history.</td></tr>
+        <tr><td>GPS</td><td>The map, Locate another radio, and your fixed position for APRS.</td></tr>
+        <tr><td>Cameras</td><td>The club's weather cameras at Jordan Creek and Waterson. Pick <strong>Latest photo</strong>, <strong>Last half hour</strong> or <strong>Today, hourly</strong> (a short time-lapse) and press <strong>Get it</strong>: the P25X gateway shrinks the photos to a few kilobytes, about 4-17 seconds on air depending on what you pick. One request at a time. The last photos from each camera stay on the page, and a red tag warns when a camera hasn't sent a photo for over two hours.</td></tr>
+        <tr><td>QLD Grid Power</td><td>Queensland's electricity right now, from Open Electricity (AEMO's market data): total demand on a dial with its 30-minute trend, the power flowing across the NSW border (importing or exporting), the wholesale spot price, and how much each fuel is making -- coal, utility and rooftop solar, wind, hydro, gas and batteries. The P25X gateway fetches it and sends a summary of about 290 bytes, a second or so on air. It asks when you open the page and every 5 minutes while the page stays open (change or turn off <strong>Auto refresh</strong>); <strong>Refresh</strong> asks now. Offline, the last reading stays on screen. Rooftop solar is AEMO's half-hourly estimate, so it runs about an hour behind. An <b>SEQ Grid Map</b> tab draws the same live figures as a logical map of how power reaches South East Queensland -- each fuel, the 275 kV backbone, bulk supply and zone substations down to 11 kV towns -- with power streaming along the lines for a few seconds after each reading. The fuel totals are real; how demand divides between the towns is illustrative.</td></tr>
+        <tr><td>SEQ Dam Telemetry</td><td>South East Queensland's six main dams over P25: animated tank gauges with the combined SEQ storage and a status glow (Nominal, High inflow, Flood operations, Spillway active), four weeks of history per dam; a P25 Packet Stream tab with link lamps, the real answer's bytes as they crossed the air, and a clearly labelled simulator of per-station telemetry frames; and a River Flow tab with inflow and outflow gauges (m³/s or ML/day), river heights and each dam's storage change. Data from Seqwater and the Queensland Water Monitoring Information Portal, via the P25X gateway -- about 650 bytes, two seconds on air.</td></tr>
+        <tr><td>SEQ Hazard Watch</td><td>Bushfires (Queensland Fire Department) and road incidents (QLDTraffic: crashes, hazards, flooding, road closures) around South East Queensland, fetched by the P25X gateway and sent to your radio over P25. A map with fire and traffic layers, each incident's nearest P25X repeater and a dispatch panel; a P25 radio &amp; AVL terminal that plays an incident out as a simulated dispatch, with a unit driving out on the map, beside the real bytes that crossed the air; and a response drill -- pick the nearest repeater, the right talkgroup, and broadcast against the clock -- with badges. Markers show the general area only; for warnings and travel advice use QFD's alerts and QLDTraffic.</td></tr>
+        <tr><td>Space Weather</td><td>Live solar and geomagnetic data from NOAA's Space Weather Prediction Center, sent to your radio over P25: X-ray flares, the Kp index, solar flux, sunspots and the NOAA radio blackout / radiation / geomagnetic storm scales, with estimated HF band conditions, MUF and flare absorption for Brisbane. A links tab shows what space weather does -- and doesn't do -- to P25, GPS, HF and satellites (P25 on VHF/UHF barely notices), with a band-noise listener; the arcade has a blackout drill, a Kp forecast log scored against NOAA's real figures, and a Solar School.</td></tr>
+        <tr><td>ISS Tracker</td><td>Predicts International Space Station passes over your station (from Kelly's fixed position, your radio's GPS, the browser or a typed position) and shows them live: map, footprint, sky dome and the Doppler shift on 145.800 MHz. Armed, it retunes your radio for each pass and puts it back afterwards -- receive only, it never transmits: in CCR mode it follows the Doppler continuously, or it steps a 5-channel bank you program. Try it with the dry run and a bench test pass first. Also a listen-and-record panel for passes, badges, and a help tab with the ISS frequencies, channel spacing and a programming table.</td></tr>
+        <tr><td>DNP3 Demo</td><td>DNP3, the SCADA protocol power utilities use, with a simulated 33/11 kV substation you can switch: breakers, earth switches, tap changers and capacitor banks, with real interlocks and protection. Run it all inside Kelly, or put the DNP3 on air with this Kelly as the outstation (RTU) or the master. Every frame can be read byte by byte. Its second plant is a Wivenhoe pumped-storage hydro trainer: pump water uphill, generate it back, and run the station over DNP3 on a simulated or real P25 link. Its third is a Mackay gas turbine trainer: start, synchronise, load and trip a 34 MW jet-engine peaker, black start a town, and watch the diesel bill climb. See <a href="#dnp3">DNP3 Demo and DNP3 over P25</a>.</td></tr>
+        <tr><td>SSTV</td><td>Send and receive small pictures over P25.</td></tr>
+        <tr><td>Directory</td><td><strong>Sync from gateway</strong> fills it with every radio on the P25X network -- name, home / car / portable, who and where last heard -- over P25 packet data; radios you entered yourself are kept as you made them. Your list of radios (name, type, notes) and talkgroups.</td></tr>
+        <tr><td>Calls</td><td>Voice calls heard and made. Kelly off all day? <strong>Today from gateway</strong> fetches the day's P25 calls over packet data and fills in the history (Kelly also does this by itself when it parks after being off for an hour or more). <strong>Last heard › Update from gateway</strong> brings in everyone the network has heard this week, by voice or data, with the repeater they were on.</td></tr>
+        <tr><td>GPS › Today's tracks</td><td>Every radio's GPS reports since 4 am, drawn as a coloured track on the map. <strong>Sync tracks</strong> fetches them from the P25X gateway over P25 packet data (later syncs only bring newer reports); tick a radio to show or hide it, hover a point for its time, speed and repeater, <strong>Fit to tracks</strong> to zoom to them.</td></tr>
+        <tr><td>LoRa Mesh</td><td>Your Meshtastic, MeshCore or LoRa APRS node next to your P25 radio: mesh chat, the map, contact hunting (<strong>📣 Calling now</strong>), a P25 &harr; mesh bridge and the <strong>Mesh Quest</strong> game. See <a href="#mesh">LoRa Mesh</a>.</td></tr>
+        <tr><td>Insights</td><td>The P25X network at a glance, like the dashboard's Insights page: an activity timeline and busiest hours, today's Repeater Awards, the weekly leaderboard and kerchunkers, and the <strong>Userlist</strong> -- every caller ever heard with their talk time. <strong>Sync from gateway</strong> fetches it all over P25 packet data (a few kilobytes); Kelly syncs by itself when you open the page and the last sync is over 15 minutes old.</td></tr>
+        <tr><td>Radio</td><td>Channel, volume and the radio's controls (Console mode mostly).</td></tr>
+        <tr><td>Aliases</td><td><strong>Sync from gateway</strong> brings in every P25X alias radio the network has heard, with callsigns and names, over P25 packet data (no internet needed; your own entries are kept). P25X radio aliases and callsign look-ups.</td></tr>
+        <tr><td>Code Plugs</td><td>The P25X status and preset lists for the TM9100 and TM9400, and the <strong>Call List</strong>: press <strong>Get from gateway</strong> to fetch the network's latest call list over P25 packet data (a few seconds), or paste the P25X dashboard's call list (Code Plugs &rsaquo; Call List &rsaquo; Copy (TSV)) and every radio on it gets its name in your Directory. Pass it on to another Kelly user with the Call List's own Copy (TSV). <strong>Program radio</strong> (TM9100): read the radio's whole code plug to a <code>.m91p</code> file, or program a file Kelly saved into a radio &mdash; no programming application needed. Kelly asks you to switch the radio off and on again each time; keep the cable in until it says it's done. Files saved by the Tait programming application can't be programmed from Kelly, and neither can files for other models (a TP9400's <code>.p94p</code>, a TM9400's <code>.m94p</code>): Kelly says so when you pick one. <strong>Radio files</strong> sends any config file up to 16 MB to the gateway inbox and fetches the club's files; Kelly picks the model from the file's extension and tells you if a file packs too big to send over the air (100 kB packed, about 4-5 minutes).</td></tr>
+        <tr><td>Monitor, Data, Developer</td><td>Signal readings, telemetry and the raw radio interface, for the curious.</td></tr>
+        <tr><td>Admin</td><td>Connection, your station, personality, alert sounds, labels and your configuration file.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section id="everyday">
+    <h2>Everyday use</h2>
+    <h3>Send a status</h3>
+    <p>On the Dashboard, press a status under <span class="ui">Quick send</span>, or use the <span class="ui">Status</span> page for the full list. With <span class="ui">To</span> empty it goes to the P25X gateway, which shows it on the network dashboard. Type a radio ID or name to send it to that radio instead. Two ticks (✓✓) mean the gateway received it.</p>
+    <h3>Send a preset message</h3>
+    <p>Presets work the same way. Some presets are also commands for the gateway, which answers with a text: <strong>WX</strong> (weather), <strong>PING</strong>, <strong>WHO</strong> (who's on), <strong>SITES</strong> (repeater status), <strong>ME</strong> and <strong>HELP</strong>.</p>
+    <h3>Send a text</h3>
+    <p>Type it in the Quick send box, or open <span class="ui">Messages</span> and pick a conversation. Texts to another radio go through the gateway, and replies come back to Kelly. A radio's screen shows about 160 characters, so keep texts short.</p>
+    <h3>Send a picture</h3>
+    <p>Press <span class="ui">Picture</span> on the Dashboard or use the <span class="ui">SSTV</span> page. Kelly shrinks the photo to fit; a picture takes the channel for several seconds, so send them sparingly. As it goes, Kelly plays an old-style SSTV warble made from your picture, on your PC only; switch it off with <span class="ui">SSTV sound when sending and receiving</span> on the SSTV page.</p>
+    <p><strong>To another radio:</strong> type their radio ID or Directory name in <span class="ui">To</span> (leave it blank for the P25X dashboard). The picture goes up your repeater to the P25X gateway, which sends it on through <em>only</em> the repeater that last heard that radio, so the rest of the network stays free. When your part is done Kelly says <span class="ui">Picture at the P25X gateway</span>; you then get a text when it has arrived, or if it couldn't be delivered. The other person has to have keyed up on a repeater recently, so the network knows where they are.</p>
+    <p>To sign your pictures, turn on <span class="ui">Put my callsign on the picture</span>: Kelly writes your callsign in big outlined letters in the corner you choose, with an optional second line (your QTH, &ldquo;73&rdquo;) and the date and time. The preview shows exactly what will be sent. It uses your callsign from <span class="ui">Admin › My station</span> unless you type another.</p>
+    <h3>Receive a picture</h3>
+    <p>Pictures sent to your radio, from the P25X dashboard's SSTV page or from another Kelly, arrive in Kelly by themselves, in Shack mode or CCR. Kelly only takes pictures meant for your radio. It answers the P25X gateway, shows a pop-up, and the picture scans in line by line under <span class="ui">Last received</span> on the SSTV page, with the SSTV warble, then goes into the <span class="ui">Gallery</span>. The same switch turns the sound off for sending and receiving.</p>
+  </section>
+
+  <section id="gps">
+    <h2>GPS, Locate and APRS</h2>
+    <h3>The map</h3>
+    <p>Radios appear on the GPS page as their positions arrive. Click one in the list to fly to it. <span class="ui">Clear map</span> forgets every position and trail.</p>
+    <h3>Locate another radio</h3>
+    <ol class="steps">
+      <li><div>On the GPS page, under <span class="ui">Locate a radio</span>, type the radio's ID or name.</div></li>
+      <li><div>Leave the method on <span class="ui">Auto</span>, or pick <span class="ui">Tait SDM</span> or <span class="ui">LRRP (APX)</span>.</div></li>
+      <li><div>Press <span class="ui">Locate</span>. The P25X gateway asks that radio for its position, and the answer lands on your map, usually within a few seconds.</div></li>
+    </ol>
+    <p>The radio must be switched on and have keyed up on a P25X repeater recently, so the network knows where it is. A Tait radio answers only when its location format is Tait SDM; a Motorola APX answers by LRRP. If it doesn't answer, Kelly shows its last known position if the network has one.</p>
+    <h3>Your own position on APRS</h3>
+    <p>A TM9100 has no GPS of its own. Give it a fixed position under <span class="ui">Fixed position · APRS</span> on the GPS page (type it, use <span class="ui">Pick on map</span>, or this computer's location), add your callsign with an SSID such as <code>VK4XX-15</code>, and press <span class="ui">Beacon now</span>, or tick the timer to repeat it. Kelly sends it over P25 to the P25X Reflector, which puts you on aprs.fi and the network map. Choose a lower precision if you'd rather not show your exact address.</p>
+    <p><span class="ui">My radio's GPS</span> reads the connected radio's own GPS, for radios that have one. Kelly hides it for a radio that doesn't.</p>
+  </section>
+
+  <section id="bulletins">
+    <h2>Bulletins</h2>
+    <p>Bulletins are notices sent from the P25X gateway to every radio at once: a net reminder, a repeater outage, a storm warning. Kelly keeps them on the <span class="ui">Bulletins</span> page with a count on the menu, and the newest one shows on the Dashboard.</p>
+    <p><strong>Urgent</strong> bulletins are marked in red, play the Bulletin alert, and stay on the Dashboard until you open the Bulletins page. Each bulletin has an expiry set by whoever sent it; expired ones hide unless you tick <span class="ui">Show expired</span>.</p>
+    <div class="note"><b>Which home mode receives them</b><p>Shack (Transparent home) and CCR home both receive bulletins. A TM9100 in Command home only shows texts in CCR, so it can miss them; Shack is the way to go at home.</p></div>
+  </section>
+
+  <section id="pbbs">
+    <h2>PBBS: packet mail and bulletins</h2>
+    <p>The <span class="ui">PBBS</span> page is a packet bulletin board, the kind hams have run on 1200-baud packet since the 1980s, carried over P25 instead. The board lives on the P25X gateway. You can send <strong>personal mail</strong> to another callsign, or post a <strong>bulletin</strong> for everyone under a category such as <code>WX</code>, <code>SALE</code>, <code>NEWS</code> or <code>DX</code>.</p>
+    <p>Press <span class="ui">📡 Check mail</span> to dial in. Kelly fetches the list of new messages, then fetches a message's text when you open it, so a quick check only takes a second or two of airtime. <span class="ui">Check every</span> keeps checking on its own while the radio is connected. When mail arrives for you, Kelly shows <strong>YOU HAVE MAIL</strong>, plays the mail fanfare and flashes the PBBS menu badge until you read it.</p>
+    <p><span class="ui">✍️ New message</span> writes one. <span class="ui">Where</span> chooses who sees it. <em>Board only</em> keeps it on P25X. <code>@ WW</code>, <code>AUS</code>, <code>VK</code> or <code>QLD</code> sends it out to the wider packet network through the club's LinBPQ node, and bulletins and mail from that network come back the same way (marked 🌍 packet). The bars under the message show how long it takes on P25 compared with 1200-baud and 300-baud packet.</p>
+    <h3>Sending and getting files</h3>
+    <p>A message can carry one file (a photo, a log, a code plug), up to 64 kB: press <span class="ui">📎 Attach a file</span> in the new-message window. A message with a file shows 📎 in the list; open it and press <span class="ui">📡 Download</span> (pictures show in the reader). Nothing downloads until you ask, and every byte is checked on the way. A file sent <code>@ QLD</code>, <code>AUS</code> or <code>WW</code> goes out to the packet network as <strong>7PLUS</strong>, the format packet BBSes have always used for files, and 7PLUS files from the packet network arrive as one message with the file joined back together. A 20 kB photo takes about a minute on P25.</p>
+    <h3>The terminal</h3>
+    <p>Under the mailbox is a green-screen terminal that works like a real packet BBS. Type <code>H</code> for the commands: <code>L</code> lists your new mail, <code>LB WX</code> lists weather bulletins, <code>R 12</code> reads message 12, <code>SP VK4XYZ</code> starts a personal message (then a title, then your text, ending with <code>/EX</code> on a line by itself), <code>SB SALE</code> posts a bulletin, <code>K 12</code> deletes one of yours, <code>D 12</code> downloads message 12's file, and <code>SYNC</code> checks the gateway. Answers type out at the speed you pick (300, 1200 or 9600 baud), with the old modem sound if <span class="ui">Modem sound</span> is on. Click the screen to skip ahead. These sounds are only on your PC.</p>
+    <div class="note"><b>No Kelly? Any P25 radio can use the board by text</b><p>Text <code>BBS</code> to 5059999 for your mail, <code>BBS R 12</code> to read message 12, <code>BBS SP VK4XYZ your message</code> to send mail, <code>BBS LB</code> for bulletins, or <code>BBS H</code> for help. The gateway also texts you when mail arrives (Kelly in Shack mode gets it straight onto the PBBS page instead). Your callsign comes from your radio ID, so the gateway has to know you, which it does once you've made a call on the network.</p></div>
+  </section>
+
+  <section id="rtty">
+    <h2>RTTY: the teleprinter</h2>
+    <p>The <span class="ui">RTTY</span> page is an old-school radioteletype station. Your overs travel over P25 data to the P25X gateway, which passes them on to every other Kelly listening on the same channel. Each over prints on the page the way a teleprinter printed it: one character at a time at 60 words a minute (45.45 baud), with the two-tone FSK sound and the clatter of the typebars, the carriage return, the line feed and the bell. Pick a paper roll, a green or amber glass terminal, or an ASR-33 under <span class="ui">⚙️ Machine &amp; station</span>. Double-click the paper to finish a line at once.</p>
+    <p><strong>Channels.</strong> <code>#MAIN</code> reaches the whole P25X network (call CQ here). <code>📍LOCAL</code> reaches only the stations on your own repeater. <code>#NET</code> is for nets and <code>#CONTEST</code> for the weekly sprint. <code>📻HF</code> carries real HF RTTY that Kelly stations copy off the air. Press <span class="ui">📡 QRV</span> to listen. The gateway then sends new overs to your radio for two hours after your last over, as long as the radio is parked (Shack mode). Press <span class="ui">QRT</span> to stop.</p>
+    <p><strong>Sending.</strong> Type your over and press <kbd>Enter</kbd> (<kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line). <kbd>F1</kbd>-<kbd>F12</kbd> are the classic macros: CQ, ANS, QSO, BTU, BRAG, 73, QRZ, RYRY, contest exchange, TU, a QSL card and your ID. <kbd>Shift</kbd>+F-key puts a macro into the buffer instead of sending it. Click any callsign on the paper and it becomes <strong>His call</strong>, which the macros fill in, together with your name, QTH, grid and rig from Machine &amp; station. Your own overs print in red, like on a two-colour ribbon. <span class="ui">🔔 Bell</span> rings the bell on every machine copying. When your call prints, your machine rings its bell, even when you're on another page. Overs are up to 300 characters, and the counter shows how long an over takes on P25.</p>
+    <p><strong>QSOs and the logbook.</strong> When you and another station both send an over that names the other's call within 15 minutes, the gateway confirms the QSO. It prints a confirmation, rings the bell three times and logs the QSO for you (✅). You can log other contacts from the His call panel. <span class="ui">📒 Logbook</span> exports ADIF or CSV. P25X QSOs are marked as over P25 data in the export, so don't upload them to LoTW as HF contacts.</p>
+    <p><strong>RTTY Quest</strong> is the game: ranks from Messenger to Golden Teletype, 34 trophies, three missions a day, your records, and the club board of gateway-confirmed points (1 point a QSO, 2 when you're on different repeaters). Every Sunday at 7:30 pm there is the <strong>P25X RTTY Sprint</strong>, an hour on <code>#CONTEST</code> where every QSO counts double. The results go on the channel and to the PBBS. Earn the <strong>P25X RTTY Award</strong> (Bronze, Silver, Gold, Worked All P25X) and print the certificate.</p>
+    <p><strong>Art, tape and news.</strong> <span class="ui">🎨 Art &amp; tape</span> has RTTY art, a banner maker and a printed QSL card. A picture costs about 10 bytes on P25, because every Kelly prints it from its own copy. The paper tape under the printer punches every character as five holes, and you can save it or load a text file into the keyboard. <span class="ui">🗞️ News printer</span> prints PBBS bulletins on the teleprinter, wire-service style. <span class="ui">📟 Copy to PBBS</span> posts the channel's recent overs to the PBBS as an <code>RTTY</code> bulletin, and <span class="ui">📟 Mail</span> in the His call panel writes to the other op.</p>
+    <p><strong>Real HF RTTY.</strong> <span class="ui">📻 HF modem</span> turns your PC's sound card into an RTTY modem for your HF rig. Connect the rig's audio out to the PC and press <span class="ui">Start receiver</span>. Tune until the crossed ellipses stand up straight, or click the mark tone on the waterfall. AFC takes care of the last few hertz. To transmit, connect the PC's audio to the rig with VOX and type in <span class="ui">Send on HF</span>, or tick <span class="ui">Also key my P25X overs on HF</span>. Kelly only makes the audio: the transmitter and the licence are yours. <span class="ui">Share my HF copy</span> puts what you copy on the P25X <code>#HF</code> channel. <span class="ui">📖 Reference</span> has the Baudot chart (the code printing now lights up), the big worldwide RTTY contests, DX-cluster RTTY spots and the RTTY shorthand.</p>
+    <div class="note"><b>No Kelly? Join in by text</b><p>Text <code>RTTY</code> to 5059999 for the last three overs on MAIN, or <code>RTTY CQ CQ DE VK4XYZ</code> to send an over to MAIN.</p></div>
+  </section>
+
+  <section id="share">
+    <h2>P25X Transfer: bigger files overnight</h2>
+    <p>The PBBS carries small attachments; <span class="ui">📦 P25X Transfer</span> (<strong>Kelly Share</strong>) is for files up to <strong>5 MB</strong>: manuals, photos, code plug collections, club documents. P25 packet data moves about 380 bytes a second, so a 5 MB file is close to four hours of air. That's why the files themselves only move <strong>overnight, between 10 pm and 5 am</strong>, a piece at a time and always behind voice. Browsing the library and queuing a file takes a second or two of air, any time.</p>
+    <ul>
+      <li><strong>Getting a file:</strong> press <span class="ui">📡 Get the library</span>, pick a file and press <span class="ui">🌙 Get it tonight</span>. It arrives during the night, every piece checked, and in the morning it's under <span class="ui">📥 My downloads</span> with a <span class="ui">💾 Save</span> button.</li>
+      <li><strong>Sharing a file:</strong> under <span class="ui">📤 Send a file</span> choose it, say what it is, and press <span class="ui">🌙 Send it tonight</span>. The gateway collects it during the night. Your radio rests between pieces so it isn't transmitting flat out for hours, so a big file can take two nights. The gateway's sysop approves it before it appears in everyone's library.</li>
+      <li><strong>Kelly has to be on the radio overnight</strong> (Shack mode). With a Raspberry Pi bridge the Pi does this for you and hands the files to your PC's Kelly in the morning; without one, leave Kelly open.</li>
+      <li>One night carries about 7 MB for the whole network, so when several people queue big files some wait a night or two. Kelly shows the estimate (<em>tonight</em>, <em>tomorrow night</em>…). A file that doesn't finish carries on the next night where it stopped.</li>
+    </ul>
+  </section>
+
+  <section id="web">
+    <h2>Web: web pages as text</h2>
+    <p><span class="ui">🌐 Web</span> reads web pages over P25. The P25X gateway fetches the page and sends only the words (headings, paragraphs, lists and numbered links), one screen at a time: about 1 kB and a few seconds of air a screen. Pictures, scripts and adverts never touch the air. It's slow, and it's meant to be: expect about 6 seconds for a page to open.</p>
+    <ul>
+      <li><strong>Going somewhere:</strong> type a web address (<code>text.npr.org</code>) or some search words in the box and press <span class="ui">🌐 Go</span>. The buttons underneath are pages that work well as text.</li>
+      <li><strong>Links</strong> show as small numbers after the words. Tap one, or type its number in the box.</li>
+      <li><span class="ui">Next screen ›</span> reads on. Screens and pages you've already seen, and <span class="ui">◀</span> Back, come from memory with no air at all.</li>
+      <li><strong>Reader</strong> keeps just the article on news sites. <span class="ui">⟳</span> fetches the screen again, fresh from the site; <span class="ui">☆</span> bookmarks the page.</li>
+      <li>Sites built with JavaScript (the new BOM site, for one) come through as menus only. Use the Weather page for the weather.</li>
+    </ul>
+  </section>
+
+  <section id="mesh">
+    <h2>LoRa Mesh</h2>
+    <p>LoRa nodes are pocket-sized radios that pass short texts and positions to each other over kilometres, every node relaying for the others. The <span class="ui">LoRa Mesh</span> page puts that mesh beside your P25 radio. It works with <strong>Meshtastic</strong> nodes, <strong>MeshCore</strong> companion nodes and <strong>LoRa APRS</strong> trackers, connected by USB cable, Bluetooth, or a Kelly bridge (the club's MeshCore node at the Ipswich gateway is reachable this way: ask for its bridge address). No node? Pick <strong>Demo mesh</strong> to try it, or press <span class="ui">📡 Mesh near me (via P25)</span> and the P25X gateway sends you the Meshtastic nodes and chat around you over packet data.</p>
+    <p>Set your callsign (Admin) and your position (GPS › Fixed position) first: the page shows every node's distance, compass bearing and grid square from them.</p>
+    <h3 id="phone">Connect your phone</h3>
+    <p>With Kelly on a Raspberry Pi at home, your phone can join it for LoRa Mesh by scanning a QR code. The P25 radio stays with the Pi.</p>
+    <ol>
+      <li>On the PC, open <span class="ui">Admin › Connection › 📱 Connect a phone</span> (or <span class="ui">🔳</span> next to the Mesh bridge address on this page) and press <span class="ui">Show QR</span>. The code holds your bridge's password (its token), so only show it to your own phone.</li>
+      <li>On the phone, on your home WiFi, scan it with the camera and open the link. If Kelly is already open on the phone, use its <span class="ui">📷 Scan a Kelly QR</span> button instead (a phone with no link shows it in a banner at the top).</li>
+      <li>The first time, the phone warns about the certificate: choose <strong>Advanced › Proceed</strong>. It's your own Pi's certificate.</li>
+      <li>Kelly opens on LoRa Mesh and goes MESH ONLINE by itself. Messages that arrived while the phone was asleep appear when you come back. Awards earned on either device show up on both, and so do your station details (callsign, radio ID, fixed position, APRS call): change them on either one. Each device still decides for itself whether it beacons to APRS.</li>
+    </ol>
+    <p>If the bridge's token is ever changed, scan a new code: the old link stops working.</p>
+    <h3>Hunting contacts</h3>
+    <p>The <span class="ui">📣 Calling now</span> card collects every station asking for a contact (CQ, QRZ, "anyone about?", or the mesh way: "Hello", "Ping", 👋, "Hi from …"). Each card shows how far and which way, and <span class="ui">🎯 Answer</span> opens a reply ready to send. Turn on <span class="ui">☁️ Callers from the gateway (via P25)</span> and the gateway pushes callers within your radius while your radio is parked. <span class="ui">Who</span> puts licensed hams first (or shows hams only): a ham is a node in licensed (HAM) mode or with a callsign in its name.</p>
+    <h3>Mesh and P25 by callsign</h3>
+    <p>The <span class="ui">P25 bridge</span> card links the two (off until you switch it on; bridged texts carry your callsign). On the mesh, <code>@VK4ZSR hello</code> goes to that ham's P25 radio. On P25, <code>@mesh hello all</code> goes onto the mesh, <code>@mesh @VK4ZGW hello</code> goes to that ham's node, and <code>@re thanks</code> answers the mesh station that last reached you. A ham whose P25 radio Kelly knows shows <strong>📻 also on P25</strong>, with a button to text them on P25; P25 radios with GPS appear on the mesh map.</p>
+    <div class="note"><b>Emergencies</b><p>A mesh message with Meshtastic's alert bell, or the words SOS, MAYDAY or EMERGENCY, sounds a siren, pins a red card at the top of Calling now and goes straight to your bridge's P25 radio with its position, even with the rest of the bridge off. Please only use those words for real emergencies.</p></div>
+    <h3>Packet paths and golden packets</h3>
+    <p>Hover a station on the mesh map and Kelly draws every hop its packets took to reach you, each repeater named with the kilometres of each leg, the way aprs.fi shows an APRS station's path. The <span class="ui">🧠 Packet paths &amp; golden packets</span> card under the map turns the routes into a picture of the network (busy links thicker, backbone repeaters bigger), with <span class="ui">Hide the noise</span> to show only stations far away.</p>
+    <p>Hearing a far station is one-way. A <strong>golden packet</strong> is a packet <em>you</em> sent that reached it, proven by its answer: a delivered message (✓✓), a traceroute, or a route your node learned back. <span class="ui">🎯 Go for gold</span> tries it on the farthest stations: first along the <em>reverse</em> of the path they reached you by, then by path discovery, then by an ordinary message. Each try transmits, so it's one per station every 10 minutes, six an hour, and only when you press the button. The best two-way exchanges are ranked under <span class="ui">🥇 Golden packets</span>, with both routes on the map.</p>
+    <h3>Mesh Quest</h3>
+    <p>A game for the mesh: personal records (longest direct contact, most hops, weakest signal decoded, the longest golden packet…), 45 trophies, levels named after the licence grades (Listener, Foundation, Standard, Advanced, then DX Hunter up to Hall of Fame), three daily missions the whole club shares, and a club leaderboard sent over P25 packet data. Sending earns points for your first 10 messages a day only: the mesh is shared airtime. Switch it off under <span class="ui">Mesh sounds &amp; effects</span>.</p>
+    <p>The full LoRa Mesh guide (<code>lora-mesh-guide.html</code>) has every trophy and mission, worked examples and troubleshooting.</p>
+  </section>
+
+  <section id="igate">
+    <h2>APRS iGate: MeshCore trackers on aprs.fi</h2>
+    <p>The <span class="ui">🗼 APRS iGate</span> page makes your Kelly an iGate. When your MeshCore node hears a node on <strong>your list</strong>, Kelly sends its position to APRS-IS and it appears on aprs.fi under its owner's callsign. It works through the Kelly bridge's internet connection or over P25 via the P25X gateway (<span class="ui">Auto</span> picks). It is receive-only and passes positions only: never messages, and never anything back onto the air.</p>
+    <ol>
+      <li>Connect your MeshCore node on the LoRa Mesh page and leave it connected.</li>
+      <li>On <span class="ui">APRS iGate</span>, check your callsign, and pick an SSID (<code>-10</code> is usual for an iGate). The Kelly bridge works out the APRS-IS passcode itself.</li>
+      <li>Put nodes on <span class="ui">🗼 My list</span>: add one from your MeshCore contacts, take the ones Kelly offers (heard nodes with a callsign in their name), and let the club list add its known users. Edit or remove any of them.</li>
+      <li>For telemetry on aprs.fi (battery, solar, temperature...), press <span class="ui">Telemetry</span> on a row, pick a device type, <span class="ui">Read the node now</span>, adjust the five values and save.</li>
+      <li>Turn on <span class="ui">Dry run</span> and the iGate, and watch the log. When it looks right, turn Dry run off.</li>
+    </ol>
+    <p>To put your own tracker on the map, name it with your callsign (e.g. "VK4XXX Car"): Kelly iGates that hear it offer to add it. Kelly can also beacon your position through your own node, rounded to about 1 km if you prefer.</p>
+    <div class="note"><b>Licensed operators only</b><p>A tracker is gated only under its owner's own amateur callsign. Only add nodes you recognise: anyone can put any callsign in a node name.</p></div>
+    <p>The full guide (<code>igate-guide.html</code>) covers telemetry, buying and setting up a MeshCore GPS tracker, the club list admin's job, and what each counter means.</p>
+  </section>
+
+  <section id="hazards">
+    <h2>SEQ Hazard Watch: fires and roads</h2>
+    <p><span class="ui">🚨 SEQ Hazard Watch</span> shows current bushfires (Queensland Fire Department) and road incidents (QLDTraffic: crashes, hazards, flooding and road closures) around South East Queensland. The P25X gateway fetches both and sends one short answer to your radio, about a kilobyte and a few seconds of air. It asks when you open the page and every 5 minutes while it stays open.</p>
+    <ul>
+      <li><strong>Hazard Map:</strong> tick <span class="ui">🔥 Fires</span> and <span class="ui">🚗 Traffic</span> to choose the layers. Click an incident to open its <strong>P25 dispatch panel</strong>: the nearest P25X repeater and a talkgroup. <span class="ui">▶ Play out the dispatch</span> sends a practice unit driving out on the map.</li>
+      <li><strong>P25 Radio &amp; AVL:</strong> that dispatch as P25 traffic -- grants, short data messages, EN ROUTE / ON SCENE and the unit's positions as it drives in. It is <em>simulated</em> on made-up club talkgroups, for training; nothing real is intercepted. Beside it are the real bytes your radio received.</li>
+      <li><strong>Dispatch Arcade:</strong> an incident pops up -- pick the nearest repeater, the right talkgroup, then Broadcast, inside 15 seconds.</li>
+      <li>A new serious incident flashes a banner with an <span class="ui">ACK</span> button. Markers show the general area only. <strong>For real warnings and travel advice, use QFD's alerts and QLDTraffic.</strong></li>
+    </ul>
+  </section>
+
+  <section id="spacewx">
+    <h2>Space Weather</h2>
+    <p><span class="ui">🌞 Space Weather</span> brings NOAA's solar and geomagnetic readings over P25 (about 350 bytes): the X-ray flare level, the Kp index, solar flux, sunspots, and the R (radio blackout), S (radiation storm) and G (geomagnetic storm) scales with NOAA's 3-day outlook.</p>
+    <ul>
+      <li><strong>Operations Centre:</strong> the sun, the X-ray and Kp charts, and an <em>estimate</em> of HF band conditions, MUF and flare absorption for Brisbane's sun angle -- good for learning, not a forecast.</li>
+      <li><strong>P25 &amp; Propagation:</strong> what space weather is doing to our links now. P25 on VHF and UHF barely notices -- even a big flare costs a fraction of a dB -- but HF, GPS positions and satellites can suffer. <span class="ui">🎧 Listen</span> plays six seconds of what a band might sound like.</li>
+      <li><strong>Blackout Arcade &amp; Solar School:</strong> a quick quiz drill, a Kp forecast you make for the next 3 hours (scored later against NOAA's real Kp), and short lessons on flares, Kp, the ionosphere and why P25 shrugs it off.</li>
+    </ul>
+  </section>
+
+  <section id="iss">
+    <h2>ISS Tracker &amp; Auto-Tuner</h2>
+    <p><span class="ui">🛰️ ISS Tracker</span> predicts when the International Space Station passes over you and shows it live: the map and footprint, its path across your sky, and the Doppler shift on 145.800 MHz (about ±3.4 kHz). It uses your position from GPS › Fixed position or the radio's GPS (or the browser, or one you type in). Press <span class="ui">🔄 Fresh elements</span> once with the radio connected; after that Kelly refreshes the orbit data itself, at most once a day.</p>
+    <p><strong>Auto-tune</strong> retunes your radio for each pass and puts it back afterwards. It is <strong>receive only -- it never transmits</strong>. Two ways:</p>
+    <ul>
+      <li><strong>CCR</strong> (best): Kelly puts the radio in CCR mode and follows the Doppler, a few hundred hertz at a time. Needs a VHF Tait with CCR enabled in its programming. Leaving CCR at the end reboots the radio (about 10 seconds).</li>
+      <li><strong>Channel bank:</strong> program five receive-only channels (the Help tab has the table) and Kelly steps through them as the Doppler moves.</li>
+    </ul>
+    <p>Set it up in this order: tick <span class="ui">Dry run</span> and press <span class="ui">🔧 Bench test pass</span> -- the command log shows what would be sent. Then untick Dry run and run a bench test pass with the radio on the desk. Then tick <span class="ui">Armed</span>. Kelly warns you 5 minutes before a pass, retunes at the start (AOS) and puts your channel, volume and squelch back 15 seconds after the end (LOS), on whatever page you're on. <span class="ui">⏹ Cancel &amp; restore now</span> puts it back straight away. The Help tab lists the ISS frequencies: voice downlink 145.800 MHz, voice uplink 144.490 MHz in Australia, APRS 145.825 MHz.</p>
+  </section>
+
+  <section id="dnp3">
+    <h2>DNP3 Demo and DNP3 over P25</h2>
+    <p><span class="ui">🔌 DNP3 Demo</span> teaches DNP3, the SCADA protocol power utilities use, with a simulated 33/11 kV substation. Choose how it runs at the top of the page:</p>
+    <ul>
+      <li><strong>In this page:</strong> the substation, its outstation (RTU) and a SCADA master all in Kelly, joined by a simulated link you can slow down or make lossy. Nothing goes on air.</li>
+      <li><strong>Over P25 RF -- this Kelly is the outstation:</strong> needs a TM9100 parked in Transparent (Admin › Home mode). Your substation answers DNP3 over the air. The P25X dashboard's DNP3 MASTER page can poll and switch it: set its site to your radio's repeater and its outstation address to the one on this page; its breaker trip and close switch feeder F1.</li>
+      <li><strong>Over P25 RF -- this Kelly is the master:</strong> polls and controls an outstation elsewhere over the air. Another Kelly as the outstation needs the gateway to pass frames between the two radios, which is still to come.</li>
+    </ul>
+    <p>Every frame can be read byte by byte in the Packet Inspector, which also shows which objects carry a timestamp, how a master sets an outstation's clock, a plain-English line for each frame and a sequence diagram of the last few.</p>
+
+    <h3 id="wivenhoe">The Wivenhoe pumped-storage trainer</h3>
+    <p>Pick <span class="ui">💧 Wivenhoe pumped storage</span> under <span class="ui">Plant</span> at the top of the DNP3 Demo page (or press <span class="ui">Run Wivenhoe in the SCADA trainer</span> on the QLD Grid Power map's Hydro box). It is a <strong>training simulation</strong> inspired by Wivenhoe Power Station near Brisbane. It isn't connected to the real station or its operator, and the figures are approximate.</p>
+    <p>Water is pumped up from Lake Wivenhoe to Splityard Creek Dam on the hill when power is cheap. When Queensland needs power, it runs back down through two reversible pump-turbines in an underground cavern. The picture shows it all moving: levels rise and fall, water flows along the tunnel, the turbines spin (backwards when pumping), the breakers swing open and shut, and the line to the grid glows green when exporting and amber when importing.</p>
+    <ul>
+      <li><strong>Role:</strong> <em>Both</em> puts the master and the outstation (RTU) in your Kelly, talking over a simulated P25 link. Start with this. <em>Master station</em> makes you the control room: the station is "far away" and you only see what DNP3 tells you. <em>Outstation</em> makes you the RTU at the station: a stand-in control room polls you, and your buttons are the local panel.</li>
+      <li><strong>Screen:</strong> in Both, <em>SCADA</em> shows what the master knows and <em>Plant</em> shows the truth. Switch between them while the link is bad.</li>
+      <li><strong>Time:</strong> <em>10 minute demo</em> (4 min pumping, 4 generating, 2 idle) and <em>30 minute demo</em> run the station for you, sending their commands over DNP3 so you can watch them. <em>Real time</em> follows the station's day: pumping overnight, generating into the evening peak. In <em>Manual</em> you drive, and you set the time speed.</li>
+      <li><strong>Interlocks:</strong> no pumping when the upper reservoir is full, no generating when it's low, no running with a breaker open, and no going from pumping straight to generating. The emergency stop trips both units and opens the generator breaker until it's reset. When a command is refused, the reason is shown.</li>
+      <li><strong>P25 link:</strong> sliders for latency, packet loss and signal strength (RSSI), plus live packets and bytes per second, how busy the channel is, retries and round-trip time. <span class="ui">✂️ Cut the link</span> to see what happens: the master's screen goes stale, the RTU flags BI0012 "P25 Link Healthy" off, and changes wait in the RTU until the link is back.</li>
+      <li><strong>Sound</strong> starts off. Press <span class="ui">🔇 Sound off</span> to turn it on: breaker clunks, the alarm horn (stopped by Acknowledge) and a radio chirp for each packet. The turbine hum and water rush are a separate tick box.</li>
+      <li><strong>Challenges:</strong> Evening peak (get 400 MW on the grid in 90 s), Low reservoir (deliver the energy without the LOW alarm) and Bad radio day (keep SCADA working with 30 % packet loss). Your best results are kept.</li>
+    </ul>
+    <p><strong>On a real P25 link:</strong> set <span class="ui">Link</span> to <span class="ui">📻 Real P25 radio</span> with a TM9100 parked in Transparent (Admin › Home mode). As the <em>Outstation</em>, any DNP3 master on the P25X network can poll your station, including the dashboard's DNP3 MASTER page; it sees the binary inputs, its breaker CLOSE starts Unit 1 pumping (BO2001), and its TRIP is refused as a format error. As the <em>Master station</em>, your radio transmits a poll every 15 s or more, and you're asked first. Another Kelly as the outstation needs the gateway to pass frames between the two radios, which is still to come. <em>Both</em> isn't offered on air.</p>
+
+    <h3 id="mackaygt">The Mackay gas turbine trainer</h3>
+    <p>Pick <span class="ui">⛽ Mackay gas turbine</span> under <span class="ui">Plant</span> at the top of the DNP3 Demo page (or press <span class="ui">Run a gas turbine peaker in the SCADA trainer</span> on the QLD Grid Power map's Gas box). It is a <strong>training simulation</strong> inspired by the former Mackay Gas Turbine (decommissioned 2021). It isn't affiliated with Stanwell, and the engine and fuel figures are approximate, for education.</p>
+    <p>One Rolls-Royce Olympus, an engine from the jet that flew the Vulcan bomber, drives a 34 MW generator on diesel. The cutaway shows it all working: the compressor and turbine blades spin with N1, N2 and the power turbine; the eight combustor cans light one after another; fuel runs from the tanks to the engine; the exhaust glows harder with load; the synchroscope needle turns towards 12 o'clock; and the line to the Mackay network glows while the unit is exporting. Under the picture are the start progress strip and the fuel figures: litres a minute, litres burned this run, what that costs, the CO2, and how fast it would fill a car, a tanker or a swimming pool.</p>
+    <ul>
+      <li><strong>Role and link</strong> work as on the Wivenhoe trainer. <em>Both</em> (the default) puts the master and the RTU in your Kelly over a simulated P25 link. <em>Master station</em> makes you the control room, seeing only what DNP3 tells you. <em>Outstation</em> makes you the RTU at the station, with your buttons as the local panel.</li>
+      <li><strong>Time:</strong> <em>Real time</em>, <em>×10</em> and <em>×60</em> leave the driving to you. <em>Demo cycle</em> runs it for you, sending every control over DNP3: a cold start to full load, a normal stop, a blackout with a black start, the town running on an island, the network coming back, a trip, then a reset and a restart. The start itself always runs at real speed (about 80 seconds from cold to on load), so you can watch it. The time speed moves the fuel, the tanks, the temperatures and the counters.</li>
+      <li><strong>Starting:</strong> press <span class="ui">▶ Start</span> (BO2001). The strip shows each step: pre-start checks, lube oil, crank and purge, light-off, accelerating to idle, the power turbine coming up to 3000 rpm, excitation, synchronising, then the load ramp to the MW setpoint (AO3001). If the unit can't start, the reason is shown in plain words, with the permissives list ticked and crossed.</li>
+      <li><strong>Trips:</strong> overspeed, high exhaust temperature or spread, high vibration, low lube oil pressure, flame out, fire (with the CO2 discharge), fuel low-low, generator protection (reverse power, over- and under-frequency) and the emergency stop. Each trip shows its <em>first-up</em> alarm. Wait for the engine to run down, then press <span class="ui">↺ Reset trips</span> (BO2004). The <span class="ui">Instructor</span> card makes these faults happen at the plant.</li>
+      <li><strong>Black start:</strong> in a blackout the station bus is dead and the unit can only start from its battery in BLACK START mode (BO2007). It closes onto the dead bus and holds 50 Hz on its own. Then close the line breaker (BO2006) to bring the town back. A town bigger than 34 MW pulls the frequency down until the unit trips.</li>
+      <li><strong>⛽ Fuel + the town:</strong> set how many homes and the average load per home to see the megawatts, the litres an hour and how long the storage tank would last. The fuel figures (fuel use per kWh, density, price, CO2 per litre, tanker size, tank size) can all be changed. They are estimates.</li>
+      <li><strong>Sound</strong> starts off. Turn it on with <span class="ui">🔇 Sound off</span> and the engine is loud: the starter whine, the light-off whump, the jet roar rising with the spools, the generator hum, breaker clunks, synchroscope ticks getting faster near sync, the alarm horn (Acknowledge stops it) and a radio chirp for each packet. <span class="ui">engine sound</span> switches the continuous sounds on and off by themselves. <span class="ui">heat shimmer</span> over the stack is off unless you tick it, and your device's reduced-motion setting stops the flicker, smoke and shimmer.</li>
+      <li><strong>Challenges:</strong> <em>Blackout!</em> (black start the unit and light the town), <em>Peak demand</em> (cold to full load as fast as you can without a trip), <em>Fuel watch</em> (follow the evening peak with about 44,000 L left) and <em>Bad radio day</em> (start it and load it from the control room with 30 % packet loss). Results show the time, the litres burned and any trips, and your best results are kept.</li>
+    </ul>
+    <p><strong>On a real P25 link:</strong> set <span class="ui">Link</span> to <span class="ui">📻 Real P25 radio</span> with a TM9100 parked in Transparent (Admin › Home mode). As the <em>Outstation</em>, any DNP3 master on the P25X network can poll the station. The dashboard's DNP3 MASTER page sees BI 0 as BI0001 Unit Available, and its BO 0 is BO2001 Start Unit (CLOSE starts it). On air the master polls no faster than every 15 s for events and every 120 s for a full poll. As the <em>Master station</em>, the outstation has to be another Kelly running this station, which needs the gateway to pass frames between radios (not built yet). The challenges and <em>Both</em> need the simulated link.</p>
+
+    <h3 id="learn-dnp3-gt">Learn DNP3 with the gas turbine</h3>
+    <ol>
+      <li><strong>Start it over DNP3.</strong> On the Operator tab, press Start. Watch the control: SELECT BO2001 (the RTU checks the start permissives and arms), then OPERATE, then done. <span class="ui">What just happened?</span> says it in plain English, frame by frame.</li>
+      <li><strong>Get refused.</strong> Press E-STOP, then Start. The SELECT comes back BLOCKED with the reason, "Can't start: the emergency stop is active". Switch to Local (BO2008 TRIP) and every control comes back LOCAL, except BO2008 itself, which is how you switch back to Remote.</li>
+      <li><strong>Setpoints are analog outputs.</strong> Send AO3001 = 34 MW and look at it in the inspector: group 41, a SELECT and OPERATE of its own. Try 40 MW: OUT OF RANGE.</li>
+      <li><strong>Deadbands.</strong> As the unit loads, the fuel flow (AI1019) and MW (AI1001) only make class 2 events when they move by more than a deadband, or the radio channel would be full of them. The Points tab shows each point's class and deadband.</li>
+      <li><strong>The first-up comes from timestamps.</strong> Cut the link, then use the Instructor card to trip the unit (hot EGT, say), and press E-STOP after it. Restore the link. The trip events arrive late, each stamped with the RTU's own clock, and SCADA puts the right one first: that's why the RTU stamps every event.</li>
+      <li><strong>What SCADA can't see.</strong> Switch <span class="ui">Screen</span> to SCADA. The start step is worked out from a handful of points, the eight flames become one "Flame Detected" point, the eight thermocouples become an average and a spread, and the synchroscope isn't there at all. SCADA only knows what it has points for.</li>
+      <li><strong>Counters</strong> (class 3): C4002 Fuel Burned Litres sends an event every 1,000 L. On a slow channel you choose how much detail is worth the airtime.</li>
+    </ol>
+
+    <h3 id="learn-dnp3">Learn DNP3 with this demo</h3>
+    <ol>
+      <li><strong>Polls.</strong> Open <span class="ui">Packet inspector</span>. Every few seconds the master asks for <em>class 1, 2 and 3 events</em>: only what has changed, which keeps polls small on a slow radio channel. About once a minute it asks for <em>class 0</em> as well: every value, an <em>integrity poll</em>. Click a frame to read it in plain English, then byte by byte.</li>
+      <li><strong>Events and confirms.</strong> Start a unit. A binary input event (class 1) says Unit 1 started pumping, and analog events (class 2) carry the MW and levels once they move past a deadband. The reply has CON set: the master must CONFIRM before the RTU deletes those events.</li>
+      <li><strong>Select before operate.</strong> On the Operator tab, press a button and watch the steps: SELECT (the RTU checks the interlocks and arms), then OPERATE (same object, next sequence number), then done. Try pumping with the upper reservoir full: the SELECT comes back BLOCKED, with the reason. In Settings, switch to direct operate to compare.</li>
+      <li><strong>A bad link.</strong> Raise the packet loss to 30 % and watch retries and timeouts. Drop the RSSI below -105 dBm. Then cut the link for a minute and restore it: the buffered events arrive with the RTU's own timestamps, BI0012 going off then on again among them.</li>
+      <li><strong>Buffers.</strong> In Settings, shrink the class 1 buffer to 3, cut the link and switch things. When it fills, the oldest events are lost and IIN2.3 EVENT BUFFER OVERFLOW tells the master so.</li>
+      <li><strong>The sequence diagram</strong> shows the half-duplex channel: one frame at a time, each taking over half a second on air.</li>
+    </ol>
+  </section>
+
+  <section id="sounds">
+    <h2>Alerts and sounds</h2>
+    <p><span class="ui">Admin › Alert sounds</span> sets a sound for each kind of alert: text message, preset message, status update, bulletin, call alert and emergency. Choose one of Kelly's built-in sounds, your own sound file (up to 512 kB; a short WAV is best), the synthesised tone, or off. The ▶ button plays it. The volume slider sets them all.</p>
+    <p><strong>Packet sounds</strong> (<span class="ui">Admin › Packet sounds</span>) give a short data chirp whenever your radio sends or receives a packet: a rising chirp ending in one tick for a packet going out, a falling chirp ending in a two-note chime for one coming in. Each packet's own data shapes its chirp, so no two sound quite alike. They're on unless you untick <span class="ui">Packet data sounds</span>; the ▶ buttons play each one. A picture transfer plays its own picture warble instead of a stream of chirps. These sounds are only on your PC; nothing extra goes over the air.</p>
+    <p>If a sound file won't play for any reason, Kelly plays the tone instead, so an alert is never silent. Turn everything off with <span class="ui">Alert sounds</span> under <span class="ui">Look &amp; sound</span>.</p>
+  </section>
+
+  <section id="config">
+    <h2>Saving your set-up</h2>
+    <p><span class="ui">Admin › Configuration file</span> saves your set-up as a small <code>.xml</code> file and loads it back.</p>
+    <div class="table"><table>
+      <thead><tr><th>In the file</th><th>Not in the file</th></tr></thead>
+      <tbody>
+        <tr><td style="white-space:normal;font:inherit">Your settings (connection, radio ID, callsign, home mode, personality, function keys, sounds, APRS position and callsign), the status and preset labels, your radio list, talkgroups and P25X aliases.</td><td>Calls, messages, positions, bulletins, look-up caches and your own sound files (your sound choice is kept; a missing file plays the tone).</td></tr>
+      </tbody>
+    </table></div>
+    <ul>
+      <li><strong>Save config (.xml)</strong> downloads <code>kelly-config-&lt;callsign&gt;-&lt;date&gt;.xml</code>. Keep it somewhere safe.</li>
+      <li><strong>Load config</strong> shows what's in the file before it changes anything. Settings and labels are replaced; your radio list, talkgroups and aliases are added to, so nothing Kelly has learned is lost. Kelly then reloads.</li>
+      <li><strong>Full backup</strong> and <strong>Restore backup</strong> save and restore everything, logs included, as a larger file.</li>
+    </ul>
+    <div class="note warn"><b>Keep it to yourself</b><p>If you've entered an APRS-IS passcode, it's in the file. Don't post your configuration file publicly.</p></div>
+  </section>
+
+  <section id="updates">
+    <h2>Updates and expiry</h2>
+    <p>Each version of Kelly Page works until a set date. This one works until the end of <strong>30 April 2027</strong>. From 14 days before, Kelly reminds you when it starts. After the date it shows <em>This version of Kelly Page has expired</em> and won't connect to the radio; the <strong>Save my config</strong> button still works, so you can carry your set-up across.</p>
+    <h3>Moving to a new version</h3>
+    <ol class="steps">
+      <li><div>In the old version, <span class="ui">Admin › Save config (.xml)</span>.</div></li>
+      <li><div>Unzip the new version, replacing the old folder or into a new one.</div></li>
+      <li><div>Open it, press <kbd>Ctrl</kbd>+<kbd>F5</kbd> once so the browser loads the new files, then <span class="ui">Admin › Load config</span> and pick your file.</div></li>
+    </ol>
+  </section>
+
+  <section id="trouble">
+    <h2>Troubleshooting</h2>
+    <div class="table"><table>
+      <thead><tr><th>You see</th><th>Try this</th></tr></thead>
+      <tbody>
+        <tr><td style="white-space:normal">"Serial port busy"</td><td>Another program has the COM port: the programming application, a terminal program, the IP bridge, or Kelly in another tab. Close it, then connect again.</td></tr>
+        <tr><td style="white-space:normal">The COM port isn't in the list</td><td>Check the lead is plugged in and Windows has a driver for it (Device Manager › Ports). Use Chrome or Edge.</td></tr>
+        <tr><td style="white-space:normal">Connected but "No CCDI reply"</td><td>Check the radio is on and set to 19200 baud. Kelly tries to wake a radio left in Transparent mode; if that fails, switch the radio off and on.</td></tr>
+        <tr><td style="white-space:normal">Statuses never show ✓✓, or Kelly says "Staying in Command mode"</td><td>Kelly hasn't parked the radio, so the P25X gateway doesn't know it's a Kelly radio. Check <strong>Ignore Escape Sequence In T-Mode</strong> is off in the code plug (see <a href="#radio">Setting up the radio</a>), reconnect, and answer <strong>Yes</strong> when Kelly asks to park the radio. The Event log should then show the gateway's welcome with your radio ID.</td></tr>
+        <tr><td style="white-space:normal">Texts from others don't appear</td><td>Use Shack mode (<span class="ui">Admin › Personality</span>). In Command home a TM9100 only shows received texts in CCR.</td></tr>
+        <tr><td style="white-space:normal">No sound when a message arrives</td><td>Browsers keep a page quiet until you click on it. If Kelly was opened already connected (for example by <code>start-kelly.bat</code>), click anywhere on Kelly once. An orange bar says so when a sound was held back, and the missed alert plays when you click. Also check <span class="ui">Admin › Alert sounds</span> and your PC's volume.</td></tr>
+        <tr><td style="white-space:normal">The map is grey or blank</td><td>The map pictures need internet. After an update, press <kbd>Ctrl</kbd>+<kbd>F5</kbd>.</td></tr>
+        <tr><td style="white-space:normal">Locate says "can't poll"</td><td>The radio hasn't keyed up on a P25X repeater recently, or the network doesn't know its type yet. Ask the operator to key up once, then try again.</td></tr>
+        <tr><td style="white-space:normal">Locate says "no reply"</td><td>The radio may be off, out of range, or (a Tait) not set to the Tait SDM location format.</td></tr>
+        <tr><td style="white-space:normal">"This version has expired"</td><td>Save your config, get the latest version, load your config into it.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section id="onair">
+    <h2>On air</h2>
+    <ul>
+      <li>Everything Kelly sends goes over the air under your licence. Identify as usual; texts and data are plain and unencrypted, as amateur rules require.</li>
+      <li>P25X repeaters are shared. Statuses and presets are tiny; pictures and repeated position beacons take the channel for longer, so use them with care.</li>
+      <li>Kelly releases a transmit it started after the time set in <span class="ui">Admin</span> (90 seconds by default), because a transmit started over the data port doesn't stop on the radio's own timer.</li>
+    </ul>
+  </section>
+
+  </main>
+
+  <footer>Kelly Page 0.4.37 · works until 30 April 2027 · for Tait TM9100, TM9400 and TP9400 radios on the P25X network</footer>
+</div>
+</body>
+</html>

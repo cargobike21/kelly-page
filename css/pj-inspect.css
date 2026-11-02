@@ -1,0 +1,91 @@
+/* Kelly Page -- LoRa Mesh > Packet Journey: the Inspect card (js/pj-inspect.js, 2026-10-24). Byte blocks reuse
+ * css/mcanalyser.css .mca-blk / .mca-g-<group>; the hex dump tints below follow the same colours. Nothing animates. */
+.pj-insp { display: grid; gap: 10px; min-width: 0; }
+.pj-insp-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pj-insp-h h2 { margin: 0; flex: 1; }
+.pj-insp-count { font: 600 11px var(--mono); color: var(--dim); text-transform: uppercase; }
+.pj-insp-pause { padding: 4px 10px; font-size: 13px; }
+.pj-insp-filter { display: flex; align-items: center; gap: 6px; }
+.pj-insp-qr { min-width: 32px; font-size: 16px; line-height: 1; }
+.pj-insp-chip { display: inline-flex; align-items: center; gap: 6px; text-transform: none; }
+.pj-insp-chip b { color: var(--cyan); }
+.pj-insp-x { all: unset; cursor: pointer; padding: 0 4px; color: var(--dim); font-size: 13px; }
+.pj-insp-x:hover, .pj-insp-x:focus-visible { color: var(--red); }
+.pj-insp-empty { padding: 12px; color: var(--dim); font-size: 14px; }
+
+/* live list */
+.pj-insp-list { max-height: 26vh; min-height: 90px; overflow: auto; border: 1px solid var(--line); border-radius: 12px; }
+.pj-insp-row { all: unset; box-sizing: border-box; display: grid; grid-template-columns: 10px 62px minmax(0, 1fr) 34px 34px; gap: 6px; align-items: center;
+  width: 100%; padding: 4px 8px; border-top: 1px solid var(--line); cursor: pointer; font-size: 12px; }
+.pj-insp-row:first-child { border-top: 0; }
+.pj-insp-row:hover { background: rgba(0, 229, 255, .06); }
+.pj-insp-row:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
+.pj-insp-row.on { background: rgba(0, 229, 255, .16); }
+.pj-insp-dot { width: 9px; height: 9px; border-radius: 50%; display: block; }
+.pj-insp-t { font: 11px var(--mono); color: var(--dim); }
+.pj-insp-s { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; line-height: 1.25; color: var(--text); }   /* the side column is narrow: two lines, then … */
+.pj-insp-s em { font: 700 9px var(--mono); font-style: normal; color: var(--amber); text-transform: uppercase; }
+.pj-insp-n { font: 11px var(--mono); color: var(--dim); text-align: right; }
+
+/* breakdown */
+.pj-insp-card { display: grid; gap: 10px; }
+.pj-insp-sum { font-size: 14px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pj-insp-kind { font: 700 11px var(--mono); text-transform: uppercase; padding: 2px 8px; border: 1px solid; border-radius: 999px; }
+.pj-insp-card p { margin: 0; line-height: 1.35; }
+.pj-insp-line { font: 600 13px var(--mono); overflow-wrap: anywhere; }
+.pj-insp-msg { font-size: 15px; color: var(--lime); overflow-wrap: anywhere; }
+.pj-insp-lock { font-size: 13px; color: #c9a8ff; }
+.pj-insp-gps { font-size: 13px; color: var(--cyan); }
+.pj-insp-bad { font-size: 13px; color: var(--red); }
+.pj-insp-rx { font-size: 12px; }
+.pj-insp-sec { border-top: 1px solid var(--line); padding-top: 8px; display: grid; gap: 6px; }
+.pj-insp-sec h4 { margin: 0; font: 700 13px var(--ui); color: var(--cyan); text-transform: uppercase; letter-spacing: .05em; }
+.pj-insp-sec h4 code { color: var(--text); text-transform: none; }
+.pj-insp-journey, .pj-insp-chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.pj-insp-jn { font-size: 12px; padding: 2px 8px; border-radius: 8px; background: var(--raised); border: 1px solid var(--line2); }
+.pj-insp-jn.from { border-color: var(--cyan); }
+.pj-insp-jn.me { border-color: var(--lime); color: var(--lime); }
+.pj-insp-jn.ahead { border-style: dashed; color: var(--dim); }
+.pj-insp-arrow { color: var(--mute); font-size: 12px; }
+.pj-insp-ahead { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; font-size: 12px; color: var(--dim); }
+.pj-insp-chip.hash, .pj-insp-chip.snr { font-size: 12px; padding: 2px 8px; border-radius: 8px; background: rgba(255, 209, 102, .12); border: 1px solid rgba(255, 209, 102, .45); }
+.pj-insp-chip.hash code { font: 700 12px var(--mono); color: #ffd166; }
+.pj-insp-chip.snr { background: rgba(249, 168, 212, .12); border-color: rgba(249, 168, 212, .45); }
+
+/* bits */
+.pj-insp-bits { display: flex; gap: 3px; }
+.pj-insp-bit { width: 26px; height: 28px; display: grid; place-items: center; border-radius: 6px; font: 700 14px var(--mono); color: #08101f; }
+.pj-insp-bit.v, .pj-insp-sw.v { background: #a78bfa; }
+.pj-insp-bit.ty, .pj-insp-sw.ty { background: #7c5cff; color: #fff; }
+.pj-insp-bit.ro, .pj-insp-sw.ro { background: #00e5ff; }
+.pj-insp-bit.hs, .pj-insp-sw.hs { background: #ffd166; }
+.pj-insp-bit.hc, .pj-insp-sw.hc { background: #ffb020; }
+.pj-insp-bit.v + .pj-insp-bit.ty, .pj-insp-bit.ty + .pj-insp-bit.ro, .pj-insp-bit.hs + .pj-insp-bit.hc { margin-left: 6px; }
+.pj-insp-bitkey { display: grid; gap: 3px; font-size: 13px; }
+.pj-insp-bitkey code { font: 600 12px var(--mono); color: var(--text); }
+.pj-insp-sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+
+/* field blocks (mcanalyser look, wrapping to fit the side card) */
+.pj-insp-strip { display: flex; flex-wrap: wrap; gap: 3px; }
+.mca-blk.pj-insp-blk { min-width: 58px; flex: 0 1 auto; padding: 4px 6px; }
+.pj-insp-explain { border: 1px solid var(--line2); border-radius: 10px; padding: 8px 10px; background: var(--raised); font-size: 13px; }
+.pj-insp-explain h4 { margin: 0 0 2px; font: 700 13px var(--ui); color: var(--cyan); }
+.pj-insp-explain h4 small { color: var(--dim); font: 600 11px var(--mono); }
+.pj-insp-explain .val { font: 600 12px var(--mono); overflow-wrap: anywhere; }
+.pj-insp-explain p { margin: 4px 0 0; line-height: 1.4; }
+.pj-insp-explain.warn { border-color: var(--red); }
+
+/* hex dump */
+.pj-insp-dump { font: 12px var(--mono); overflow-x: auto; }
+.pj-insp-hl { display: flex; gap: 2px; white-space: nowrap; }
+.pj-insp-off { color: var(--mute); width: 30px; flex: none; }
+.pj-insp-b { padding: 0 2px; border-radius: 3px; cursor: pointer; color: var(--text); }
+.pj-insp-b.on { outline: 2px solid #fff; outline-offset: -1px; }
+.pj-insp-t-header { background: rgba(124, 92, 255, .45); } .pj-insp-t-transport { background: rgba(167, 139, 250, .4); }
+.pj-insp-t-pathlen { background: rgba(255, 176, 32, .45); } .pj-insp-t-path { background: rgba(255, 209, 102, .35); }
+.pj-insp-t-addr { background: rgba(57, 255, 136, .3); } .pj-insp-t-key { background: rgba(0, 229, 255, .28); }
+.pj-insp-t-time { background: rgba(125, 211, 252, .32); } .pj-insp-t-sig { background: rgba(148, 163, 184, .25); }
+.pj-insp-t-flags { background: rgba(244, 114, 182, .38); } .pj-insp-t-loc { background: rgba(52, 211, 153, .35); }
+.pj-insp-t-name { background: rgba(253, 230, 138, .3); } .pj-insp-t-mac { background: rgba(251, 146, 60, .4); }
+.pj-insp-t-cipher { background: rgba(59, 74, 107, .7); } .pj-insp-t-plain { background: rgba(163, 230, 53, .3); }
+.pj-insp-t-data { background: rgba(203, 213, 225, .2); } .pj-insp-t-snr { background: rgba(249, 168, 212, .35); }

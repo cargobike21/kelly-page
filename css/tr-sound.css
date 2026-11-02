@@ -1,0 +1,8 @@
+/* Kelly Page -- Trace Route: tr-sound controls (speaker toggle + volume) inline in the header bar (#tr-sound) */
+.tr-snd-row { display: flex; align-items: center; gap: 8px; }
+.tr-snd-tog { white-space: nowrap; }
+.tr-snd-tog.on { border-color: var(--tr-out, #7df9ff); color: var(--tr-out, #7df9ff); box-shadow: 0 0 10px rgba(125, 249, 255, .25); }
+.tr-snd-tog:focus-visible, .tr-snd-vol:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.tr-snd-vol { width: 110px; accent-color: var(--tr-out, #7df9ff); }
+.tr-snd-vol:disabled { opacity: .4; }
+@media (max-width: 560px) { .tr-snd-vol { width: 84px; } .tr-snd-lbl { display: none; } }
