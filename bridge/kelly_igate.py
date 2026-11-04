@@ -2,9 +2,14 @@
 
 A browser can't open TCP, so the page's APRS iGate (js/igateui.js) decides WHAT to gate -- whitelist, valid position,
 dedup, per-station interval (js/igate.js) -- and this keeps ONE persistent, receive-only APRS-IS connection and sends
-it. It re-checks every field and keeps its own global token bucket, so a page bug can't flood APRS-IS.
+it. It re-checks every field and keeps its own global token bucket (1 line per second, burst 10) as an abuse / runaway-bug guard.
 
   GET  /api/igate          status: state, server, verified, uptime, sent / dropped, retry, the last raw lines
+  GET  /api/igate/rx?hours=24&src=CALL-SSID&format=json|kml
+                           the received-packet log: every line the page offered in the last 24 h with its EXACT position
+                           (before the privacy zone) and what happened to it -- sent, held, offline (no internet)...
+                           Kept on disk (KELLY_IGATE_RX_FILE, mode 600), so an internet outage or a reload loses nothing;
+                           nothing is ever re-sent late (APRS-IS would show an old position as current)
   POST /api/igate/config   {on, call: CALL-SSID, server, port, filter, dry, everyS, burst, vers, status, statusMin}
   POST /api/igate/send     {lines: [{src: CALL-SSID, lat, lon, sym, comment, amb} | {src, body: telemetry}
                                     | {mprs: hex, rxAt: ms, record?: {sender, id}}, ...]} -> {results: [...], status}
@@ -38,6 +43,8 @@ import re
 import os
 import socket
 import time
+
+from urllib.parse import parse_qs
 
 import meshprs
 
@@ -327,6 +334,146 @@ class Backoff:
         self.n = 0
 
 
+RX_FILE = os.environ.get("KELLY_IGATE_RX_FILE") or "~/.kelly-igate-rx.jsonl"
+RX_KEEP_S = 24 * 3600
+RX_MAX = 5000                              # ~1 MB at most; a busy iGate keeps its newest 5000 lines
+
+
+class RxLog:
+    """The received-packet log (GET /api/igate/rx): one JSON line per offered packet, the last RX_KEEP_S, on disk so it
+    survives an internet outage, a page reload and a bridge restart. Exact positions (the owner's own included), so the
+    file is mode 600 and the endpoint wants the bridge token like the rest of /api/igate."""
+
+    def __init__(self, path=RX_FILE, clock=time.time):
+        self.path, self.clock, self.recs = os.path.expanduser(path), clock, []
+        try:
+            with open(self.path, encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        r = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(r, dict) and isinstance(r.get("t"), (int, float)):
+                        self.recs.append(r)
+        except OSError:
+            pass
+        if self.recs:
+            self._prune(rewrite=True)
+
+    def _prune(self, rewrite=False):
+        cut = self.clock() - RX_KEEP_S
+        n = len(self.recs)
+        self.recs = [r for r in self.recs if r["t"] >= cut][-RX_MAX:]
+        if rewrite or len(self.recs) != n:
+            self._rewrite()
+
+    def _rewrite(self):
+        try:
+            tmp = self.path + ".tmp"
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.writelines(json.dumps(r, separators=(",", ":")) + "\n" for r in self.recs)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
+
+    def add(self, rec: dict):
+        rec = {"t": round(rec.get("t") or self.clock(), 1), **{k: v for k, v in rec.items() if k != "t" and v is not None}}
+        self.recs.append(rec)
+        if self.recs[0]["t"] < self.clock() - RX_KEEP_S - 600 or len(self.recs) > RX_MAX + 500:
+            self._prune()                       # at most every ~10 min / 500 lines: one whole-file rewrite
+            return
+        try:
+            fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            with os.fdopen(fd, "a", encoding="utf-8") as f:
+                f.write(json.dumps(rec, separators=(",", ":")) + "\n")
+        except OSError:
+            pass
+
+    def query(self, hours=24.0, src=None) -> list:
+        cut = self.clock() - max(0.0, min(24.0, float(hours))) * 3600
+        return [r for r in self.recs if r["t"] >= cut and (not src or r.get("src") == src)]
+
+
+def rx_record(x: dict, r: dict) -> dict:
+    """One /api/igate/send line + its result -> an RxLog record: src, kind, exact position, outcome."""
+    rec = {"src": str(x.get("src", "")).strip().upper()[:12] or None, "k": "pos"}
+    if "mprs" in x:
+        rec["k"] = "mprs"
+        try:
+            f = meshprs.decode(bytes.fromhex(str(x.get("mprs", ""))))
+            rec["src"] = f["src"]
+            rec["k"] = {meshprs.POS: "pos", meshprs.STA: "sta", meshprs.TLM: "tlm", meshprs.MSG: "msg"}.get(f["subtype"], "mprs")
+            if "lat" in f and not (f["lat"] == 0 and f["lon"] == 0):
+                rec["lat"], rec["lon"] = round(f["lat"] * 90 / 2 ** 23, 5), round(f["lon"] * 180 / 2 ** 23, 5)
+            if "course" in f:
+                rec["crs"], rec["spd"] = round(f["course"] * 360 / 256), f["speed"]     # degrees, km/h
+            if "alt" in f:
+                rec["alt"] = f["alt"]
+            rec["t"] = int(x.get("rxAt")) / 1000
+        except (ValueError, TypeError, KeyError, meshprs.Drop):
+            pass
+    elif "body" in x:
+        rec["k"] = "tlm"
+    else:
+        try:
+            lat, lon = float(x.get("lat")), float(x.get("lon"))
+            if -90 <= lat <= 90 and -180 <= lon <= 180:
+                rec["lat"], rec["lon"] = round(lat, 5), round(lon, 5)
+        except (TypeError, ValueError):
+            pass
+    why = str(r.get("reason") or "")
+    rec["r"] = ("dry" if r.get("dry") else "sent") if r.get("ok") else (
+        "offline" if why.startswith("APRS-IS") else "held" if why.startswith("privacy") else "off" if "is off" in why
+        else why if why in ("rate", "duplicate") else "refused")
+    if not r.get("ok") and rec["r"] in ("refused", "offline"):
+        rec["why"] = why[:60]
+    return rec
+
+
+def _esc(t) -> str:
+    return str(t).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _when(t: float) -> str:
+    z = time.strftime("%z", time.localtime(t))
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t)) + z[:3] + ":" + z[3:]
+
+
+def rx_kml(recs: list, title: str) -> str:
+    """The positions in an RxLog query as KML: a folder per station with its track and one placemark per fix."""
+    by: dict = {}
+    for r in recs:
+        if "lat" in r and "lon" in r:
+            by.setdefault(r.get("src") or "?", []).append(r)
+    folders = []
+    for src, rs in sorted(by.items()):
+        rs.sort(key=lambda r: r["t"])
+        pts = []
+        for r in rs:
+            d = [time.strftime("%d %b %H:%M:%S", time.localtime(r["t"])), r.get("r", "")]
+            if "spd" in r:
+                d.append(f"{r['spd']} km/h {r.get('crs', 0)}°")
+            if "alt" in r:
+                d.append(f"alt {r['alt']} m")
+            desc = " · ".join(x for x in d if x)
+            style = "pt" if r.get("r") in ("sent", "dry") else "ptx"
+            pts.append(f"<Placemark><name>{time.strftime('%H:%M', time.localtime(r['t']))}</name>"
+                       f"<description>{_esc(desc)}</description><TimeStamp><when>{_when(r['t'])}</when></TimeStamp>"
+                       f"<styleUrl>#{style}</styleUrl><Point><coordinates>{r['lon']},{r['lat']},0</coordinates></Point></Placemark>")
+        line = " ".join(f"{r['lon']},{r['lat']},0" for r in rs)
+        folders.append(f"<Folder><name>{_esc(src)} ({len(rs)})</name><Placemark><name>{_esc(src)} track</name>"
+                       f"<styleUrl>#path</styleUrl><LineString><tessellate>1</tessellate><coordinates>{line}</coordinates>"
+                       f"</LineString></Placemark>{''.join(pts)}</Folder>")
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2"><Document>'
+            f"<name>{_esc(title)}</name><description>Exact positions heard by this Kelly iGate. Green = sent to APRS-IS; "
+            "grey = not sent (held, offline, refused).</description>"
+            '<Style id="pt"><IconStyle><color>ff50d050</color><scale>0.8</scale></IconStyle></Style>'
+            '<Style id="ptx"><IconStyle><color>ff9a9a9a</color><scale>0.7</scale></IconStyle></Style>'
+            '<Style id="path"><LineStyle><color>ff00b4ff</color><width>3</width></LineStyle></Style>'
+            f"{''.join(folders)}</Document></kml>\n")
+
+
 class Igate:
     def __init__(self, verbose=False, first_s=30.0, cap_s=600.0):
         self.verbose = verbose
@@ -342,8 +489,9 @@ class Igate:
         self.mprs_seen: dict = {}          # (originator, seq) -> unix s: MeshPRS frames sent in the last 10 min (spec 10.2)
         self.jumps = JumpGuard()           # impossible position jumps, per station (adverts and MeshPRS share it)
         self.privacy = PrivacyZone()       # the privacy switch: the owner's own stations hidden near home
+        self.rx = RxLog()                  # the received-packet log, last 24 h (GET /api/igate/rx)
         self.log: list[list] = []          # [unix s, "> line" | "! reason"]
-        self.bucket = TokenBucket(5, 3)
+        self.bucket = TokenBucket(1, 10)
         self.backoff = Backoff(first_s, cap_s)
         self.task: asyncio.Task | None = None
         self.writer: asyncio.StreamWriter | None = None
@@ -371,11 +519,11 @@ class Igate:
             return {"ok": False, "error": "the iGate callsign must look like VK4XXX-10 (SSID 1-15)"}
         try:
             port = int(c.get("port") or DEFAULT_SERVER[1])
-            every, burst = float(c.get("everyS") or 5), int(c.get("burst") or 3)
+            every, burst = float(c.get("everyS") or 1), int(c.get("burst") or 10)
         except (TypeError, ValueError):
             return {"ok": False, "error": "port / rate must be numbers"}
-        if not (1 <= port <= 65535) or not (1 <= every <= 3600) or not (1 <= burst <= 10):
-            return {"ok": False, "error": "port 1-65535, one packet every 1-3600 s, burst 1-10"}
+        if not (1 <= port <= 65535) or not (1 <= every <= 3600) or not (1 <= burst <= 50):
+            return {"ok": False, "error": "port 1-65535, one packet every 1-3600 s, burst 1-50"}
         server = re.sub(r"[^A-Za-z0-9.\-:]", "", str(c.get("server") or DEFAULT_SERVER[0]))[:100] or DEFAULT_SERVER[0]
         new = {"on": bool(c.get("on")), "call": call, "pass": re.sub(r"[^0-9-]", "", os.environ.get("KELLY_IGATE_PASS", ""))[:6] or str(passcode(call)),
                "server": server, "port": port, "filter": clean(c.get("filter", ""), 200), "dry": bool(c.get("dry")),
@@ -500,7 +648,13 @@ class Igate:
     async def send(self, lines: list) -> list:
         out = []
         for x in lines[:20] if isinstance(lines, list) else []:
-            out.append(self._one(x if isinstance(x, dict) else {}))
+            x = x if isinstance(x, dict) else {}
+            r = self._one(x)
+            out.append(r)
+            try:
+                self.rx.add(rx_record(x, r))
+            except Exception:  # noqa: BLE001 -- the log must never stop gating
+                pass
         if self.writer:
             try:
                 await self.writer.drain()
@@ -649,7 +803,7 @@ KEEPER_HOLDS = "the Pi keeper is this station's iGate -- it gates while this Kel
 
 
 async def http(ig: Igate, method: str, path: str, headers: dict, reader, writer, allowed: bool,
-               local: bool = False):
+               local: bool = False, query: str = ""):
     """/api/igate[/config|/send] for kelly_bridge.handle(). local = from this machine; ig.keeper() = the Pi's headless
     Kelly (--keeper-local) is on the node. While it is, and it turned the iGate on, the iGate is ITS: another Kelly's
     config and sends are refused (two pages would fight over one connection's callsign / privacy, and gate twice);
@@ -694,6 +848,24 @@ async def http(ig: Igate, method: str, path: str, headers: dict, reader, writer,
                 out = ig.status()
             elif path == "/api/igate" and method == "GET":
                 out = ig.status()
+            elif path == "/api/igate/rx" and method == "GET":
+                q = {k: v[0] for k, v in parse_qs(query).items()}
+                try:
+                    hours = float(q.get("hours", 24))
+                except ValueError:
+                    hours = 24.0
+                src = q.get("src", "").strip().upper() or None
+                recs = ig.rx.query(hours, src)
+                if q.get("format") == "kml":
+                    body = rx_kml(recs, f"{src or 'Kelly iGate'} - last {hours:g} h").encode()
+                    name = f"{(src or 'igate').lower()}-{time.strftime('%Y%m%d-%H%M')}.kml"
+                    writer.write(f"HTTP/1.1 200 OK\r\nContent-Type: application/vnd.google-earth.kml+xml\r\n{cors}"
+                                 f"Content-Disposition: attachment; filename=\"{name}\"\r\nCache-Control: no-cache\r\n"
+                                 f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
+                    await writer.drain()
+                    writer.close()
+                    return
+                out = {"hours": hours, "src": src, "count": len(recs), "recs": recs}
             else:
                 status, out = "404 Not Found", {"error": "no such iGate call"}
     body = json.dumps(out).encode()

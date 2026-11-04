@@ -2289,7 +2289,7 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, hub
         tok = parse_qs(url.query).get("token", [""])[0] or headers.get("x-kelly-token", "")
         allowed = is_loopback(writer.get_extra_info("peername")) or not hub.args.token or tok == hub.args.token
         await kelly_igate.http(hub.igate, method, url.path, headers, reader, writer, allowed,
-                               local=is_loopback(writer.get_extra_info("peername")))
+                               local=is_loopback(writer.get_extra_info("peername")), query=url.query)
         return
 
     # ---- APRS-IS beacon (browsers can't open TCP; the bridge builds the packet from checked fields)

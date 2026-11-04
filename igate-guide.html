@@ -47,7 +47,7 @@
     <li><strong>By key, not name.</strong> A node on your list is known by its MeshCore <em>public key</em>, not its name (anyone can copy a name). Kelly also checks each advert's digital signature, so a forged one can't use a listed key.</li>
     <li><strong>Receive-only.</strong> Positions and telemetry go from MeshCore to APRS-IS only. Nothing goes back onto the air. Messages, channel chat and anything encrypted are never sent anywhere.</li>
     <li><strong>Internet only.</strong> Everything goes to APRS-IS through the Kelly bridge's internet connection (<code>kelly_bridge.py</code> on your PC or Pi), never over P25. The only thing the iGate fetches over P25 is the club list.</li>
-    <li><strong>Polite.</strong> A tracker is gated at most every 2 minutes, or every 30 seconds if it is moving. The same position twice is dropped. All APRS-IS traffic is rate-limited, and each Kelly waits a random few seconds so several iGates hearing one advert don't all send at once. Kelly only asks a node for its position or telemetry when your node has a direct route to it, never by flooding the mesh.</li>
+    <li><strong>Polite.</strong> A tracker is gated at most once every 5 seconds. The same position twice within 30 seconds is dropped. A global limit (one line per second, burst 10) guards against runaway bugs and abuse, and each Kelly waits a random few seconds so several iGates hearing one advert don't all send at once. Kelly only asks a node for its position or telemetry when your node has a direct route to it, never by flooding the mesh.</li>
   </ul>
 
   <h2 id="setup">Set up an iGate</h2>
@@ -65,7 +65,7 @@
   <ul>
     <li><span class="ui">Ask the trackers on my list for their position</span> (off by default). A tracker's own adverts can be hours apart. With this on, Kelly asks each listed tracker it has a direct route to for its position, at most every 10 minutes (15 by default). Each request goes over the air, so use it sparingly. The tracker must allow location telemetry to you (see <a href="#buy">configuring a tracker</a>).</li>
     <li><span class="ui">iGate status line</span>: a short status text under your iGate call, every 30 minutes or more.</li>
-    <li><span class="ui">APRS-IS server, filter and limits</span>. The server defaults to <code>aunz.aprs2.net:14580</code> (if it can't be reached, the bridge tries <code>rotate.aprs2.net</code> next), and the limits default to one packet per 5 seconds, a burst of 3, and 2 minutes per station. Leave them alone unless you know why.</li>
+    <li><span class="ui">APRS-IS server, filter and limits</span>. The server defaults to <code>aunz.aprs2.net:14580</code> (if it can't be reached, the bridge tries <code>rotate.aprs2.net</code> next), and the limits default to one packet per second, a burst of 10, and 5 seconds per station. Leave them alone unless you know why.</li>
   </ul>
   <h3>APRS-IS passcode</h3>
   <p>You don't enter one. The Kelly bridge works it out from your callsign, and it never leaves the bridge. If you need a different passcode, set <code>KELLY_IGATE_PASS</code> in the bridge's environment.</p>

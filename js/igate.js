@@ -11,8 +11,8 @@
  *   Gate     the decisions, in order: whitelist (default deny) -> valid position (0,0, range, no fix, stale by RECEIVE
  *            time, replay = an advert timestamp older than the last one from that key; MeshCore clocks are often wrong,
  *            so their own time never ages a fix out) -> duplicate (same station + position within 30 s) -> per-station
- *            interval (2 min; down to a 30 s floor when it has moved > 500 m) -> a bounded queue with a random delay
- *            (iGates hearing one advert don't all send at once) -> the global token bucket (1 per 5 s, burst 3).
+ *            interval (5 s per station) -> a bounded queue with a random delay
+ *            (iGates hearing one advert don't all send at once) -> the global token bucket (1 per second, burst 10 -- an abuse / runaway-bug guard).
  *            Every drop is counted by reason, nothing queues without bound.
  *   Stats    the page's counters (heard, gated total / last hour / today, drops, last packet per station, own beacon, telemetry),
  *            JSON-able so the page keeps them across restarts.
@@ -32,7 +32,7 @@
   'use strict';
   const TOCALL = 'APZKPG';            // APZ = the experimental tocall range (no registered one yet); bridge/kelly_igate.py has the same
   const SOFTWARE = 'KellyPage';
-  const DEFAULTS = { maxAgeMin: 10, perStationMin: 2, moveM: 500, floorS: 30, dedupS: 30, bucketS: 5, burst: 3, jitterS: 8, waitS: 30, queueMax: 20 };
+  const DEFAULTS = { maxAgeMin: 10, perStationS: 5, dedupS: 30, bucketS: 1, burst: 10, jitterS: 8, waitS: 10, queueMax: 20 };
   const OWN_MIN_MIN = { zero: 15, flood: 60 };   // own beacon over MeshCore: zero-hop / flood advert, minutes (MBUG: keep floods rare)
 
   // ------------------------------------------------------------------ callsigns
@@ -162,10 +162,7 @@
       if (seen.size > 500) seen.delete(seen.keys().next().value);
       const l = last.get(key), since = l ? now() - l.at : Infinity;
       if (l && since < cfg.dedupS * 1000 && samePos(l, p)) return drop('duplicate', 'same position within ' + cfg.dedupS + ' s', key);
-      if (l && since < cfg.perStationMin * 60000) {
-        const moved = distanceM(l, p);
-        if (!(moved >= cfg.moveM && since >= cfg.floorS * 1000)) return drop('rate', `per-station interval (${Math.round(since / 1000)} s, moved ${Math.round(moved)} m)`, key);
-      }
+      if (l && since < cfg.perStationS * 1000) return drop('rate', `per-station interval (${Math.round(since / 1000)} s)`, key);
       if (queue.some(q => q.key === key)) return drop('duplicate', 'one already waiting', key);
       if (queue.length >= cfg.queueMax) return drop('rate', 'queue full', key);
       last.set(key, { at: now(), lat: p.lat, lon: p.lon });

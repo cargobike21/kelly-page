@@ -48,8 +48,8 @@
     'unknown ack': 'An ack for a message this gateway never carried.',
     replayed: 'Its seq is older than the last one heard from this sender in the last 10 min: a replay.',
     duplicate: 'Already heard (the same sender and seq) in the last 10 min -- a retry or a second path.',
-    interval: 'This station was gated less than its interval ago (2 min, or 30 s once it moved 500 m).',
-    'queue full': 'The iGate queue is full.', rate: 'The global rate limit (one line per 5 s, burst 3).',
+    interval: 'This station was gated less than its interval ago (5 s).',
+    'queue full': 'The iGate queue is full.', rate: 'The global rate limit (one line per second, burst 10).',
     expired: 'Not sent within 15 s of hearing it, so APRS-IS could no longer merge it with other gateways\' copies.',
     'no fix': 'No GPS fix.', 'out of range': 'The position is outside the earth.', '0,0': 'Exactly 0,0: no real fix.', stale: 'The position is too old.',
   };

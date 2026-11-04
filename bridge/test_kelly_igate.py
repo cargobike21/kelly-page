@@ -20,6 +20,7 @@ import os
 import tempfile
 
 os.environ["KELLY_IGATE_PRIVACY_FILE"] = os.path.join(tempfile.mkdtemp(), "privacy.json")   # never the real one
+os.environ["KELLY_IGATE_RX_FILE"] = os.path.join(tempfile.mkdtemp(), "rx.jsonl")            # never the real one
 sys.path.insert(0, str(Path(__file__).parent))
 import kelly_igate as ki  # noqa: E402
 
@@ -69,12 +70,12 @@ check("CALL-SSID for the page's src: VK4XXX-9 ok, VK4XXX / -0 / -16 refused",
 
 # ---- bucket + backoff on fake clocks
 t = [1000.0]
-b = ki.TokenBucket(5, 3, clock=lambda: t[0])
-check("bucket: burst of 3", b.take() and b.take() and b.take() and not b.take())
-t[0] += 4.9
-check("bucket: none before 5 s", not b.take())
+b = ki.TokenBucket(1, 10, clock=lambda: t[0])
+check("bucket: burst of 10", all(b.take() for _ in range(10)) and not b.take())
+t[0] += 0.9
+check("bucket: none before 1 s", not b.take())
 t[0] += 0.1
-check("bucket: one after 5 s", b.take() and not b.take())
+check("bucket: one after 1 s", b.take() and not b.take())
 bo = ki.Backoff(30, 600, rand=lambda: 1.0)
 steps = [bo.next() for _ in range(8)]
 check("backoff: 30 s doubling to a 10 min cap", steps == [30, 60, 120, 240, 480, 600, 600, 600], steps)
@@ -175,9 +176,9 @@ async def live():
     check("send: ok", res[0]["ok"], res)
     check("send: the exact qAO packet reached APRS-IS",
           await wait_for(lambda: "VK4XXX-9>APZKPG,qAO,VK4XXX-10:!2727.27S/15259.26E>MeshCore" in srv.lines), srv.lines)
-    res = await ig.send([POS, POS, POS, POS])
-    check("bucket: burst 3 -- one used, two more go, the rest dropped as rate", [x.get("reason") for x in res] == [None, None, "rate", "rate"], res)
-    await asyncio.sleep(10.5)                       # let the bucket refill (5 s each, burst 3)
+    res = await ig.send([POS] * 12)
+    check("bucket: burst 10 -- one used, nine more go, the rest dropped as rate", [x.get("reason") for x in res] == [None] * 9 + ["rate"] * 3, res)
+    await asyncio.sleep(2.5)                        # let the bucket refill (1 s each)
     T = V["telemetry"][0]
     TN = T["src"].split("-")[0] + " node"
     res = await ig.send([{"src": T["src"], "name": TN, "body": T["body"]}, {"src": T["src"], "name": TN, "body": T["defs"][0]}])
@@ -188,7 +189,7 @@ async def live():
     check("telemetry: a message to someone else / no SSID refused", [x["reason"] for x in res] == ["invalid"] * 2, res)
     res = await ig.send([{**POS, "src": "VK4XXX"}, {**POS, "lat": 0, "lon": 0}, {**POS, "lat": 95}, "junk"])
     check("refused: no SSID, 0,0, out of range, not an object", [x["reason"] for x in res] == ["invalid"] * 3 + ["not an amateur station"], res)
-    check("status counts", ig.status()["dropped"]["rate"] == 2 and ig.status()["dropped"]["invalid"] == 6, ig.status())
+    check("status counts", ig.status()["dropped"]["rate"] == 3 and ig.status()["dropped"]["invalid"] == 6, ig.status())
     res = await ig.send([{**POS, "lat": POS["lat"] + 2.0}])
     check("jump: an impossible position from a station is refused, nothing sent",
           res[0]["reason"] == "impossible position" and not any("2527.27S" in l for l in srv.lines), res)
@@ -386,6 +387,32 @@ asyncio.run(privacy())
 asyncio.run(fallback())
 
 
+# ---- the received-packet log (GET /api/igate/rx), on a fake clock
+clk = [1_800_000_000.0]
+rxf = os.path.join(tempfile.mkdtemp(), "rx.jsonl")
+rl = ki.RxLog(rxf, clock=lambda: clk[0])
+rl.add({"src": "VK4XXX-12", "k": "pos", "lat": -27.4, "lon": 153.0, "r": "held"})
+clk[0] += 3600
+rl.add({"src": "VK4XXX-12", "k": "pos", "lat": -27.5, "lon": 153.1, "r": "sent"})
+rl.add({"src": "VK4XX-9", "k": "tlm", "r": "offline", "why": "APRS-IS waiting"})
+check("rx log: query all / by station / by hours", (len(rl.query()), len(rl.query(src="VK4XXX-12")), len(rl.query(0.5))) == (3, 2, 2),
+      (len(rl.query()), len(rl.query(src="VK4XXX-12")), len(rl.query(0.5))))
+check("rx log: file is mode 600 (exact positions)", os.name == "nt" or (os.stat(rxf).st_mode & 0o777) == 0o600, oct(os.stat(rxf).st_mode))
+rl2 = ki.RxLog(rxf, clock=lambda: clk[0])
+check("rx log: survives a restart (reloaded from disk)", len(rl2.query()) == 3, len(rl2.query()))
+clk[0] += 23.5 * 3600
+rl3 = ki.RxLog(rxf, clock=lambda: clk[0])
+check("rx log: older than 24 h dropped on load, file rewritten", len(rl3.query()) == 2 and sum(1 for _ in open(rxf)) == 2, len(rl3.query()))
+r = ki.rx_record({"src": "vk4xxx-12", "lat": -27.45, "lon": 153.05, "name": "VK4XXX Buddy"}, {"ok": False, "reason": "privacy: no home position"})
+check("rx record: advert position, held", (r["src"], r["k"], r["lat"], r["r"]) == ("VK4XXX-12", "pos", -27.45, "held"), r)
+r = ki.rx_record({"src": "VK4XXX-12", "lat": 1, "lon": 2}, {"ok": False, "reason": "APRS-IS waiting", "packet": "x"})
+check("rx record: internet down -> offline + why", r["r"] == "offline" and r["why"] == "APRS-IS waiting", r)
+r = ki.rx_record({"src": "VK4XXX-12", "body": "T#001,1,2,3,4,5,00000000"}, {"ok": True, "packet": "x"})
+check("rx record: telemetry sent, no position", r["k"] == "tlm" and r["r"] == "sent" and "lat" not in r, r)
+k = ki.rx_kml([{"t": 1.8e9, "src": "VK4XXX-12", "lat": -27.4, "lon": 153.0, "r": "held"}, {"t": 1.8e9 + 60, "src": "VK4XXX-12", "lat": -27.5, "lon": 153.1, "r": "sent", "spd": 20, "crs": 90}, {"t": 1.8e9, "src": "VK4XX-9", "k": "tlm", "r": "sent"}], "VK4XXX-12 <test>")
+check("rx kml: one folder, a track, a placemark per fix, title escaped",
+      k.count("<Folder>") == 1 and k.count("<LineString>") == 1 and k.count("<Point>") == 2 and "&lt;test&gt;" in k and "<test>" not in k, k[:200])
+
 # ---- a real bridge
 def free_port() -> int:
     with socket.socket() as so:
@@ -421,6 +448,12 @@ try:
     check("bridge: config dry run", st == 200 and js.get("ok") and js["status"]["state"] == "dry", (st, js))
     st, hd, js = req("/api/igate/send", {"lines": [POS]})
     check("bridge: send in dry run -> the packet", st == 200 and js["results"][0].get("packet") == "VK4XXX-9>APZKPG,qAO,VK4XXX-10:!2727.27S/15259.26E>MeshCore", js)
+    st, hd, js = req("/api/igate/rx?src=VK4XXX-9")
+    check("bridge: GET /api/igate/rx -> that send, logged as dry", st == 200 and js.get("count", 0) >= 1 and js["recs"][-1]["r"] == "dry", (st, js))
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/igate/rx?format=kml&hours=1", timeout=10) as x:
+        kml = x.read().decode()
+        check("bridge: GET /api/igate/rx?format=kml -> a KML download",
+              "kml" in x.headers.get("Content-Type", "") and "attachment" in x.headers.get("Content-Disposition", "") and "<Point>" in kml, kml[:120])
     lan = ""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as so:
@@ -433,6 +466,8 @@ try:
     else:
         st, hd, js = req("/api/igate", host=lan)
         check("bridge: from the LAN without the token -> 403", st == 403, st)
+        st, hd, js = req("/api/igate/rx", host=lan)
+        check("bridge: the rx log from the LAN without the token -> 403", st == 403, st)
         st, hd, js = req("/api/igate?token=s3cret", host=lan)
         check("bridge: from the LAN with the token -> status", st == 200 and js.get("state") == "dry", (st, js))
 finally:

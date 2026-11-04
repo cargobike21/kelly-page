@@ -73,8 +73,8 @@
     home: 'command', lastModel: null, lastSerial: null, persona: null, consoleHome: null,   // home 'ccr' = Kelly parks the radio in CCR (live P25 monitor)   // P25X leading-digit alias rule; RadioID.net callsign lookups
     aprs: { on: false, lat: '', lon: '', call: '', pass: '', symbol: '/-', interval: 30, comment: '', ambiguity: 0, lastSent: 0, via: 'auto' },
     // APRS iGate page (js/igateui.js): whitelisted MeshCore trackers -> APRS-IS. call = the base callsign (from myCall), ssid 1-15
-    igate: { on: false, dry: true, call: '', ssid: 10, server: 'aunz.aprs2.net', port: 14580, filter: '', everyS: 5, burst: 3,
-      perStationMin: 2, moveM: 500, maxAgeMin: 10, poll: false, pollMin: 15, statusOn: false, statusText: 'Kelly Page MeshCore iGate', statusMin: 30, wlUrl: '' },
+    igate: { on: false, dry: true, call: '', ssid: 10, server: 'aunz.aprs2.net', port: 14580, filter: '', everyS: 1, burst: 10,
+      perStationS: 5, maxAgeMin: 10, poll: false, pollMin: 15, statusOn: false, statusText: 'Kelly Page MeshCore iGate', statusMin: 30, wlUrl: '' },
   };
   // Status / preset labels 1-16 = the P25X code plug's TM9100 lists (js/codeplugs.js, Code Plugs page),
   // so a number means the same here as on the radios and the dashboard. Past 16, the TM9400 lists name it.
@@ -122,6 +122,9 @@
   settings.mq = Object.assign({}, DEFAULT_SETTINGS.mq, settings.mq);
   settings.aprs = Object.assign({}, DEFAULT_SETTINGS.aprs, settings.aprs);
   settings.igate = Object.assign({}, DEFAULT_SETTINGS.igate, settings.igate);
+  // Limits loosened: the old per-station minutes / move distance are gone, and the old default bucket (5 s, burst 3) is reset to the new one.
+  if (settings.igate.everyS === 5 && settings.igate.burst === 3) { settings.igate.everyS = DEFAULT_SETTINGS.igate.everyS; settings.igate.burst = DEFAULT_SETTINGS.igate.burst; }
+  delete settings.igate.perStationMin; delete settings.igate.moveM;
   settings.sstvStamp = Object.assign({}, DEFAULT_SETTINGS.sstvStamp, settings.sstvStamp);
   const storedLabels = (key, def, old) => { const a = store.get(key, null); return Array.isArray(a) && a.join('|') !== old.join('|') ? a : def.slice(); };
   const statusLabels = storedLabels('statusLabels', DEFAULT_STATUS, OLD_STATUS);
@@ -315,6 +318,8 @@
   ['pointerdown', 'keydown', 'touchstart'].forEach(ev => document.addEventListener(ev, () => {
     if (blockedAlert || !actx || actx.state === 'suspended') unlockAudio();
   }, true));
+  // the hint's link only has to be clicked (the pointerdown above unlocks); it must not jump to #
+  document.querySelector('#snd-hint a')?.addEventListener('click', e => e.preventDefault());
   function beep(kind, force) {
     if (!settings.sound && !force) return;
     const pick = settings.sounds[kind] || 'tone';
@@ -4762,20 +4767,23 @@
     }
     dirty('gps');
   }
+  // Minutes between Kelly's own fixed beacons: 10 min minimum over P25 (airtime), 10 s minimum direct to APRS-IS.
+  const aprsMinGap = () => { const a = settings.aprs; return (KellyEnt.allowed('p25.gateway') && (a.via === 'p25' || (a.via !== 'internet' && radioCaps().kellyData))) ? 10 : 1 / 6; };
+  const aprsGapMin = () => Math.max(aprsMinGap(), +settings.aprs.interval || 30);
   setInterval(() => {
     const a = settings.aprs;
-    if (a.on && fixedPos() && Date.now() - (a.lastSent || 0) >= Math.max(10, +a.interval || 30) * 60000) aprsBeacon(false);
-  }, 30000);
+    if (a.on && fixedPos() && Date.now() - (a.lastSent || 0) >= aprsGapMin() * 60000) aprsBeacon(false);
+  }, 5000);
   function renderAprs() {
     const a = settings.aprs, pos = fixedPos(), tag = $('#ap-state');
     tag.textContent = a.on ? (pos ? 'beaconing' : 'needs position') : 'off';
     tag.className = 'tag ' + (a.on && pos ? 'ok' : a.on ? 'warn' : '');
     const call = (a.call || '').toUpperCase();
     $('#ap-view').href = call ? `https://aprs.fi/#!call=a%2F${encodeURIComponent(call)}` : 'https://aprs.fi/';
-    const next = a.on && pos ? Math.max(0, (a.lastSent || 0) + Math.max(10, +a.interval) * 60000 - Date.now()) : null;
+    const next = a.on && pos ? Math.max(0, (a.lastSent || 0) + aprsGapMin() * 60000 - Date.now()) : null;
     $('#ap-status').innerHTML = [
       aprsLast ? (aprsLast.ok && aprsLast.sent ? `✓ Last beacon ${fmtTime(aprsLast.t)} <span class="mono">${esc(aprsLast.packet)}</span>` : `<span class="bad-txt">⚠ ${esc(aprsLast.error || 'failed')}</span>`) : (a.lastSent ? `Last beacon ${fmtTime(a.lastSent)}` : ''),
-      next != null ? `Next in ${Math.ceil(next / 60000)} min` : '',
+      next != null ? (next < 60000 ? `Next in ${Math.ceil(next / 1000)} s` : `Next in ${Math.ceil(next / 60000)} min`) : '',
     ].filter(Boolean).join(' · ');
   }
   function syncFixedMarker() {

@@ -30,7 +30,7 @@
 (function () {
   'use strict';
   const WL_DAY_MS = 86400000, WL_WEB_MS = 6 * 3600000, BRIDGE_POLL_MS = 15000, STATS_SAVE_MS = 30000;
-  const TLM_DEFS_MS = 6 * 3600000, TLM_GAP_MS = 6000, TLM_QMAX = 40, TLM_HOLD_MS = 600000, TLM_MIN_MIN = 10;
+  const TLM_DEFS_MS = 6 * 3600000, TLM_GAP_MS = 1000, TLM_QMAX = 40, TLM_HOLD_MS = 600000, TLM_MIN_MIN = 10;
   const SYMBOLS = [['/>', '🚗 Car'], ['/[', '🚶 Walker'], ['/b', '🚲 Bicycle'], ['/p', '🐕 Dog'], ['/<', '🏍️ Motorcycle'], ['/k', '🛻 Truck'], ['/j', '🚙 Jeep'],
     ['/v', '🚐 Van'], ['/u', '🚚 Lorry'], ['/s', '🚤 Boat'], ['/Y', '⛵ Yacht'], ["/'", '✈️ Small plane'], ['/O', '🎈 Balloon'], ['/-', '🏠 House'], ['/R', '🚌 RV'],
     ['/r', '📡 Repeater'], ['/_', '🌦️ Weather station'], ['/#', '📶 Digipeater']];
@@ -65,7 +65,7 @@
       ownBusy: false, mprsOut: 0, mprsUnsent: 0, path: '', tq: [], tqAt: 0, t: null, reads: new Map(),
       find: { q: '', pick: null, listenAt: 0, more: false, t: null } };
     const mprsHeard = new Map();   // node key prefix (8 hex) -> { src, sym, at }: MeshPRS senders heard (🔎 Add my device)
-    const cfgOf = () => ({ maxAgeMin: +s.maxAgeMin, perStationMin: +s.perStationMin, moveM: +s.moveM, bucketS: +s.everyS, burst: +s.burst });
+    const cfgOf = () => ({ maxAgeMin: +s.maxAgeMin, perStationS: +s.perStationS, bucketS: +s.everyS, burst: +s.burst });
     const byKey = key => list.e.find(x => x.k === key);
     const lookup = key => { const x = byKey(String(key || '').toLowerCase()); return x && x.e ? x : null; };
     const gate = I.Gate({ lookup, cfg: cfgOf(), stats: store.get('igateStats', null) });
@@ -1017,8 +1017,8 @@
       bind('#ig-on', 'on'); bind('#ig-dry', 'dry');
       bind('#ig-call', 'call', x => x.trim().toUpperCase()); bind('#ig-ssid', 'ssid', Number);
       bind('#ig-server', 'server', x => x.trim()); bind('#ig-port', 'port', Number); bind('#ig-filter', 'filter', x => x.trim());
-      bind('#ig-every', 'everyS', x => Math.min(3600, Math.max(2, +x || 5))); bind('#ig-burst', 'burst', x => Math.min(10, Math.max(1, +x || 3)));
-      bind('#ig-perstn', 'perStationMin', x => Math.min(60, Math.max(0.5, +x || 2))); bind('#ig-move', 'moveM', x => Math.max(50, +x || 500));
+      bind('#ig-every', 'everyS', x => Math.min(3600, Math.max(1, +x || 1))); bind('#ig-burst', 'burst', x => Math.min(50, Math.max(1, +x || 10)));
+      bind('#ig-perstn', 'perStationS', x => Math.min(3600, Math.max(5, +x || 5)));
       bind('#ig-maxage', 'maxAgeMin', x => Math.min(60, Math.max(1, +x || 10)));
       bind('#ig-poll', 'poll'); bind('#ig-poll-min', 'pollMin', x => Math.min(240, Math.max(10, +x || 15)));
       bind('#ig-stat-on', 'statusOn'); bind('#ig-stat-text', 'statusText'); bind('#ig-stat-min', 'statusMin', x => Math.min(1440, Math.max(10, +x || 30)));
@@ -1029,6 +1029,19 @@
         catch (e) { S.bridgeErr = e.message; }
         dirty('igate');
       };
+      // the bridge's received-packet log (GET /api/igate/rx): exact positions, so a file for the owner only, never shared
+      const rxSave = async fmt => {
+        try {
+          const b = bridge(), r = await fetch(`${b.base}/api/igate/rx?hours=24${fmt === 'kml' ? '&format=kml' : ''}`, { headers: b.headers, cache: 'no-store' });
+          if (r.status === 404) throw new Error('this bridge is older -- update Kelly on it first');
+          if (!r.ok) throw new Error(r.status === 403 ? 'the bridge wants its token' : `bridge HTTP ${r.status}`);
+          const a = document.createElement('a'), stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+          a.href = URL.createObjectURL(await r.blob()); a.download = `igate-rx-${stamp}.${fmt}`; a.click();
+          setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+        } catch (e) { toast('📒', 'Could not get the packet log', e.message, 'bad'); }
+      };
+      $('#ig-rx-kml').onclick = () => rxSave('kml');
+      $('#ig-rx-json').onclick = () => rxSave('json');
       bind('#ig-own-on', 'on', x => x, s.own); bind('#ig-own-src', 'src', x => x, s.own); bind('#ig-own-every', 'everyMin', Number, s.own);
       bind('#ig-own-flood', 'flood', x => x, s.own); bind('#ig-own-places', 'places', Number, s.own);
       $('#ig-call').oninput = () => { s.call = $('#ig-call').value.trim().toUpperCase(); dirty('igate'); };

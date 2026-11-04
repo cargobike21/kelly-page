@@ -121,8 +121,9 @@
       w.document.write(`<!doctype html><title>${esc(ev.name)} certificates</title><style>body{font-family:Georgia,serif;margin:0}.c{page-break-after:always;border:12px double #1f3b73;margin:24px;padding:48px;text-align:center;min-height:80vh;box-sizing:border-box}
         h1{font-size:40px;color:#1f3b73;margin:.2em}h2{font-size:56px;margin:.3em;letter-spacing:.08em}p{font-size:20px}.s{font-size:14px;color:#555}</style>
         ${ev.checkins.map(c => `<div class="c"><p class="s">Kelly Page · P25X</p><h1>Certificate of attendance</h1><p>This certifies that</p><h2>${esc(c.call)}</h2><p>checked in at <b>${esc(ev.name)}</b> on ${esc(date)} at ${esc(new Date(c.at).toLocaleTimeString())}${c.first ? ', <b>first on site</b>' : ''}.</p><p>${c.pts} points · ${streakOf(c.call, ev)} event${streakOf(c.call, ev) > 1 ? 's' : ''} in a row</p><p class="s">Checked in automatically by their registered Bluetooth LE beacon.</p></div>`).join('')}
-        <script>window.onload=()=>window.print()<\/script>`);
+`);
       w.document.close();
+      w.print();   // from here, not an inline script: the pop-up inherits Kelly's CSP
     }
 
     // ---- BLEdex

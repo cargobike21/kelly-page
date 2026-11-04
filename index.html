@@ -164,7 +164,7 @@
     </div>
     <div id="mode-warning" hidden></div>
     <div id="wake-bar" hidden role="status" aria-live="polite"><img src="assets/kelly-mark.svg" alt=""><b>Waking up the radio dog…</b><span id="wake-detail">hang on, this takes about 10 seconds</span></div>
-    <div id="snd-hint" hidden>🔇 Your browser is holding back Kelly's alert sounds until you click on the page. <a href="#" onclick="return false">Click here to turn sounds on</a> -- you'll hear the alert you missed.</div>
+    <div id="snd-hint" hidden>🔇 Your browser is holding back Kelly's alert sounds until you click on the page. <a href="#">Click here to turn sounds on</a> -- you'll hear the alert you missed.</div>
     <div id="rx-hint" hidden>📭 This radio only passes received texts, calls and status to Kelly in <b>CCR mode</b> -- in Command mode Kelly can send but not receive. <a href="#" data-act="go-trans">Switch Home mode to Transparent (mic free)</a> · <a href="#" data-act="go-ccr">CCR</a></div>
 
     <main id="pages">
@@ -449,7 +449,7 @@
               <option value="/-">🏠 House</option><option value="/&gt;">🚗 Car</option><option value="/[">🚶 Person</option><option value="/r">📡 Repeater / antenna</option>
               <option value="/y">🏡 House + Yagi</option><option value="/k">🚚 Truck</option><option value="/u">🚛 Semi</option><option value="/j">🚙 Jeep</option><option value="/v">🚐 Van</option>
               <option value="/&lt;">🏍 Motorcycle</option><option value="/s">⛵ Boat</option><option value="/'">✈ Aircraft</option><option value="/#">📶 Digipeater</option></select></label>
-              <label class="fld"><span>Every</span><select id="ap-int"><option value="10">10 min</option><option value="20">20 min</option><option value="30">30 min</option><option value="60">60 min</option></select></label></div>
+              <label class="fld"><span>Every</span><select id="ap-int"><option value="0.17">10 s (internet only)</option><option value="0.5">30 s (internet only)</option><option value="1">1 min (internet only)</option><option value="5">5 min (internet only)</option><option value="10">10 min</option><option value="20">20 min</option><option value="30">30 min</option><option value="60">60 min</option></select></label></div>
             <div class="row gap"><label class="fld grow"><span>Send via</span><select id="ap-via"><option value="auto">Auto (over P25 on this radio)</option><option value="p25">Over P25 (P25X Reflector)</option><option value="internet">Internet (APRS-IS, via the bridge)</option></select></label></div>
             <div class="row gap"><label class="fld grow"><span>Comment</span><input id="ap-comment" maxlength="43" placeholder="Kelly Page · P25 TP9400"></label>
               <label class="fld"><span>Precision</span><select id="ap-amb"><option value="0">Exact</option><option value="1">~180 m</option><option value="2">~1.8 km</option><option value="3">~18 km</option></select></label></div>
@@ -1458,6 +1458,11 @@
               <button class="btn small ghost" id="ig-priv-new" title="Move the zone: a new spot 75-150 m from home">New spot</button>
               <span class="small dim" id="ig-priv-info"></span>
             </div>
+            <div class="row gap wrap">
+              <span class="small">📒 Received-packet log (last 24 h, kept by the bridge even when the internet is down; exact positions, home included)</span>
+              <button class="btn small ghost" id="ig-rx-kml" title="Every position heard in the last 24 h as a KML track (Google Earth / My Maps)">⬇ KML track</button>
+              <button class="btn small ghost" id="ig-rx-json" title="The whole log: each packet, its position and what happened to it (sent / held / offline)">⬇ Log (JSON)</button>
+            </div>
             <details class="ig-more"><summary class="small">APRS-IS server, filter and limits</summary>
               <div class="row gap wrap">
                 <label class="fld grow"><span>Server</span><input id="ig-server" placeholder="aunz.aprs2.net"></label>
@@ -1465,13 +1470,12 @@
                 <label class="fld grow"><span>Filter (optional)</span><input id="ig-filter" placeholder="none -- receive-only"></label>
               </div>
               <div class="row gap wrap">
-                <label class="fld"><span>One packet every (s)</span><input type="number" id="ig-every" min="2" max="3600"></label>
-                <label class="fld"><span>Burst</span><input type="number" id="ig-burst" min="1" max="10"></label>
-                <label class="fld"><span>Per station (min)</span><input type="number" id="ig-perstn" min="0.5" max="60" step="0.5"></label>
-                <label class="fld"><span>Sooner if moved (m)</span><input type="number" id="ig-move" min="50" step="50"></label>
+                <label class="fld"><span>One packet every (s)</span><input type="number" id="ig-every" min="1" max="3600"></label>
+                <label class="fld"><span>Burst</span><input type="number" id="ig-burst" min="1" max="50"></label>
+                <label class="fld"><span>Per station (s)</span><input type="number" id="ig-perstn" min="5" max="3600" step="1"></label>
                 <label class="fld"><span>Max age (min)</span><input type="number" id="ig-maxage" min="1" max="60"></label>
               </div>
-              <div class="small dim">Never sooner than 30 s per station; the same position within 30 s is a duplicate; each iGate waits a random 0-8 s so iGates hearing one advert don't all send at once.</div>
+              <div class="small dim">One gated position per station every 5 s by default; the same position within 30 s is a duplicate; each iGate waits a random 0-8 s so iGates hearing one advert don't all send at once. The packet limit (one per second, burst 10) is an abuse guard.</div>
             </details>
           </div>
           <div class="card">
@@ -2451,15 +2455,6 @@
 <script src="js/bleui.js"></script>
 <script src="js/pwa.js"></script>
 <script src="js/app.js"></script>
-<script>
-  // #kp-missing (top of body): show it if Kelly's scripts didn't load, even when the CSS did.
-  (function () {
-    if (/\.zip|[\\\/]Temp\d*_/i.test(decodeURIComponent(location.href)))
-      document.getElementById("kp-missing-why").textContent =
-        "It looks like index.html was opened straight from inside the zip -- Windows only unpacks that one file, so the rest of Kelly is missing.";
-    if (typeof CCDI === "undefined" || typeof KellyLicense === "undefined")
-      document.getElementById("kp-missing").style.setProperty("display", "block", "important");
-  })();
-</script>
+<script src="js/kp-missing.js"></script>
 </body>
 </html>

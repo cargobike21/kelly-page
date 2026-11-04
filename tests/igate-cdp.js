@@ -192,7 +192,7 @@ const srv = http.createServer(async (req, res) => {
     await js(`document.querySelector('#ig-t-save').click(); kelly.igate().render()`);
     eq('the list shows telemetry on for VK4ZR-1', await js(`[...document.querySelectorAll('#ig-l-rows tr')].find(r => r.cells[0].textContent === 'VK4ZR-1').cells[5].textContent.startsWith('📈')`), true);
     const t2 = B.lines.length;
-    for (let i = 0; i < 300 && !B.lines.slice(t2).some(l => /^T#/.test(l.body || '')); i++) await sleep(250);   // the 30 s poll, then one line per 6 s
+    for (let i = 0; i < 300 && !B.lines.slice(t2).some(l => /^T#/.test(l.body || '')); i++) await sleep(250);   // the 30 s poll, then one line per 1 s
     const tl = B.lines.slice(t2).filter(l => l.body);
     eq('the poll sent PARM, UNIT, EQNS, BITS, then T#, all for VK4ZR-1', tl.map(l => [l.src, l.body.replace(/^:VK4ZR-1  :/, '').split(/[.#]/)[0]]), [['VK4ZR-1', 'PARM'], ['VK4ZR-1', 'UNIT'], ['VK4ZR-1', 'EQNS'], ['VK4ZR-1', 'BITS'], ['VK4ZR-1', 'T']]);
     eq('T# carries the mapped values (the temperature swapped in)', /^T#\d{3},178,067,010,133,157,00000000$/.test((tl[4] || {}).body || ''), true);

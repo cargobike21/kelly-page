@@ -296,14 +296,8 @@
   //   due     steps 8-9 at `now`: -> { send: [item], drop: [{ item, reason }] }; an item = { f, line, rxAt, dueAt, prio }
   // A queued message is remembered (30 min) so the station's ack can be rendered (§6.2); the interval is taken when a
   // frame is queued, so a second frame waiting behind it is an 'interval' drop, not a second line.
-  const GATE = { jitterS: 5, waitS: 10, holdS: 15, perStationS: 120, floorS: 30, moveM: 500, bucketS: 5, burst: 3, queueMax: 20,
+  const GATE = { jitterS: 5, waitS: 10, holdS: 15, perStationS: 5, bucketS: 1, burst: 10, queueMax: 20,
     windowMs: 600000, recordMs: 1800000, advertMaxMs: 86400000 };
-  const RAD = Math.PI / 180, deg = (v, span) => v * span / 2 ** 23;
-  function distM(a, b) {
-    const la1 = deg(a.lat, 90) * RAD, la2 = deg(b.lat, 90) * RAD, dla = la2 - la1, dlo = (deg(b.lon, 180) - deg(a.lon, 180)) * RAD;
-    const h = Math.sin(dla / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dlo / 2) ** 2;
-    return 2 * 6371008.8 * Math.asin(Math.min(1, Math.sqrt(h)));
-  }
   // the per-station interval key: one per service, so a station's PARM/UNIT/EQNS/BITS, or an owner's several objects,
   // aren't each other's interval drops
   const ivKey = f => [f.src, f.subtype, f.subtype === TLM ? f.kind : f.subtype === OBJ ? f.name : ''].join('|');
@@ -349,8 +343,7 @@
       dups.set(dk, now);
       if (!exempt(f)) {                                                                                      // 6
         const k = ivKey(f), l = last.get(k);
-        const moved = l && l.pos && f.lat !== undefined && distM(l.pos, f) > cfg.moveM;
-        if (l && now - l.at < (moved ? cfg.floorS : cfg.perStationS) * 1000) return dropIt('interval', f);
+        if (l && now - l.at < cfg.perStationS * 1000) return dropIt('interval', f);
       }
       const prio = exempt(f) && f.subtype === STA ? 1 : 0;                                                   // 7
       if (queue.length >= cfg.queueMax) {

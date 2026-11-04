@@ -1,20 +1,21 @@
 // mesh.html (kellypage.app/mesh launcher): no third-party URLs, the browser-support banners for each kind of browser, the
-// QR maker. Runs the page's inline script against a tiny fake DOM. Node 22+.
+// QR maker. Runs the page's script (js/mesh-launch.js -- no inline script, for the CSP) against a tiny fake DOM. Node 22+.
 const fs = require('fs'), path = require('path'), vm = require('vm');
 const html = fs.readFileSync(path.join(__dirname, '..', 'mesh.html'), 'utf8');
+const script = fs.readFileSync(path.join(__dirname, '..', 'js', 'mesh-launch.js'), 'utf8');
 let pass = 0; const fails = [];
 const t = (name, ok, got) => { if (ok) pass++; else { fails.push(name); console.log(`FAIL ${name}${got !== undefined ? '  got ' + JSON.stringify(got) : ''}`); } };
 
 // no third-party scripts / fonts / CDNs / trackers: every src/href/url() is a relative file of this site
 const urls = [...html.matchAll(/(?:src|href)\s*=\s*"([^"]+)"/g)].map(m => m[1]).concat([...html.matchAll(/url\(([^)]+)\)/g)].map(m => m[1]));
 t('no absolute or protocol-relative URLs in src/href/url()', urls.every(u => !/^([a-z]+:)?\/\//i.test(u) && !/^https?:/i.test(u)), urls);
-t('the scripts are this site\'s own (js/meshqr.js + inline)', [...html.matchAll(/<script[^>]*src="([^"]+)"/g)].map(m => m[1]).join() === 'js/meshqr.js');
-t('no @import, no fetch, no XHR, no analytics', !/@import|fetch\(|XMLHttpRequest|gtag|analytics|googletag/i.test(html));
+t('the scripts are this site\'s own (js/meshqr.js + js/mesh-launch.js)', [...html.matchAll(/<script[^>]*src="([^"]+)"/g)].map(m => m[1]).join() === 'js/meshqr.js,js/mesh-launch.js');
+t('no inline script or inline handler (CSP script-src \'self\')', !/<script>|\son[a-z]+="/i.test(html));
+t('no @import, no fetch, no XHR, no analytics', !/@import|fetch\(|XMLHttpRequest|gtag|analytics|googletag/i.test(html + script));
 t('opens Kelly on LoRa Mesh > Ham Contacts', /href="index\.html#mesh-contacts"/.test(html));
 const mesh = fs.readFileSync(path.join(__dirname, '..', 'js', 'mesh.js'), 'utf8');
 t('mesh.js opens the Ham Contacts tab for #mesh-contacts', /location\.hash === '#mesh-contacts'\) setTimeout\(\(\) => showMeshTab\('contacts'\)/.test(mesh));
 
-const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]).join('\n');
 function run(nav, secure = true) {
   const els = {};
   const get = id => els[id] || (els[id] = { id, hidden: true, innerHTML: '', textContent: '', value: '', onclick: null });

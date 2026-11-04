@@ -171,8 +171,9 @@
       <p>THIS CERTIFIES THAT</p><div class="call">${call}</div>
       <p>HAS MADE RTTY CONTACT WITH <b>${a.calls}</b> STATIONS ON <b>${a.reps}</b> P25X REPEATER${a.reps === 1 ? '' : 'S'},<br>EVERY ONE CONFIRMED BY THE P25X GATEWAY.</p>
       <div class="tape">DE P25X -- QSL -- 73</div><p>${esc(date.toUpperCase())}</p><div class="s">P25X: Digital Voice. Total Data.<br>Kelly Page · RTTY over P25 data</div>
-      <button onclick="print()">Print</button></div></body></html>`);
+      <button>Print</button></div></body></html>`);
       w.document.close();
+      w.document.querySelector('button').addEventListener('click', () => w.print());   // no inline handler: the pop-up inherits Kelly's CSP
     }
     // ---- render
     function render(el, info) {

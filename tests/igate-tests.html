@@ -65,11 +65,11 @@
 
   // ---- token bucket
   let t = T0; const now = () => t;
-  const b = I.TokenBucket(5000, 3, now);
-  check('bucket: burst of 3', b.take() && b.take() && b.take() && !b.take());
-  t += 4999; check('bucket: not before 5 s', !b.take());
-  t += 1; check('bucket: one after 5 s', b.take() && !b.take());
-  t += 60000; check('bucket: never more than the burst', b.take() && b.take() && b.take() && !b.take());
+  const b = I.TokenBucket(1000, 10, now);
+  check('bucket: burst of 10', Array.from({ length: 10 }, () => b.take()).every(Boolean) && !b.take());
+  t += 999; check('bucket: not before 1 s', !b.take());
+  t += 1; check('bucket: one after 1 s', b.take() && !b.take());
+  t += 60000; check('bucket: never more than the burst', Array.from({ length: 10 }, () => b.take()).every(Boolean) && !b.take());
 
   // ---- the Gate on a fake clock
   const KA = 'a'.repeat(64), KB = 'b'.repeat(64), KC = 'c'.repeat(64);
@@ -89,36 +89,35 @@
   t += 5000;
   check('gate: same station + position within 30 s -> duplicate', off({ ts: 101 }).reason === 'duplicate');
   t += 30000;
-  check('gate: same station within 2 min, not moved -> rate', off({ ts: 102 }).reason === 'rate');
-  check('gate: moved 1 km after 39 s -> queued (SmartBeaconing-lite)', off({ ts: 103, lat: -27.459 }).verdict === 'queued');
+  check('gate: same station after 5 s, not moved -> queued', off({ ts: 102 }).verdict === 'queued');
+  t += 2000;
+  check('gate: same station again within 5 s -> rate', off({ ts: 103, lat: -27.459 }).reason === 'rate');
   t += 10000; g.due();
-  t += 15000;
-  check('gate: moved again but under the 30 s floor -> rate', off({ ts: 104, lat: -27.47 }).reason === 'rate');
   check('gate: older advert than the last -> invalid (replay)', off({ ts: 50, lat: -27.5 }).reason === 'invalid');
   t += 150000;
-  check('gate: after 2 min -> queued', off({ ts: 105 }).verdict === 'queued');
-  // the global bucket: 5 stations at once, burst 3 then one per 5 s; waiting more than 30 s = dropped
+  check('gate: after 5 s -> queued', off({ ts: 105 }).verdict === 'queued');
+  // the global bucket: 12 stations at once, burst 10 then one per second; waiting more than 10 s = dropped
   const g2 = I.Gate({ now, rand: () => 0, lookup: () => ({ c: 'VK4XXX', s: 1, y: '/>' }) });
-  for (let i = 0; i < 5; i++) g2.offer({ key: String(i).repeat(64), lat: -27.4 - i / 10, lon: 152.9, at: t });
-  check('bucket in the gate: 3 go at once', g2.due().length === 3);
-  t += 5000; check('bucket in the gate: one more after 5 s', g2.due().length === 1);
-  t += 40000; check('bucket in the gate: the last waited > 30 s ... still goes if a token is there', g2.due().length === 1);
+  for (let i = 0; i < 12; i++) g2.offer({ key: i.toString(16).repeat(64), lat: -27.4 - i / 10, lon: 152.9, at: t });
+  check('bucket in the gate: 10 go at once', g2.due().length === 10);
+  t += 1000; check('bucket in the gate: one more after 1 s', g2.due().length === 1);
+  t += 1000; check('bucket in the gate: and the last one a second later', g2.due().length === 1);
   const g3 = I.Gate({ now, rand: () => 0, lookup: () => ({ c: 'VK4XXX', s: 1, y: '/>' }), cfg: { burst: 1, bucketS: 60 } });
   for (let i = 0; i < 3; i++) g3.offer({ key: String(i).repeat(64), lat: -27.4 - i / 10, lon: 152.9, at: t });
-  g3.due(); t += 31000; g3.due();
-  check('bucket in the gate: no token for 30 s -> dropped as rate', g3.stats.view().drops.rate === 2, g3.stats.view().drops);
+  g3.due(); t += 11000; g3.due();
+  check('bucket in the gate: no token for 10 s -> dropped as rate', g3.stats.view().drops.rate === 2, g3.stats.view().drops);
   const g4 = I.Gate({ now, rand: () => 1, lookup: () => ({ c: 'VK4XXX', s: 1, y: '/>' }), cfg: { queueMax: 2 } });
   for (let i = 0; i < 4; i++) g4.offer({ key: String(i).repeat(64), lat: -27.4 - i / 10, lon: 152.9, at: t });
   check('queue never grows past queueMax', g4.pending() === 2 && g4.stats.view().drops.rate === 2, [g4.pending(), g4.stats.view().drops]);
 
   // ---- counters
   const v = g.stats.view();
-  check('stats: heard counts every distinct packet', v.heard === 9, v.heard);
+  check('stats: heard counts every distinct packet', v.heard === 8, v.heard);
   check('stats: gated total / hour / today', v.gated === 1 && v.lastHour === 1 && v.today === 1, [v.gated, v.lastHour, v.today]);
-  check('stats: drops by reason', v.drops.notListed === 1 && v.drops.invalid === 2 && v.drops.duplicate === 1 && v.drops.rate === 2, v.drops);
+  check('stats: drops by reason', v.drops.notListed === 1 && v.drops.invalid === 2 && v.drops.duplicate === 1 && v.drops.rate === 1, v.drops);
   check('stats: last packet per station', v.stations[KA].call === 'VK4XXX-9' && /qAO/.test(v.stations[KA].raw));
   const again = I.Gate({ now, stats: JSON.parse(JSON.stringify(g.stats.json())) });
-  check('stats: survive a restart (JSON)', again.stats.view().gated === 1 && again.stats.view().drops.rate === 2);
+  check('stats: survive a restart (JSON)', again.stats.view().gated === 1 && again.stats.view().drops.rate === 1);
   t += 3600001; check('stats: last hour rolls off', again.stats.view().lastHour === 0 && again.stats.view().gated === 1);
   again.stats.reset(); check('stats: reset', again.stats.view().gated === 0 && again.stats.view().heard === 0);
 
