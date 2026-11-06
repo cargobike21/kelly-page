@@ -175,21 +175,43 @@
       if (!mgate || !s.mprs.on) return;
       // MeshPRS: the companion's channel data (RESP 27, decision 0010), or -- only when the node has no #meshprs slot --
       // a GRP_DATA from the raw packet log, decrypted here with the public #meshprs key
-      if (kind === 'chdata' && x.type === M.DATA_TYPE && /^#meshprs$/i.test(x.chName || '')) return mprsIn(x.data, x.at || now, 'node');
-      if (kind === 'grpdata' && MC && !mprsSlot()) {
-        const d = MC.decode(x.raw, { channels: [{ name: M.CHANNEL, secret: M.CHANNEL_KEY }] }), inf = d && d.info;
-        if (inf && inf.channel && inf.dataType === M.DATA_TYPE && inf.data) return mprsIn(M.unhex(inf.data), now, 'raw log');
+      // hops: the repeaters this copy came through -- path_len 0xFF ("came direct", e.g. zero-hop) = 0 (decision 0031)
+      // path: the repeater hashes (first repeater first), from the same packet's raw log line -- the companion's channel
+      // data carries only the hop count, so it is matched by its bytes to a GRP_DATA heard a moment before (as mprs-ui.js)
+      if (kind === 'chdata' && x.type === M.DATA_TYPE && /^#meshprs$/i.test(x.chName || '')) {
+        const hex = M.hex(x.data).toUpperCase(), m = mprsRaws.find(r => !r.used && now - r.at < MPRS_RAW_MS && r.data === hex);
+        if (m) m.used = true;
+        return mprsIn(x.data, x.at || now, 'node', x.hops == null ? 0 : x.hops, m ? m.path : null);
+      }
+      if (kind === 'grpdata' && MC) {
+        let d = null; try { d = MC.decode(x.raw, { channels: [{ name: M.CHANNEL, secret: M.CHANNEL_KEY }] }); } catch { /* not ours */ }
+        const inf = d && d.info;
+        if (!(inf && inf.channel && inf.dataType === M.DATA_TYPE && inf.data)) return;
+        if (!mprsSlot()) return mprsIn(M.unhex(inf.data), now, 'raw log', d.hops == null ? 0 : d.hops, d.path || null);
+        mprsRaws.unshift({ at: now, data: String(inf.data).toUpperCase(), path: d.path || [], used: false });
+        mprsRaws.length = Math.min(mprsRaws.length, 20);
       }
     }
     // the LoRa Mesh > MeshPRS tab (js/mprs-ui.js) follows each frame through the gate: offer / drop / sent
     const mprsFns = new Set();
+    const MPRS_RAW_MS = 4000, mprsRaws = [];   // recent #meshprs GRP_DATA raw log lines: { at, data, path, used }
+    // a path's repeater names for the bridge's received-packet log: the one heard repeater (else node) whose key starts
+    // with that hash, or null when none or several do
+    function pathNames(path) {
+      const heard = nodesHeard();
+      return path.map(h => {
+        const c = heard.filter(n => n.key && n.key.toLowerCase().startsWith(String(h).toLowerCase())), r = c.filter(n => n.role === 2);
+        const one = r.length === 1 ? r[0] : c.length === 1 ? c[0] : null;
+        return one ? String(one.longName || '').trim().slice(0, 32) || null : null;
+      });
+    }
     const emit = e => { for (const fn of mprsFns) try { fn(e); } catch (err) { console.warn('MeshPRS listener', err); } };
     // the name of the listed node a MeshPRS frame is bound to (its key prefix), or '' -- the bridge re-checks it
     function mprsName(f) {
       const kp = String(f && f.key || '').toLowerCase(), e = kp && list.e.find(x => x.e && x.k.toLowerCase().startsWith(kp));
       return e ? nodeName(e.k) || '' : null;   // null = not on my list: the gate drops it as untrusted
     }
-    function mprsIn(blob, at, via) {
+    function mprsIn(blob, at, via, hops, path) {
       let f0 = null; try { f0 = M.decode(blob); } catch (e) { /* the gate names the decode error */ }
       if (f0 && f0.key && !f0.g && f0.sym && !mprsHeard.has(f0.key.toLowerCase())) mprsHeard.set(f0.key.toLowerCase(), { src: f0.src, sym: f0.sym, at: Date.now() });   // raw-log frames too (symFor)
       const nm0 = f0 && !f0.g ? mprsName(f0) : null;
@@ -199,7 +221,8 @@
         log('drop', `MeshPRS ${reason} -- ${f0.src} (the listed node's name must carry ${f0.src.split('-')[0]} as its first or second word) (${via})`);
         return { verdict: 'drop', reason };
       }
-      const r = mgate.offer(blob, at); statsDirty = true;
+      const r = mgate.offer(blob, at, hops); statsDirty = true;
+      if (r.item && Array.isArray(path)) r.item.path = path.slice(0, 32);
       emit({ t: 'offer', hex: M.hex(blob), at, via, verdict: r.verdict, reason: r.reason || '', line: r.item ? r.item.line : '' });
       log(r.verdict === 'queued' ? 'in' : 'drop', r.verdict === 'queued' ? `MeshPRS queued (${via}): ${r.item.line}` : `MeshPRS ${r.reason}${r.f ? ` -- ${r.f.src} seq ${r.f.seq}` : ''} (${via})`);
       return r;
@@ -245,10 +268,13 @@
     // the bridge decodes and renders each frame again (bridge/meshprs.py) and sends ITS line
     async function sendMprs(items) {
       let res;
-      try { res = (await bridgeCall('/api/igate/send', { lines: items.map(it => Object.assign({ mprs: M.hex(it.blob), rxAt: it.rxAt, name: mprsName(it.f) || '' },
-        it.f._record ? { record: { sender: it.f._record.sender, id: it.f._record.id } } : {})) })).results; }
+      try { res = (await bridgeCall('/api/igate/send', { lines: items.map(it => Object.assign({ mprs: M.hex(it.blob), rxAt: it.rxAt, name: mprsName(it.f) || '', hops: it.hops },
+        it.path ? { path: it.path, via: pathNames(it.path) } : {}, it.f._record ? { record: { sender: it.f._record.sender, id: it.f._record.id } } : {})) })).results; }
       catch (e) { S.mprsUnsent += items.length; log('drop', `MeshPRS bridge: ${e.message}`); for (const it of items) emit({ t: 'drop', hex: M.hex(it.blob), at: it.rxAt, reason: `bridge: ${e.message}` }); return; }
-      items.forEach((it, i) => { const r = res[i] || {}; if (r.ok) S.mprsOut++; else S.mprsUnsent++; log(r.ok ? 'out' : 'drop', r.ok ? `${r.dry ? '(dry run) ' : ''}${r.packet}` : `bridge refused MeshPRS ${it.f.src}: ${r.reason}`);
+      // a track history (spec §5.8) comes back as one result with a line per entry sent (r.packets) and one per entry held (r.held)
+      items.forEach((it, i) => { const r = res[i] || {}; if (r.ok) S.mprsOut++; else S.mprsUnsent++;
+        if (r.ok && r.packets) { for (const p of r.packets) log('out', `${r.dry ? '(dry run) ' : ''}${p}`); for (const h of r.held || []) log('drop', `track history entry held: ${h}`); }
+        else log(r.ok ? 'out' : 'drop', r.ok ? `${r.dry ? '(dry run) ' : ''}${r.packet}` : `bridge refused MeshPRS ${it.f.src}: ${r.reason}`);
         emit(r.ok ? { t: 'sent', hex: M.hex(it.blob), at: it.rxAt, dry: !!r.dry, packet: r.packet } : { t: 'drop', hex: M.hex(it.blob), at: it.rxAt, reason: `bridge refused: ${r.reason}` }); });
       statsDirty = true;
     }

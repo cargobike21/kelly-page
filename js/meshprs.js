@@ -12,7 +12,8 @@
  *   Gate(cfg)         the whole spec §10.1 pipeline on a given clock (replay, duplicates, interval, queue, rate, expiry)
  *
  * Implemented subtypes: the 1.0 required set (decision 0007) -- position, message, ack, telemetry, object/item, query
- * (parsed, never gated), status. Weather, bulletin and neighbour report are optional and drop as 'unknown subtype'.
+ * (parsed, never gated), status -- and track history (0x0A, decision 0030: check() and render() give an ARRAY of lines,
+ * one per entry gated). Weather, bulletin and neighbour report are optional and drop as 'unknown subtype'.
  * The ack 'to hash' needs SHA-256: js/mcdecode.js (KellyMcDecode) is loaded first.
  *
  * window.MeshPRS = { TOCALL, DATA_TYPE, CHANNEL, Drop, callEncode, callDecode, amateurCall, toHash, degToRaw, fmtLat,
@@ -26,7 +27,8 @@
   const TOCALL = 'APZKPG', DATA_TYPE = 0xFF4D, CHANNEL = '#meshprs';   // decision 0012 (development values)
   const CHANNEL_KEY = '650fa1fd5d2c0bc01449a964a130ea1c';              // sha256('#meshprs')[0:16], spec §12.1 (hash 0xBA)
   const ALPHA = ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/.', MAX40 = 40n ** 9n;
-  const [POS, MSG, ACK, TLM, , OBJ, , QRY, NBR, STA] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+  const [POS, MSG, ACK, TLM, , OBJ, , QRY, NBR, STA, HIST] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+  const HIST_MAX = 8, HIST_AGE_MAX = 1800;   // track history: entries per frame, oldest entry gated (s) -- spec §5.8
   const STATUS_NAMES = ['OFF DUTY', 'EN ROUTE', 'IN SERVICE', 'RETURNING', 'COMMITTED', 'SPECIAL', 'PRIORITY', 'EMERGENCY',
     null, 'EMERGENCY CANCELLED'];
   const TLM_KINDS = { 1: 'PARM', 2: 'UNIT', 3: 'EQNS', 4: 'BITS' };
@@ -114,7 +116,7 @@
     f.key = f.k ? hex(blob.subarray(9, 13)) : null;
     const st = f.subtype, r = reader(blob, f.k ? 13 : 9);
     if (st >= 0xE0 && st <= 0xFE) drop('experimental subtype');
-    if (![POS, MSG, ACK, TLM, OBJ, QRY, STA].includes(st)) drop('unknown subtype');
+    if (![POS, MSG, ACK, TLM, OBJ, QRY, STA, HIST].includes(st)) drop('unknown subtype');
     if (st === POS) {
       f.lat = i24(r.take(3)); f.lon = i24(r.take(3)); f.sym = sym(r.take(2));
       const pf = r.u8(), amb = (pf >> 3) & 7;
@@ -137,7 +139,8 @@
       const kind = f.kind = r.u8();
       if (kind === 0) {
         const mask = r.u8();
-        if (mask & 0x60) drop('unknown flag');
+        if (mask & 0x40) drop('unknown flag');
+        if (mask & 0x20) { if ((mask & 0x1F) === 0x1F) drop('bad field'); f.h = 1; }   // H: the gateway's hop count fills a slot (0031)
         f.a = [0, 1, 2, 3, 4].map(i => mask & (1 << i) ? r.u8() : null);
         f.bits = mask & 0x80 ? r.u8().toString(2).padStart(8, '0') : null;
         if (r.rest().length) drop('bad field');
@@ -160,12 +163,30 @@
       if (f.qtype > 5 || r.rest().length) drop('bad field');
     } else if (st === STA) {
       const c = r.u8();
-      if (c & 0x70) drop('unknown flag');
+      if (c & 0x60) drop('unknown flag');
+      if (c & 0x10) f.h = 1;                                     // H: the gateway adds its hop count (decision 0031)
       f.code = c & 0x0F;
       if (f.code > 9) drop('bad field');
       if (c & 0x80) { f.lat = i24(r.take(3)); f.lon = i24(r.take(3)); }
       f.text = text(r.rest());
       if (f.text.length > 62) drop('bad text');
+    } else if (st === HIST) {
+      f.sym = sym(r.take(2));
+      const hf = r.u8();
+      if (hf & 0xE0) drop('unknown flag');
+      const amb = (hf >> 1) & 7;
+      if (amb > 4) drop('bad field');
+      f.amb = amb; f.msg = (hf >> 4) & 1;
+      const n = r.u8();
+      if (n < 1 || n > HIST_MAX) drop('bad field');
+      f.entries = [];
+      for (let i = 0; i < n; i++) {
+        const e = { age: le(r.take(2)), lat: i24(r.take(3)), lon: i24(r.take(3)) };
+        if (hf & 1) e.alt = le(r.take(2), true);
+        f.entries.push(e);
+      }
+      if (r.rest().length) drop('bad field');
+      if (f.entries.some((e, i) => i && e.age >= f.entries[i - 1].age)) drop('bad field');   // oldest first, ages strictly falling
     }
     return f;
   }
@@ -190,7 +211,7 @@
     else if (st === TLM) {
       out.push(f.kind);
       if (f.kind === 0) {
-        out.push(f.a.reduce((m, a, i) => a === null ? m : m | (1 << i), 0) | (f.bits ? 0x80 : 0));
+        out.push(f.a.reduce((m, a, i) => a === null ? m : m | (1 << i), 0) | (f.bits ? 0x80 : 0) | (f.h ? 0x20 : 0));
         for (const a of f.a) if (a !== null) out.push(a);
         if (f.bits) out.push(parseInt(f.bits, 2));
       } else if (TLM_KINDS[f.kind]) put(ascii(f.text));
@@ -203,9 +224,13 @@
       put(ascii(f.comment || ''));
     } else if (st === QRY) { out.push(f.qtype | (f.target ? 0x80 : 0)); if (f.target) put(callEncode(f.target)); }
     else if (st === STA) {
-      out.push(f.code | (has('lat') ? 0x80 : 0));
+      out.push(f.code | (has('lat') ? 0x80 : 0) | (f.h ? 0x10 : 0));
       if (has('lat')) { put(i24b(f.lat)); put(i24b(f.lon)); }
       put(ascii(f.text || ''));
+    } else if (st === HIST) {
+      const alt = f.entries[0].alt !== undefined;
+      put(ascii(f.sym)); out.push((alt ? 1 : 0) | ((f.amb || 0) << 1) | ((f.msg || 0) << 4), f.entries.length);
+      for (const e of f.entries) { put(leb(e.age, 2)); put(i24b(e.lat)); put(i24b(e.lon)); if (alt) put(leb(e.alt, 2)); }
     } else throw new Error(`subtype ${st} not implemented`);
     return Uint8Array.from(out);
   }
@@ -230,6 +255,8 @@
   }
 
   // the info field for a frame that passed the checks (§5.3, §6.5, §7.3, §8.2, §8.4, §10.3)
+  // the hop count of the copy this gateway received (decision 0031), or null when it isn't known
+  const hopsOf = cfg => cfg && Number.isInteger(cfg.hops) && cfg.hops >= 0 && cfg.hops <= 63 ? cfg.hops : null;
   function render(f, cfg) {
     const st = f.subtype;
     if (st === POS) {
@@ -239,7 +266,10 @@
     if (st === MSG) return `:${pad9(f.to)}:${f.text}` + (f.msgno ? `{${f.msgno}` : '');
     if (st === ACK) return `:${pad9(f._record.sender)}:${f.rej ? 'rej' : 'ack'}${f._record.id}`;
     if (st === TLM) {
-      if (f.kind === 0) return `T#${p3(f.seq)},${f.a.map(v => v === null ? '' : p3(v)).join(',')},${f.bits || '00000000'}`;
+      if (f.kind === 0) {
+        const a = f.a.slice(); if (f.h) a[a.indexOf(null)] = hopsOf(cfg);   // §7.4: the first slot the mask leaves out
+        return `T#${p3(f.seq)},${a.map(v => v === null ? '' : p3(v)).join(',')},${f.bits || '00000000'}`;
+      }
       return `:${pad9(f.src)}:${TLM_KINDS[f.kind]}.${f.text}`;
     }
     if (st === OBJ) {
@@ -249,20 +279,36 @@
       return ';' + f.name.padEnd(9, ' ') + (f.live ? '*' : '_') + ddhhmm(ts) + pos + c;
     }
     if (st === STA) {
-      if (f.code === 8) return '>' + fit(f.text, 62);
+      const h = f.h ? hopsOf(cfg) : null, text = h === null ? f.text : `${f.text.trimEnd()} ${h}`.trim();   // §8.4: H adds " <hops>"
+      if (f.code === 8) return '>' + fit(text, 62);
       const name = STATUS_NAMES[f.code];
-      if (f.lat !== undefined) return '!' + latlon(f.lat, f.lon, '/>') + fit(`${name} ${f.text}`, 43);
-      return '>' + fit(`${name} ${f.text}`, 62);
+      if (f.lat !== undefined) return '!' + latlon(f.lat, f.lon, '/>') + fit(`${name} ${text}`, 43);
+      return '>' + fit(`${name} ${text}`, 62);
     }
+    if (st === HIST) return histEntries(f, cfg).filter(x => x.info).map(x => x.info);
     return drop('not gated');
+  }
+  // track history (spec §5.8): why one entry is not gated, or null; and every entry with its line or its reason. Each entry
+  // is a timestamped position: '/' ('@' with MSG) + DDHHMMz of (receive time - age), truncated to the minute
+  const histProblem = e => e.age < 1 || e.age > HIST_AGE_MAX ? 'stale' : e.lat === 0 && e.lon === 0 ? '0,0' : null;
+  function histEntries(f, cfg) {
+    const rx = Math.floor(cfg.rxAt / 1000);
+    return f.entries.map(e => {
+      const why = histProblem(e);
+      return { e, why, info: why ? null : (f.msg ? '@' : '/') + ddhhmm(rx - e.age) + latlon(e.lat, e.lon, f.sym, f.amb) + posExt(e) };
+    });
   }
 
   // ---------------------------------------------------------------- the stateless gate (§10.1 steps 1-4)
   // cfg.adverts (optional, Kelly: decision 0015) = { fullKeyHex: last advert ms } and cfg.advertMaxMs: a binding counts
   // only when its key's advert was heard that recently (spec §4.3 item 5), else 'untrusted'.
   const check = (blob, cfg) => { const f = verify(blob, cfg); validity(f); return line(f, cfg); };
-  const line = (f, cfg) => `${f.src}>${TOCALL},qAO,${cfg.igate}:${render(f, cfg)}`;
-  function validity(f) { if (f.lat === 0 && f.lon === 0) drop('0,0'); }   // step 4 (the stateless part)
+  const line = (f, cfg) => f.subtype === HIST ? render(f, cfg).map(i => `${f.src}>${TOCALL},qAO,${cfg.igate}:${i}`)
+    : `${f.src}>${TOCALL},qAO,${cfg.igate}:${render(f, cfg)}`;
+  function validity(f) {                                                 // step 4 (the stateless part)
+    if (f.lat === 0 && f.lon === 0) drop('0,0');
+    if (f.subtype === HIST && !f.entries.some(e => !histProblem(e))) drop('stale');   // no entry left to gate
+  }
   function verify(blob, cfg) {
     const f = decode(blob);                                              // 1. decode and validate
     if (!f.g && !amateurCall(f.src)) drop('bad callsign');
@@ -292,8 +338,11 @@
   // Gate(cfg) -> { offer(blob, rxAt), due(now), records, stats }. cfg = check()'s cfg (bindings, igate, adverts, ...) plus
   // the timings below; cfg.rng() for the jitter (tests pass () => 0). Bindings, adverts and records may be functions,
   // read on every offer, so the page's lists stay live.
-  //   offer   steps 1-7: -> { verdict: 'queued', item } or { verdict: 'drop', reason, f? }
-  //   due     steps 8-9 at `now`: -> { send: [item], drop: [{ item, reason }] }; an item = { f, line, rxAt, dueAt, prio }
+  //   offer   steps 1-7: -> { verdict: 'queued', item } or { verdict: 'drop', reason, f? }. offer(blob, rxAt, hops): hops =
+  //           the repeaters this copy came through (0 = heard direct), for a frame with H set (decision 0031)
+  //   due     steps 8-9 at `now`: -> { send: [item], drop: [{ item, reason }] }; an item = { f, line, lines, rxAt, dueAt, prio }
+  //           (lines: every APRS-IS line of the frame -- one, or one per entry of a track history; each takes a token, and
+  //           line is them joined by a newline). A track history's entries never touch the live position's interval state.
   // A queued message is remembered (30 min) so the station's ack can be rendered (§6.2); the interval is taken when a
   // frame is queued, so a second frame waiting behind it is an 'interval' drop, not a second line.
   const GATE = { jitterS: 5, waitS: 10, holdS: 15, perStationS: 5, bucketS: 1, burst: 10, queueMax: 20,
@@ -329,9 +378,9 @@
       s.rep = f.seq;
       return 'replayed';
     }
-    function offer(blob, rxAt) {
+    function offer(blob, rxAt, hops) {
       const now = rxAt; stats.heard++; prune(now);
-      const c = Object.assign({}, cfg, { igate: val(cfg.igate), bindings: val(cfg.bindings), adverts: val(cfg.adverts), now, rxAt,
+      const c = Object.assign({}, cfg, { igate: val(cfg.igate), bindings: val(cfg.bindings), adverts: val(cfg.adverts), now, rxAt, hops,
         records: records.concat(val(cfg.records) || []) });
       let f;
       try { f = verify(blob, c); } catch (e) { if (e instanceof Drop) return dropIt(e.reason); throw e; }   // steps 1-3
@@ -351,24 +400,25 @@
         if (low < 0) return dropIt('queue full', f);
         queue.splice(low, 1); stats.drops['queue full'] = (stats.drops['queue full'] || 0) + 1;
       }
-      const item = { f, blob, line: line(f, c), rxAt, dueAt: rxAt + rng() * cfg.jitterS * 1000, prio };
+      const out = line(f, c), lines = Array.isArray(out) ? out : [out];
+      const item = { f, blob, line: lines.join('\n'), lines, rxAt, hops, dueAt: rxAt + rng() * cfg.jitterS * 1000, prio };
       if (!exempt(f)) last.set(ivKey(f), { at: now, pos: f.lat !== undefined ? { lat: f.lat, lon: f.lon } : null });
       if (f.subtype === MSG && f.msgno) records.push({ seq: f.seq, msgno: f.msgno, toHash: toHash(f.src), addressee: f.to, sender: f.src, id: String(f.msgno), at: now });
       queue.push(item); queue.sort((a, b) => b.prio - a.prio || a.dueAt - b.dueAt); stats.queued++;
       return { verdict: 'queued', item };
     }
-    function take(now) {          // token bucket: one per bucketS, up to burst
+    function take(now, n = 1) {   // token bucket: one per bucketS, up to burst; a frame of n lines takes n at once
       if (bucket.at !== null) bucket.tokens = Math.min(cfg.burst, bucket.tokens + (now - bucket.at) / (cfg.bucketS * 1000));
       bucket.at = now;
-      if (bucket.tokens < 1) return false;
-      bucket.tokens--; return true;
+      if (bucket.tokens < n) return false;
+      bucket.tokens -= n; return true;
     }
     function due(now) {
       const send = [], gone = [];
       for (let i = 0; i < queue.length;) {
         const q = queue[i];
         if (q.dueAt > now) { i++; continue; }
-        if (take(now)) { send.push(queue.splice(i, 1)[0]); stats.sent++; continue; }
+        if (take(now, q.lines.length)) { send.push(queue.splice(i, 1)[0]); stats.sent++; continue; }
         const why = now > q.dueAt + cfg.waitS * 1000 ? 'rate' : now > q.rxAt + cfg.holdS * 1000 ? 'expired' : null;
         if (why) { gone.push({ item: queue.splice(i, 1)[0], reason: why }); stats.drops[why] = (stats.drops[why] || 0) + 1; } else i++;
       }

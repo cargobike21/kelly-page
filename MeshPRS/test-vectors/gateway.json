@@ -1,5 +1,5 @@
 {
- "_": "MeshPRS gateway vectors: frame -> the APRS-IS line, or the spec §15.2 drop reason, through the STATELESS part of spec §10.1 (steps 1-4: decode, loop and gating, trust, position validity) and the §10.3 rendering. Replay, duplicate, interval, queue and rate need a clock and are tested with the gate. 'config' is merged over the top-level config. rxAt = 2026-10-29 10:30:00 UTC.",
+ "_": "MeshPRS gateway vectors: frame -> the APRS-IS line, or the spec §15.2 drop reason, through the STATELESS part of spec §10.1 (steps 1-4: decode, loop and gating, trust, position validity) and the §10.3 rendering. Replay, duplicate, interval, queue and rate need a clock and are tested with the gate. 'config' is merged over the top-level config. rxAt = 2026-10-29 10:30:00 UTC. A track history frame (subtype 10, spec §5.8) gives a LIST of lines, one per entry gated, oldest first.",
  "config": {
   "igate": "VK4XXX-10",
   "rxAt": 1793269800000,
@@ -308,6 +308,130 @@
    "about": "decode drops come first",
    "hex": "90 00 2A 00 00 12 9F 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 3E 00 4D 6F 62 69 6C 65",
    "drop": "unknown version"
+  },
+  {
+   "id": "gw-hst-001",
+   "spec": "§5.8",
+   "about": "track history: one timestamped position per entry, oldest first; time = receive time - age, to the minute",
+   "hex": "50 0A 30 B1 29 F6 53 5D 8E 02 F9 52 3D 2F 62 01 03 2C 01 35 EF D8 14 D1 6C 2D 00 F0 00 F5 E8 D8 C4 D5 6C 2E 00 B4 00 B5 E2 D8 74 DA 6C 2F 00",
+   "out": [
+    "VK4ABC-12>APZKPG,qAO,VK4XXX-10:/291025z2728.08S/15301.41Eb/A=000148",
+    "VK4ABC-12>APZKPG,qAO,VK4XXX-10:/291026z2729.11S/15302.95Eb/A=000151",
+    "VK4ABC-12>APZKPG,qAO,VK4XXX-10:/291027z2730.14S/15304.50Eb/A=000154"
+   ]
+  },
+  {
+   "id": "gw-hst-002",
+   "spec": "§5.8",
+   "about": "track history, messaging-capable: '@'",
+   "hex": "50 0A 34 B1 29 F6 53 5D 8E 02 F9 52 3D 2F 62 10 01 5F 00 35 EF D8 14 D1 6C",
+   "out": [
+    "VK4ABC-12>APZKPG,qAO,VK4XXX-10:@291028z2728.08S/15301.41Eb"
+   ]
+  },
+  {
+   "id": "gw-hst-003",
+   "spec": "§5.8",
+   "about": "track history: an entry 59 s old and one 1 s old both fall in the previous minute (truncated, not rounded)",
+   "hex": "50 0A 35 B1 29 F6 53 5D 8E 02 F9 52 3D 2F 62 00 02 3B 00 35 EF D8 14 D1 6C 01 00 F5 E8 D8 C4 D5 6C",
+   "out": [
+    "VK4ABC-12>APZKPG,qAO,VK4XXX-10:/291029z2728.08S/15301.41Eb",
+    "VK4ABC-12>APZKPG,qAO,VK4XXX-10:/291029z2729.11S/15302.95Eb"
+   ]
+  },
+  {
+   "id": "gw-hst-004",
+   "spec": "§5.8",
+   "about": "track history: an entry older than 1800 s is not gated (stale), the rest are",
+   "hex": "50 0A 36 B1 29 F6 53 5D 8E 02 F9 52 3D 2F 62 00 03 09 07 35 EF D8 14 D1 6C 08 07 F5 E8 D8 C4 D5 6C 58 02 B5 E2 D8 74 DA 6C",
+   "out": [
+    "VK4ABC-12>APZKPG,qAO,VK4XXX-10:/291000z2729.11S/15302.95Eb",
+    "VK4ABC-12>APZKPG,qAO,VK4XXX-10:/291020z2730.14S/15304.50Eb"
+   ]
+  },
+  {
+   "id": "gw-hst-005",
+   "spec": "§5.8",
+   "about": "track history: a 0,0 entry is not gated, the rest are",
+   "hex": "50 0A 37 B1 29 F6 53 5D 8E 02 F9 52 3D 2F 62 00 02 90 01 00 00 00 00 00 00 2C 01 F5 E8 D8 C4 D5 6C",
+   "out": [
+    "VK4ABC-12>APZKPG,qAO,VK4XXX-10:/291025z2729.11S/15302.95Eb"
+   ]
+  },
+  {
+   "id": "gw-hst-006",
+   "spec": "§5.8",
+   "about": "track history with no entry left to gate",
+   "hex": "50 0A 38 B1 29 F6 53 5D 8E 02 F9 52 3D 2F 62 00 02 A0 0F 35 EF D8 14 D1 6C 6C 07 F5 E8 D8 C4 D5 6C",
+   "drop": "stale"
+  },
+  {
+   "id": "gw-hst-007",
+   "spec": "§5.8",
+   "about": "track history with ambiguity 2",
+   "hex": "50 0A 33 B1 29 F6 53 5D 8E 02 F9 52 3D 2F 62 04 02 C8 00 35 EF D8 14 D1 6C 64 00 F5 E8 D8 C4 D5 6C",
+   "out": [
+    "VK4ABC-12>APZKPG,qAO,VK4XXX-10:/291026z2728.  S/15301.  Eb",
+    "VK4ABC-12>APZKPG,qAO,VK4XXX-10:/291028z2729.  S/15302.  Eb"
+   ]
+  },
+  {
+   "id": "gw-hst-008",
+   "spec": "§4.3",
+   "about": "track history without K: no key",
+   "hex": "40 0A 31 00 00 12 9F 5D 8E 2F 3E 10 01 5F 00 35 EF D8 14 D1 6C",
+   "drop": "no key"
+  },
+  {
+   "id": "gw-hst-009",
+   "spec": "§9.3",
+   "about": "track history from APRS-IS (G = 1): looped",
+   "hex": "70 0A 30 B1 29 F6 53 5D 8E 02 F9 52 3D 2F 62 01 03 2C 01 35 EF D8 14 D1 6C 2D 00 F0 00 F5 E8 D8 C4 D5 6C 2E 00 B4 00 B5 E2 D8 74 DA 6C 2F 00",
+   "drop": "looped"
+  },
+  {
+   "id": "gw-hst-010",
+   "spec": "§10.2",
+   "about": "a position retry (Mesh Buddy layout: ALT and CSE, retry 1) renders the original's line, so the gate's (originator, seq) duplicate check collapses the two",
+   "hex": "51 00 39 B1 29 F6 53 5D 8E 02 F9 52 3D 35 EF D8 14 D1 6C 2F 62 03 2D 00 40 14",
+   "out": "VK4ABC-12>APZKPG,qAO,VK4XXX-10:!2728.08S/15301.41Eb090/011/A=000148"
+  },
+  {
+   "id": "gw-hop-01",
+   "spec": "§7.4",
+   "about": "telemetry with H, heard over 2 repeaters: the hop count fills A2, the slot the mask leaves out",
+   "hex": "50 03 3C B1 29 F6 53 5D 8E 02 F9 52 3D 00 BD 9C 5A 09 8C 36",
+   "config": {
+    "hops": 2
+   },
+   "out": "VK4ABC-12>APZKPG,qAO,VK4XXX-10:T#060,156,002,090,009,140,00110110"
+  },
+  {
+   "id": "gw-hop-02",
+   "spec": "§7.4",
+   "about": "telemetry with H, hop count not known (an older bridge or page): the slot stays empty",
+   "hex": "50 03 3C B1 29 F6 53 5D 8E 02 F9 52 3D 00 BD 9C 5A 09 8C 36",
+   "out": "VK4ABC-12>APZKPG,qAO,VK4XXX-10:T#060,156,,090,009,140,00110110"
+  },
+  {
+   "id": "gw-hop-03",
+   "spec": "§8.4",
+   "about": "plain status with H, heard direct (0 hops)",
+   "hex": "50 09 3D B1 29 F6 53 5D 8E 02 F9 52 3D 18 48 6F 70 20 63 6F 75 6E 74",
+   "config": {
+    "hops": 0
+   },
+   "out": "VK4ABC-12>APZKPG,qAO,VK4XXX-10:>Hop count 0"
+  },
+  {
+   "id": "gw-hop-04",
+   "spec": "§8.4",
+   "about": "plain status with H, heard over 3 repeaters",
+   "hex": "50 09 3D B1 29 F6 53 5D 8E 02 F9 52 3D 18 48 6F 70 20 63 6F 75 6E 74",
+   "config": {
+    "hops": 3
+   },
+   "out": "VK4ABC-12>APZKPG,qAO,VK4XXX-10:>Hop count 3"
   }
  ]
 }

@@ -109,5 +109,29 @@ for (const r of ['short frame', 'unknown version', 'bad callsign', 'unknown subt
   'looped', 'nogate', 'test', 'not gated', 'text profile', 'untrusted', 'no key', 'key mismatch', 'replayed', 'duplicate', 'interval', 'rate', 'expired'])
   ok(`explained: ${r}`, !!P.WHY[r]);
 
+// ---- track history (subtype 0x0A, spec §5.8): dissected byte by byte, rendered one line per entry, backfilled into the track
+const HST = M.unhex('50 0A 30 B1 29 F6 53 5D 8E 02 F9 52 3D 2F 62 01 03 2C 01 35 EF D8 14 D1 6C 2D 00 F0 00 F5 E8 D8 C4 D5 6C 2E 00 B4 00 B5 E2 D8 74 DA 6C 2F 00');
+{
+  const d = P.dissect(HST);
+  ok('history decodes', d.f && !d.err, d.err);
+  let o = 0; for (const x of d.fields) { ok(`history ${x.key} starts at ${o}`, x.start === o, x); o += x.len; }
+  eq('history covers every byte', o, HST.length);
+  eq('history entry 1 age', d.fields.find(x => x.key === 'age0').value, '300 s ago');
+  const t = P.tnc2(d.f, 'VK4XXX-10', 1793269800000);
+  eq('history tnc2: one line per entry', t.line.split('\n').length, 3);
+  ok('history tnc2: timestamped', t.line.startsWith('VK4ABC-12>APZKPG,qAO,VK4XXX-10:/291025z'), t.line);
+  const T4 = P.Tracker(), T0 = 1793269800000;
+  const live = M.encode({ version: 1, g: 0, gating: 0, retry: 0, subtype: 0, seq: 47, src: 'VK4ABC-12', key: '02F9523D', lat: -2565000, lon: 7140000, sym: '/b', amb: 0, msg: 0, comment: '' });
+  T4.frame({ blob: live, at: T0 - 10000 });
+  T4.frame({ blob: HST, at: T0 });
+  const s = T4.station('VK4ABC-12');
+  ok('history: station made', !!s);
+  if (s) {
+    eq('history: the track holds the live fix and the 3 entries', s.track.length, 4);
+    ok('history: entries sorted in before the live fix', s.track[3].hist === undefined && s.track[0].at === T0 - 300000, s.track.map(p => p.at));
+    ok('history: the current position stays the live one', Math.abs(s.lat - (-2565000 * 90 / 8388608)) < 1e-9, s.lat);
+  }
+}
+
 console.log(fail ? `RESULT: ${fail} FAILED, ${pass} passed` : `RESULT: ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

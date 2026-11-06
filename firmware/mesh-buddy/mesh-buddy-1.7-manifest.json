@@ -7,7 +7,7 @@
                 "application_version": 4294967295,
                 "device_revision": 65535,
                 "device_type": 82,
-                "firmware_crc16": 4823,
+                "firmware_crc16": 62890,
                 "softdevice_req": [
                     182
                 ]

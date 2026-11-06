@@ -16,7 +16,8 @@ it. It re-checks every field and keeps its own global token bucket (1 line per s
                            body = T#... or :SRC:PARM./UNIT./EQNS./BITS. for that station only. mprs = a MeshPRS frame the
                            page has gated (js/meshprs.js Gate): decoded and rendered AGAIN here with meshprs.py, so the
                            line is the spec's rendering of a real frame, never text from the page; record = the gated
-                           message an ack answers (spec §6.2)
+                           message an ack answers (spec §6.2). A track history (MeshPRS 0x0A, spec §5.8) answers ONE
+                           result with a line per entry: {ok, packets, packet (joined), held, entries}
   (this machine, or the bridge token -- ?token= or X-Kelly-Token)
 
   login    user CALL-SSID pass N vers KellyPage x.y [filter F]; nothing is ever sent unless the reply says "verified"
@@ -129,6 +130,13 @@ def valid_symbol(s) -> bool:
 MAX_SPEED_KMH = 400.0          # faster than this between two fixes = a bad fix
 SPEED_MIN_KM = 2.0             # GPS jitter is not "speed"
 SPEED_WINDOW_S = 3600.0        # only compare against a fix this recent
+# Slow stations, by APRS symbol (2026-11-05: a push bike drew 48-66 km/h jumps that 400 km/h / 2 km never catch): a
+# lower limit, checked from a shorter distance (a good fix is within tens of metres). A frame's reported speed over the
+# limit is a bad fix too: its course and speed are left out of the line.
+SPEED_LIMITS = {"/b": 60.0, "/[": 25.0}   # bicycle, person (walker / jogger)
+SLOW_MIN_KM = 0.15
+HIST_KEEP_S = 1800.0            # live positions a track history is checked against: its entries are never over 30 min old
+RETRY_AGE_S = 45.0           # a position retry is sent 40-50 s after the original (spec §5.7): its fix is that old
 
 
 def km_between(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -141,25 +149,38 @@ class JumpGuard:
     def __init__(self):
         self.good: dict[str, tuple[float, float, float]] = {}   # callsign -> (lat, lon, time) last accepted
         self.jump: dict[str, tuple[float, float, float]] = {}   # callsign -> the last fix refused as a jump
+        self.sym: dict[str, str] = {}                            # callsign -> the last symbol it was gated with
 
     @staticmethod
-    def _bad(a, lat, lon, t):
+    def _bad(a, lat, lon, t, limit=None):
+        """(km, km/h) when the move from fix a is impossible: over `limit` km/h for a slow station, else the 400 km/h rule."""
         dt = abs(t - a[2])
         if dt > SPEED_WINDOW_S:
             return None
         km = km_between(a[0], a[1], lat, lon)
         kmh = km / max(dt, 1.0) * 3600
-        return (km, kmh) if km > SPEED_MIN_KM and kmh > MAX_SPEED_KMH else None
+        return (km, kmh) if km > (SLOW_MIN_KM if limit else SPEED_MIN_KM) and kmh > (limit or MAX_SPEED_KMH) else None
 
-    def problem(self, call: str, lat: float, lon: float, t: float) -> str | None:
+    def limit(self, call: str, sym: str | None = None) -> float | None:
+        """The station's speed limit (SPEED_LIMITS) from this symbol, or the last one it was gated with; None = any."""
+        if sym:
+            self.sym[call] = sym
+            if len(self.sym) > 2000:
+                self.sym.pop(next(iter(self.sym)))
+        return SPEED_LIMITS.get(sym or self.sym.get(call, ""))
+
+    def problem(self, call: str, lat: float, lon: float, t: float, sym: str | None = None) -> str | None:
         """Why this fix can't be real, or None -- and then it is the callsign's last good fix."""
+        lim = self.limit(call, sym)
         prev = self.good.get(call)
         if prev and prev[0] == lat and prev[1] == lon:
             return None
         refused = self.jump.pop(call, None)
-        j = prev and self._bad(prev, lat, lon, t)
-        if j and not (refused and self._bad(refused, lat, lon, t) is None and abs(t - refused[2]) <= SPEED_WINDOW_S):
+        j = prev and self._bad(prev, lat, lon, t, lim)
+        if j and not (refused and self._bad(refused, lat, lon, t, lim) is None and abs(t - refused[2]) <= SPEED_WINDOW_S):
             self.jump[call] = (lat, lon, t)
+            if j[0] < 2:
+                return f"jumped {j[0] * 1000:.0f} m in {abs(t - prev[2]):.0f} s from its last good fix ({j[1]:.0f} km/h, limit {lim:.0f})"
             return f"jumped {j[0]:.0f} km in {abs(t - prev[2]):.0f} s from its last good fix ({j[1]:.0f} km/h)"
         self.good[call] = (lat, lon, t)
         if len(self.good) > 2000:
@@ -200,39 +221,56 @@ class PrivacyZone:
     entering it over the weeks outline the zone's circle, so a zone centred ON home would give home away to anyone who
     plotted them -- this way they give away only the centre, and home is somewhere within 150 m of it (and always at
     least 100 m inside the edge). "New spot" (POST /api/igate/privacy) picks a new centre. The home position comes from
-    the page (Kelly's own position) and is never saved here or sent anywhere."""
+    the page (Kelly's own position) and is never saved here or sent anywhere. The zone's centre IS saved (it is the one
+    spot already public on APRS-IS), so after a restart that loses the page's home (a keeper restart did, 2026-11-03/04)
+    own stations are still placed by the saved centre instead of all being held."""
 
     def __init__(self, path=PRIVACY_FILE, rand=random.random):
-        self.path, self.rand, self.bearing, self.dist = os.path.expanduser(path), rand, None, None
+        self.path, self.rand, self.bearing, self.dist, self.spot = os.path.expanduser(path), rand, None, None, None
         try:
             with open(self.path, encoding="utf-8") as f:
                 d = json.load(f)
             self.bearing, self.dist = float(d["bearing"]) % 360, float(d["dist"])   # a 1st-version file (no dist) is replaced
         except (OSError, ValueError, KeyError, TypeError):
             self.bearing = None
+            return
+        self.spot = home_of(d.get("centre"))      # files from before the centre was saved have none: set on the next home
+
+    def _save(self):
+        try:
+            tmp = self.path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"bearing": self.bearing, "dist": self.dist,
+                           **({"centre": [round(self.spot[0], 6), round(self.spot[1], 6)]} if self.spot else {})}, f)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass   # still fixed for as long as the bridge runs
 
     def new(self):
         lo, hi = PRIVACY_CENTRE_M
         self.bearing = round(self.rand() * 360, 1) % 360
         self.dist = round(lo + self.rand() * (hi - lo), 1)
-        try:
-            tmp = self.path + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump({"bearing": self.bearing, "dist": self.dist}, f)
-            os.replace(tmp, self.path)
-        except OSError:
-            pass   # still fixed for as long as the bridge runs
+        self.spot = None                          # the old centre is gone; the next home position sets the new one
+        self._save()
 
-    def centre(self, home) -> tuple[float, float]:
+    def centre(self, home) -> tuple[float, float] | None:
+        """The zone's centre: from home when the page sent one (and saved when it moved), else the saved centre."""
+        if not home:
+            return self.spot
         if self.dist is None:
             self.new()
-        return offset(home[0], home[1], self.bearing, self.dist)
+        c = offset(home[0], home[1], self.bearing, self.dist)
+        if not self.spot or km_between(c[0], c[1], self.spot[0], self.spot[1]) * 1000 > 1:
+            self.spot = c
+            self._save()
+        return c
 
     def place(self, lat: float, lon: float, home) -> tuple[float, float, bool] | None:
-        """(lat, lon, inside the zone) to send, or None: no home known yet, so an own position can't be placed safely."""
-        if not home:
-            return None
+        """(lat, lon, inside the zone) to send, or None: no home known and no saved centre, so an own position can't
+        be placed safely."""
         c = self.centre(home)
+        if not c:
+            return None
         if km_between(c[0], c[1], lat, lon) * 1000 <= PRIVACY_ZONE_M:
             return c[0], c[1], True
         return lat, lon, False
@@ -404,6 +442,9 @@ def rx_record(x: dict, r: dict) -> dict:
             f = meshprs.decode(bytes.fromhex(str(x.get("mprs", ""))))
             rec["src"] = f["src"]
             rec["k"] = {meshprs.POS: "pos", meshprs.STA: "sta", meshprs.TLM: "tlm", meshprs.MSG: "msg"}.get(f["subtype"], "mprs")
+            rec["seq"] = f["seq"]                 # the sender's frame counter: gaps = frames sent but never heard
+            if f.get("retry"):
+                rec["retry"] = f["retry"]
             if "lat" in f and not (f["lat"] == 0 and f["lon"] == 0):
                 rec["lat"], rec["lon"] = round(f["lat"] * 90 / 2 ** 23, 5), round(f["lon"] * 180 / 2 ** 23, 5)
             if "course" in f:
@@ -413,6 +454,7 @@ def rx_record(x: dict, r: dict) -> dict:
             rec["t"] = int(x.get("rxAt")) / 1000
         except (ValueError, TypeError, KeyError, meshprs.Drop):
             pass
+        rec.update(rx_route(x))
     elif "body" in x:
         rec["k"] = "tlm"
     else:
@@ -422,13 +464,61 @@ def rx_record(x: dict, r: dict) -> dict:
                 rec["lat"], rec["lon"] = round(lat, 5), round(lon, 5)
         except (TypeError, ValueError):
             pass
+    return _outcome(rec, r)
+
+
+def rx_route(x: dict) -> dict:
+    """The route the page heard a MeshPRS frame over, for the log: hops (0 = direct), path = the repeater hashes, first
+    repeater first, and via = their names where the page knew them (null = unknown / ambiguous). Bad values are left out."""
+    out = {}
+    hops = x.get("hops")
+    if isinstance(hops, int) and not isinstance(hops, bool) and 0 <= hops <= 63:
+        out["hops"] = hops
+    path = x.get("path")
+    if isinstance(path, list) and len(path) <= 32 and all(isinstance(h, str) and re.fullmatch(r"[0-9A-Fa-f]{2,6}", h) for h in path):
+        out["path"] = [h.lower() for h in path]
+        via = x.get("via")
+        if isinstance(via, list) and len(via) == len(path):
+            names = [re.sub(r"[\x00-\x1f]", "", v)[:32] if isinstance(v, str) else None for v in via]
+            if any(names):
+                out["via"] = names
+    return out
+
+
+def _outcome(rec: dict, r: dict) -> dict:
     why = str(r.get("reason") or "")
     rec["r"] = ("dry" if r.get("dry") else "sent") if r.get("ok") else (
         "offline" if why.startswith("APRS-IS") else "held" if why.startswith("privacy") else "off" if "is off" in why
-        else why if why in ("rate", "duplicate") else "refused")
+        else why if why in ("rate", "duplicate", "late") else "refused")
     if not r.get("ok") and rec["r"] in ("refused", "offline"):
         rec["why"] = why[:60]
     return rec
+
+
+def rx_records(x: dict, r: dict) -> list:
+    """rx_record, except that a MeshPRS track history (spec §5.8) gives one record per entry: "k": "hist", its own time
+    t = receive time - age, the EXACT position (before the privacy zone), the frame's seq and receive time (rx), and that
+    entry's own outcome (r["entries"][i] when the bridge got as far as the entries, else the frame's)."""
+    if "mprs" in x:
+        try:
+            f = meshprs.decode(bytes.fromhex(str(x.get("mprs", ""))))
+            rx = int(x.get("rxAt")) / 1000
+        except (ValueError, TypeError, meshprs.Drop):
+            f = None
+        if f and f["subtype"] == meshprs.HIST:
+            per = r.get("entries") or []
+            out = []
+            for i, e in enumerate(f["entries"]):
+                rec = {"t": rx - e["age"], "src": f["src"], "k": "hist", "seq": f["seq"], "rx": rx}
+                if f.get("retry"):
+                    rec["retry"] = f["retry"]
+                if not (e["lat"] == 0 and e["lon"] == 0):
+                    rec["lat"], rec["lon"] = round(e["lat"] * 90 / 2 ** 23, 5), round(e["lon"] * 180 / 2 ** 23, 5)
+                if "alt" in e:
+                    rec["alt"] = e["alt"]
+                out.append(_outcome(rec, per[i] if i < len(per) else r))
+            return out
+    return [rx_record(x, r)]
 
 
 def _esc(t) -> str:
@@ -440,9 +530,29 @@ def _when(t: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t)) + z[:3] + ":" + z[3:]
 
 
+def rx_route_text(r: dict) -> str:
+    """'heard direct' / '3 hops: Timelineal [bc40] > ? [9b80] > VK4XXX Rpt [fbae]' / '2 hops' (no path known) / ''."""
+    hops, path = r.get("hops"), r.get("path")
+    if hops is None and not path:
+        return ""
+    if hops == 0 and not path:
+        return "heard direct"
+    n = len(path) if path else hops
+    via = r.get("via") or [None] * len(path or [])
+    hopw = f"{n} hop{'' if n == 1 else 's'}"
+    return f"{hopw}: " + " > ".join(f"{v or '?'} [{h}]" for h, v in zip(path, via)) if path else hopw
+
+
 def rx_kml(recs: list, title: str) -> str:
     """The positions in an RxLog query as KML: a folder per station with its track and one placemark per fix."""
     by: dict = {}
+    missed, last = {}, {}                 # frames never heard before each one: seq gaps over ALL of a station's frames
+    # a track history's entries share their frame's seq and carry its receive time (rx): ordered by that, they count once
+    for r in sorted((r for r in recs if isinstance(r.get("seq"), int)), key=lambda r: r.get("rx", r["t"])):
+        p = last.get(r.get("src"))
+        if p is not None:
+            missed[id(r)] = (r["seq"] - p - 1) % 256 if r["seq"] != p else 0
+        last[r.get("src")] = r["seq"]
     for r in recs:
         if "lat" in r and "lon" in r:
             by.setdefault(r.get("src") or "?", []).append(r)
@@ -456,6 +566,13 @@ def rx_kml(recs: list, title: str) -> str:
                 d.append(f"{r['spd']} km/h {r.get('crs', 0)}°")
             if "alt" in r:
                 d.append(f"alt {r['alt']} m")
+            route = rx_route_text(r)
+            if route:
+                d.append(route)
+            if r.get("k") == "hist":
+                d.append(f"from track history seq {r.get('seq')}, received {time.strftime('%H:%M:%S', time.localtime(r.get('rx', r['t'])))}")
+            elif "seq" in r:
+                d.append(f"seq {r['seq']}" + (f" ({missed[id(r)]} missed before this)" if missed.get(id(r)) else ""))
             desc = " · ".join(x for x in d if x)
             style = "pt" if r.get("r") in ("sent", "dry") else "ptx"
             pts.append(f"<Placemark><name>{time.strftime('%H:%M', time.localtime(r['t']))}</name>"
@@ -485,8 +602,11 @@ class Igate:
         self.retry_at = 0.0
         self.last_error = ""
         self.sent = 0
-        self.dropped = {"rate": 0, "offline": 0, "invalid": 0, "duplicate": 0}
+        self.dropped = {"rate": 0, "offline": 0, "invalid": 0, "duplicate": 0, "late": 0}
         self.mprs_seen: dict = {}          # (originator, seq) -> unix s: MeshPRS frames sent in the last 10 min (spec 10.2)
+        # station -> (newest fix time sent live, {(lat, lon) raw MeshPRS units: fix time}): what a track history is checked
+        # against -- an entry already sent live, or older than a live fix already sent, stays in the rx log only (spec 5.8)
+        self.live_pos: dict = {}
         self.jumps = JumpGuard()           # impossible position jumps, per station (adverts and MeshPRS share it)
         self.privacy = PrivacyZone()       # the privacy switch: the owner's own stations hidden near home
         self.rx = RxLog()                  # the received-packet log, last 24 h (GET /api/igate/rx)
@@ -652,7 +772,8 @@ class Igate:
             r = self._one(x)
             out.append(r)
             try:
-                self.rx.add(rx_record(x, r))
+                for rec in rx_records(x, r):
+                    self.rx.add(rec)
             except Exception:  # noqa: BLE001 -- the log must never stop gating
                 pass
         if self.writer:
@@ -686,7 +807,7 @@ class Igate:
             self.dropped["invalid"] += 1
             self._log(f"! refused {src or '?'}: bad callsign or position")
             return {"ok": False, "reason": "invalid"}
-        jump = self.jumps.problem(src, lat, lon, time.time())
+        jump = self.jumps.problem(src, lat, lon, time.time(), str(x.get("sym") or "/>"))
         if jump:
             return self._jumped(src, jump)
         if not self.cfg.get("on"):
@@ -696,7 +817,18 @@ class Igate:
             if not p:
                 return self._no_home(src)
             lat, lon = p[0], p[1]
-        return self._out(packet(src, self.cfg["call"], lat, lon, str(x.get("sym", "/>")), x.get("comment", ""), amb))
+        r = self._out(packet(src, self.cfg["call"], lat, lon, str(x.get("sym", "/>")), x.get("comment", ""), amb))
+        if r.get("ok"):
+            self._sent_live(src, time.time())
+        return r
+
+    def _sent_live(self, src, t, raw=None):
+        """A live position of src (fix time t; raw = its MeshPRS lat/lon units, before the privacy zone) went out."""
+        newest, seen = self.live_pos.get(src, (0.0, {}))
+        seen = {k: v for k, v in seen.items() if t - v < HIST_KEEP_S}
+        if raw:
+            seen[raw] = t
+        self.live_pos[src] = (max(newest, t), seen)
 
     def _private(self, src) -> bool:
         """The privacy switch is on and this is one of the owner's own stations (the iGate's base callsign)."""
@@ -704,7 +836,8 @@ class Igate:
 
     def _no_home(self, src) -> dict:
         self.dropped["invalid"] += 1
-        self._log(f"! held {src}: privacy is on but Kelly has no home position yet (GPS > Fixed position)", debug=False)
+        self._log(f"! held {src}: privacy is on but Kelly has no home position and no saved zone yet (GPS > Fixed position)",
+                  debug=False)
         return {"ok": False, "reason": "privacy: no home position"}
 
     def _mprs(self, x: dict) -> dict:
@@ -723,6 +856,11 @@ class Igate:
                 if not (meshprs.CALL_RE.match(str(rec.get("sender", ""))) and re.match(r"^[A-Za-z0-9]{1,5}$", str(rec.get("id", "")))):
                     why = "an ack needs the message it answers"
                 f["_record"] = rec
+            if not why and f["subtype"] == meshprs.HIST and not any(meshprs.hist_entry_problem(e) is None for e in f["entries"]):
+                why = "stale (no track history entry under 30 min old)"
+            if not why and "lat" in f:
+                f["_real"] = (f["lat"] * 90 / 2 ** 23, f["lon"] * 180 / 2 ** 23)   # the jump guard's, never the privacy spot
+                f["_raw"] = (f["lat"], f["lon"])  # the same fix in a later track history carries these exact units
             if not why and f["subtype"] in (meshprs.POS, meshprs.STA) and "lat" in f and self._private(f["src"]):
                 p = self.privacy.place(f["lat"] * 90 / 2 ** 23, f["lon"] * 180 / 2 ** 23, self.cfg.get("home"))
                 if not p:
@@ -732,17 +870,30 @@ class Igate:
                     f["lon"] = max(-2 ** 23, min(2 ** 23 - 1, round(p[1] * 2 ** 23 / 180)))
                     f.pop("course", None)
                     f.pop("speed", None)
-            info = "" if why else meshprs.render(f, {"rxAt": rx})
+            # decision 0031: the hop count of the copy the page heard (0-63), for a frame with H set; else left out
+            hops = x.get("hops")
+            hops = hops if isinstance(hops, int) and not isinstance(hops, bool) and 0 <= hops <= 63 else None
+            info = "" if why or f["subtype"] == meshprs.HIST else meshprs.render(f, {"rxAt": rx, "hops": hops})
         except (ValueError, TypeError, meshprs.Drop) as e:
             why = getattr(e, "reason", None) or "not a MeshPRS frame"
         if why:
             self.dropped["invalid"] += 1
             self._log(f"! refused MeshPRS frame: {why}")
             return {"ok": False, "reason": "invalid"}
+        if f["subtype"] == meshprs.HIST:
+            return self._hist(f, rx)
+        # a retry (decision 0030) left the tracker 40-50 s before this copy arrived: it is checked as ~45 s old
+        t = rx / 1000 - (RETRY_AGE_S if f.get("retry") else 0)
         if f["subtype"] in (meshprs.POS, meshprs.STA) and "lat" in f:   # the originator's own position (an object is elsewhere)
-            jump = self.jumps.problem(f["src"], f["lat"] * 90 / 2 ** 23, f["lon"] * 180 / 2 ** 23, rx / 1000)
+            jump = self.jumps.problem(f["src"], *f["_real"], t, f.get("sym"))
             if jump:
                 return self._jumped(f["src"], jump)
+            lim = self.jumps.limit(f["src"])
+            if lim and f.get("speed", 0) > lim:          # a reported speed no bike makes: a bad fix's course and speed
+                self._log(f"! {f['src']}: reported {f['speed']} km/h, over its {lim:.0f} km/h limit -- course and speed left out")
+                f.pop("course", None)
+                f.pop("speed", None)
+                info = meshprs.render(f, {"rxAt": rx, "hops": hops})
         if not self.cfg.get("on"):
             return self._off()
         # spec 10.2: one APRS-IS line per (originator, seq), retries included, here as well as in each Kelly -- a reloaded
@@ -757,7 +908,82 @@ class Igate:
         r = self._out(f"{f['src']}>{TOCALL},qAO,{self.cfg['call']}:{info}")
         if r.get("ok"):
             self.mprs_seen[dk] = now
+            if "_raw" in f and f["subtype"] in (meshprs.POS, meshprs.STA):
+                self._sent_live(f["src"], t, f["_raw"])
         return r
+
+    def _hist(self, f: dict, rx: int) -> dict:
+        """A MeshPRS track history (spec §5.8, decision 0030): positions the tracker sent but never heard echoed, each an
+        APRS-IS line of its own, timestamped receive time - age. Every entry gets the live-position rules (HAM ONLY was
+        checked for the frame; the privacy zone here, per entry), but none of them touches the jump guard: they are older
+        than the station's live position, so they are checked only against each other (no faster than MAX_SPEED_KMH
+        between entries) and never become its "last good fix". Each line takes its own token from the global bucket (no
+        per-station interval between entries). One APRS-IS send per (originator, seq), as for every frame (spec §10.2).
+        -> {ok, packets: [sent lines], packet: them joined, held: [why], entries: [per-entry result]}"""
+        src = f["src"]
+        if not self.cfg.get("on"):
+            return self._off()
+        private = self._private(src)
+        if private and not self.privacy.centre(self.cfg.get("home")):
+            return self._no_home(src)
+        now = time.time()
+        self.mprs_seen = {k: t for k, t in self.mprs_seen.items() if now - t < 600}
+        dk = (f["key"] or src, f["seq"])
+        if dk in self.mprs_seen:
+            self.dropped["duplicate"] += 1
+            self._log(f"! MeshPRS duplicate (track history seq {f['seq']}, retry {f.get('retry', 0)}) from {src} -- already sent")
+            return {"ok": False, "reason": "duplicate"}
+        per, sent, held, prev, dry = [], [], [], None, False
+        newest, seen = self.live_pos.get(src, (0.0, {}))
+        for e, info, why in meshprs.hist_entries(f, {"rxAt": rx}):
+            lat, lon, t = e["lat"] * 90 / 2 ** 23, e["lon"] * 180 / 2 ** 23, rx / 1000 - e["age"]
+            # 2026-11-06: an entry behind the live track would draw a spike back to it on any map that plots in
+            # arrival order, and one the tracker missed the echo of may already have gone out by its retry -- both stay
+            # in the rx log / KML only. Entries newer than every live fix sent (a long hole) still go.
+            if not why and (e["lat"], e["lon"]) in seen:
+                self.dropped["duplicate"] += 1
+                self._log(f"! track history entry from {src} ({e['age']} s old) already sent live -- not sent again")
+                per.append({"ok": False, "reason": "duplicate"})
+                held.append(f"{e['age']} s old: duplicate")
+                continue
+            if not why and t <= newest:
+                self.dropped["late"] += 1
+                self._log(f"! track history entry from {src} ({e['age']} s old) is older than a live position already "
+                          f"sent -- kept in the log only")
+                per.append({"ok": False, "reason": "late"})
+                held.append(f"{e['age']} s old: late")
+                continue
+            if not why and prev:
+                j = JumpGuard._bad(prev, lat, lon, t)      # live fixes only get the per-symbol limit
+                if j:
+                    why = f"impossible jump between entries ({j[0]:.0f} km, {j[1]:.0f} km/h)"
+            if not why:
+                prev = (lat, lon, t)
+                if private:
+                    p = self.privacy.place(lat, lon, self.cfg.get("home"))
+                    if p[2]:                      # inside the zone: the fixed spot
+                        e = dict(e, lat=max(-2 ** 23, min(2 ** 23 - 1, round(p[0] * 2 ** 23 / 90))),
+                                 lon=max(-2 ** 23, min(2 ** 23 - 1, round(p[1] * 2 ** 23 / 180))))
+                        info = meshprs.hist_entries(dict(f, entries=[e]), {"rxAt": rx})[0][1]
+            if why:
+                self.dropped["invalid"] += 1
+                self._log(f"! track history entry from {src} ({e['age']} s old) not gated: {why}")
+                per.append({"ok": False, "reason": why})
+                held.append(f"{e['age']} s old: {why}")
+                continue
+            r = self._out(f"{src}>{TOCALL},qAO,{self.cfg['call']}:{info}")
+            per.append(r)
+            if r.get("ok"):
+                sent.append(r["packet"])
+                dry = dry or bool(r.get("dry"))
+            else:
+                held.append(f"{e['age']} s old: {r.get('reason')}")
+        if not sent:
+            first = next((r for r in per if not r.get("ok")), {"reason": "invalid"})
+            return {"ok": False, "reason": first.get("reason"), "entries": per}
+        self.mprs_seen[dk] = now
+        return {"ok": True, **({"dry": True} if dry else {}), "packet": "\n".join(sent), "packets": sent, "held": held,
+                "entries": per}
 
     def _not_ham(self, src, name) -> dict:
         self.dropped["invalid"] += 1
@@ -796,7 +1022,8 @@ class Igate:
                 "error": self.last_error, "sent": self.sent, "dropped": dict(self.dropped), "log": self.log[-LOG_MAX:], "tocall": TOCALL,
                 "keeper": self.keeper_owns(),
                 "privacy": {"on": bool(self.cfg.get("privacy")), "base": base_call(self.cfg.get("call")), "zoneM": PRIVACY_ZONE_M,
-                            "home": bool(self.cfg.get("home")), "bearing": self.privacy.bearing, "dist": self.privacy.dist}}
+                            "home": bool(self.cfg.get("home")), "saved": bool(self.privacy.spot),
+                            "bearing": self.privacy.bearing, "dist": self.privacy.dist}}
 
 
 KEEPER_HOLDS = "the Pi keeper is this station's iGate -- it gates while this Kelly uses the node"

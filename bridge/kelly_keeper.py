@@ -133,7 +133,14 @@ class Keeper:
         self.started = 0.0
         self.last_user = 0.0
         self.yielded = False         # a person has the radio: this Kelly runs on without it (LoRa Mesh, iGate)
-        self.applied = None          # config file mtime last applied
+        # config file mtime last applied -- kept in the profile, so a restart doesn't apply the same file again
+        # (2026-11-06: every restart re-applied ~/kelly-config.xml, whose empty aprs.lat/lon wiped the iGate's home)
+        self.applied_file = os.path.join(a.profile, "kelly-keeper-applied.json")
+        try:
+            with open(self.applied_file, encoding="utf-8") as f:
+                self.applied = json.load(f).get("mtime")
+        except (OSError, ValueError, AttributeError):
+            self.applied = None
 
     def chromium(self) -> str:
         for name in ("chromium-headless-shell", "chromium", "chromium-browser", "google-chrome"):
@@ -209,7 +216,8 @@ class Keeper:
             cdp.eval("""((c, over) => {
               const get = (k, d) => { try { return JSON.parse(localStorage.getItem('kelly.' + k)) ?? d; } catch { return d; } };
               const put = (k, v) => localStorage.setItem('kelly.' + k, JSON.stringify(v));
-              const deep = (d, s) => { for (const [k, v] of Object.entries(s)) { if (v && typeof v === 'object' && !Array.isArray(v)) { d[k] = d[k] && typeof d[k] === 'object' ? d[k] : {}; deep(d[k], v); } else d[k] = v; } return d; };
+              // an empty value in the file is "not set": it never blanks a value Kelly already has (aprs.lat / lon = home)
+              const deep = (d, s) => { for (const [k, v] of Object.entries(s)) { if (v && typeof v === 'object' && !Array.isArray(v)) { d[k] = d[k] && typeof d[k] === 'object' ? d[k] : {}; deep(d[k], v); } else if (!(v === '' && d[k] != null && d[k] !== '')) d[k] = v; } return d; };
               put('settings', Object.assign(deep(get('settings', {}), c.settings), over));
               if (c.statusLabels) put('statusLabels', c.statusLabels);
               if (c.presetLabels) put('presetLabels', c.presetLabels);
@@ -217,6 +225,11 @@ class Keeper:
             })(%s, %s)""" % (json.dumps(c), json.dumps(UNATTENDED)))
             cdp.call("Page.navigate", url=self.url)
             self.applied = mtime
+            try:
+                with open(self.applied_file, "w", encoding="utf-8") as f:
+                    json.dump({"mtime": mtime, "file": path}, f)
+            except OSError as e:
+                log(f"couldn't note the applied config: {e}")
             self.started = time.monotonic()      # it reconnects from scratch
             log(f"applied {os.path.basename(path)} (callsign {c.get('settings', {}).get('myCall') or '?'}, "
                 f"home {c.get('settings', {}).get('home') or '?'}) and reloaded Kelly")

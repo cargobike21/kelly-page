@@ -19,7 +19,7 @@ A dropped input expects `{ "drop": "<reason>" }`, using the reason names from sp
 
 ## Status
 
-- `frames.json` (14 frames, 23 drops) and `gateway.json` (39 vectors, stateless pipeline steps 1-4 + rendering) are written, for header version 1. Every worked example in the spec is in them.
+- `frames.json` (18 frames, 30 drops) and `gateway.json` (49 vectors, stateless pipeline steps 1-4 + rendering) are written, for header version 1. Every worked example in the spec is in them. A track history (subtype 0x0A) vector's `out` is a list of lines, one per entry gated.
 - Implementations passing them: `kelly-page/js/meshprs.js` (`kelly-page/tests/meshprs-tests.html`) and `kelly-page/bridge/meshprs.py` (`kelly-page/bridge/test_meshprs.py`).
 - The stateful steps (replay and reboot resync, duplicate, interval, queue and emergency priority, rate, expired) are tested in `kelly-page/tests/meshprs-tests.html` on a fake clock, not yet as shared JSON.
 - Still to write: shared stateful gate vectors, `inject.json` (APRS-IS -> mesh), `text.json` (compact text), and the optional subtypes (weather, bulletin, neighbour report).

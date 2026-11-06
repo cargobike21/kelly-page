@@ -11,8 +11,9 @@ protocol in two languages, keep them in step (test_meshprs.py, tests/meshprs-tes
   cfg = { igate: 'VK4XXX-10', bindings: [{call: 'VK4ABC', key: hex}], records: [ack records], rxAt: ms, testServer }
 
 Implemented subtypes: the 1.0 required set (decision 0007) -- 0x00 position, 0x01 message, 0x02 ack, 0x03 telemetry,
-0x05 object/item, 0x07 query (parsed, never gated), 0x09 status. 0x04 weather, 0x06 bulletin and 0x08 neighbour report
-are optional and not implemented here, so they drop as 'unknown subtype' (decision 0007).
+0x05 object/item, 0x07 query (parsed, never gated), 0x09 status -- and 0x0A track history (decision 0030: check() and
+render() give a LIST of lines for it, one per entry gated). 0x04 weather, 0x06 bulletin and 0x08 neighbour report are
+optional and not implemented here, so they drop as 'unknown subtype' (decision 0007).
 """
 import hashlib
 import re
@@ -23,7 +24,9 @@ DATA_TYPE = 0xFF4D                      # GRP_DATA data type (development value,
 CHANNEL = "#meshprs"
 ALPHA = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/."
 MAX40 = 40 ** 9
-POS, MSG, ACK, TLM, WX, OBJ, BLN, QRY, NBR, STA = range(10)
+POS, MSG, ACK, TLM, WX, OBJ, BLN, QRY, NBR, STA, HIST = range(11)
+HIST_MAX = 8                            # entries per track history frame (spec §5.8)
+HIST_AGE_MAX = 1800                     # s: an older entry is not gated (stale)
 STATUS_NAMES = ["OFF DUTY", "EN ROUTE", "IN SERVICE", "RETURNING", "COMMITTED", "SPECIAL", "PRIORITY", "EMERGENCY",
                 None, "EMERGENCY CANCELLED"]
 TLM_KINDS = {1: "PARM", 2: "UNIT", 3: "EQNS", 4: "BITS"}
@@ -152,7 +155,7 @@ def decode(blob):
     st, r = f["subtype"], _R(blob, 13 if f["k"] else 9)
     if 0xE0 <= st <= 0xFE:
         raise Drop("experimental subtype")
-    if st not in (POS, MSG, ACK, TLM, OBJ, QRY, STA):
+    if st not in (POS, MSG, ACK, TLM, OBJ, QRY, STA, HIST):
         raise Drop("unknown subtype")
     if st == POS:
         f["lat"], f["lon"] = _i24(r.take(3)), _i24(r.take(3))
@@ -190,8 +193,12 @@ def decode(blob):
         kind = f["kind"] = r.u8()
         if kind == 0:
             mask = r.u8()
-            if mask & 0x60:
+            if mask & 0x40:
                 raise Drop("unknown flag")
+            if mask & 0x20:                                            # H: the gateway's hop count fills a slot (0031)
+                if mask & 0x1F == 0x1F:
+                    raise Drop("bad field")
+                f["h"] = 1
             f["a"] = [r.u8() if mask & (1 << i) else None for i in range(5)]
             f["bits"] = format(r.u8(), "08b") if mask & 0x80 else None
             if r.rest():
@@ -227,8 +234,10 @@ def decode(blob):
             raise Drop("bad field")
     elif st == STA:
         c = r.u8()
-        if c & 0x70:
+        if c & 0x60:
             raise Drop("unknown flag")
+        if c & 0x10:                                                   # H: the gateway adds its hop count (0031)
+            f["h"] = 1
         f["code"] = c & 0x0F
         if f["code"] > 9:
             raise Drop("bad field")
@@ -237,6 +246,28 @@ def decode(blob):
         f["text"] = _text(r.rest())
         if len(f["text"]) > 62:
             raise Drop("bad text")
+    elif st == HIST:
+        f["sym"] = _sym(r.take(2))
+        hf = r.u8()
+        if hf & 0xE0:
+            raise Drop("unknown flag")
+        amb = (hf >> 1) & 7
+        if amb > 4:
+            raise Drop("bad field")
+        f["amb"], f["msg"] = amb, (hf >> 4) & 1
+        n = r.u8()
+        if not 1 <= n <= HIST_MAX:
+            raise Drop("bad field")
+        f["entries"] = []
+        for _ in range(n):
+            e = {"age": int.from_bytes(r.take(2), "little"), "lat": _i24(r.take(3)), "lon": _i24(r.take(3))}
+            if hf & 1:
+                e["alt"] = int.from_bytes(r.take(2), "little", signed=True)
+            f["entries"].append(e)
+        if r.rest():
+            raise Drop("bad field")
+        if any(b["age"] >= a["age"] for a, b in zip(f["entries"], f["entries"][1:])):
+            raise Drop("bad field")                                    # oldest first, ages strictly falling
     return f
 
 
@@ -278,7 +309,8 @@ def encode(f):
     elif st == TLM:
         out.append(f["kind"])
         if f["kind"] == 0:
-            mask = sum(1 << i for i, a in enumerate(f["a"]) if a is not None) | (0x80 if f.get("bits") else 0)
+            mask = (sum(1 << i for i, a in enumerate(f["a"]) if a is not None) | (0x80 if f.get("bits") else 0)
+                    | (0x20 if f.get("h") else 0))
             out.append(mask)
             out += bytes(a for a in f["a"] if a is not None)
             if f.get("bits"):
@@ -302,10 +334,19 @@ def encode(f):
             out += call_encode(f["target"])
     elif st == STA:
         pos = "lat" in f
-        out.append(f["code"] | (0x80 if pos else 0))
+        out.append(f["code"] | (0x80 if pos else 0) | (0x10 if f.get("h") else 0))
         if pos:
             out += _i24b(f["lat"]) + _i24b(f["lon"])
         out += f.get("text", "").encode("ascii")
+    elif st == HIST:
+        ents = f["entries"]
+        alt = "alt" in ents[0]
+        out += f["sym"].encode("latin-1") + bytes([(1 if alt else 0) | (f.get("amb", 0) << 1) | (f.get("msg", 0) << 4),
+                                                   len(ents)])
+        for e in ents:
+            out += int(e["age"]).to_bytes(2, "little") + _i24b(e["lat"]) + _i24b(e["lon"])
+            if alt:
+                out += int(e["alt"]).to_bytes(2, "little", signed=True)
     else:
         raise ValueError(f"subtype {st} not implemented")
     return bytes(out)
@@ -342,8 +383,14 @@ def _ddhhmm(sec):
     return f"{t.tm_mday:02d}{t.tm_hour:02d}{t.tm_min:02d}z"
 
 
+def _hops(cfg):
+    """The hop count of the copy this gateway received (decision 0031), or None when it isn't known."""
+    h = cfg.get("hops")
+    return h if isinstance(h, int) and not isinstance(h, bool) and 0 <= h <= 63 else None
+
+
 def render(f, cfg):
-    """The info field for a frame that passed the checks (§5.3, §6.5, §7.3, §8.2, §8.4, §10.3)."""
+    """The info field for a frame that passed the checks (§5.3, §6.5, §7.3, §7.4, §8.2, §8.4, §10.3)."""
     st = f["subtype"]
     if st == POS:
         ext = _pos_ext(f)
@@ -356,7 +403,10 @@ def render(f, cfg):
         return f":{_addressee(rec['sender'])}:{'rej' if f['rej'] else 'ack'}{rec['id']}"
     if st == TLM:
         if f["kind"] == 0:
-            a = ",".join("" if v is None else f"{v:03d}" for v in f["a"])
+            vals = list(f["a"])
+            if f.get("h"):                                              # §7.4: the first slot the mask leaves out
+                vals[vals.index(None)] = _hops(cfg)
+            a = ",".join("" if v is None else f"{v:03d}" for v in vals)
             return f"T#{f['seq']:03d},{a},{f['bits'] or '00000000'}"
         return f":{_addressee(f['src'])}:{TLM_KINDS[f['kind']]}.{f['text']}"
     if st == OBJ:
@@ -368,13 +418,39 @@ def render(f, cfg):
             return f")" + f["name"] + ("!" if f["live"] else "_") + pos + c
         return ";" + f["name"].ljust(9) + ("*" if f["live"] else "_") + _ddhhmm(ts) + pos + c
     if st == STA:
+        h = _hops(cfg) if f.get("h") else None                         # §8.4: H adds " <hops>" to the text
+        text = f["text"] if h is None else f"{f['text'].rstrip()} {h}".strip()
         if f["code"] == 8:
-            return ">" + _fit(f["text"], 62)
+            return ">" + _fit(text, 62)
         name = STATUS_NAMES[f["code"]]
         if "lat" in f:
-            return "!" + _latlon(f["lat"], f["lon"], "/>") + _fit(f"{name} {f['text']}", 43)
-        return ">" + _fit(f"{name} {f['text']}", 62)
+            return "!" + _latlon(f["lat"], f["lon"], "/>") + _fit(f"{name} {text}", 43)
+        return ">" + _fit(f"{name} {text}", 62)
+    if st == HIST:
+        return [info for _e, info, _why in hist_entries(f, cfg) if info]
     raise Drop("not gated")
+
+
+def hist_entry_problem(e):
+    """Why one track history entry is not gated (spec §5.8), or None."""
+    if not 1 <= e["age"] <= HIST_AGE_MAX:
+        return "stale"
+    if e["lat"] == 0 and e["lon"] == 0:
+        return "0,0"
+    return None
+
+
+def hist_entries(f, cfg):
+    """[(entry, info or None, drop reason or None)] in frame order (oldest first). Each entry is a timestamped position:
+    '/' (or '@' with MSG) + DDHHMMz of (receive time - age), truncated to the minute, + position + /A= (spec §5.8)."""
+    rx = cfg["rxAt"] // 1000
+    out = []
+    for e in f["entries"]:
+        why = hist_entry_problem(e)
+        info = None if why else (("@" if f["msg"] else "/") + _ddhhmm(rx - e["age"])
+                                 + _latlon(e["lat"], e["lon"], f["sym"], f["amb"]) + _pos_ext(e))
+        out.append((e, info, why))
+    return out
 
 
 # ---------------------------------------------------------------- the stateless gate (§10.1 steps 1-4)
@@ -415,4 +491,8 @@ def check(blob, cfg):
             raise Drop("key mismatch")
     if "lat" in f and f["lat"] == 0 and f["lon"] == 0:               # 4. validity (stateless part)
         raise Drop("0,0")
+    if f["subtype"] == HIST:
+        if not any(hist_entry_problem(e) is None for e in f["entries"]):
+            raise Drop("stale")                                        # no entry left to gate
+        return [f"{f['src']}>{TOCALL},qAO,{cfg['igate']}:{info}" for info in render(f, cfg)]
     return f"{f['src']}>{TOCALL},qAO,{cfg['igate']}:{render(f, cfg)}"

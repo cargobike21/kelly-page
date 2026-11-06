@@ -1,5 +1,5 @@
 {
- "_": "MeshPRS frame vectors (spec 1.0 Candidate). Every implementation must pass them: kelly-page/js/meshprs.js (tests/meshprs-tests.html) and kelly-page/bridge/meshprs.py (bridge/test_meshprs.py). 'decode' = the fields the blob decodes to (encode must give the same bytes back); 'drop' = the spec §15.2 reason. lat/lon are the raw i24 values; key is the 4-byte prefix in hex; course is the raw byte (v*360/256 degrees).",
+ "_": "MeshPRS frame vectors (spec 1.0 Candidate). Every implementation must pass them: kelly-page/js/meshprs.js (tests/meshprs-tests.html) and kelly-page/bridge/meshprs.py (bridge/test_meshprs.py). 'decode' = the fields the blob decodes to (encode must give the same bytes back); 'drop' = the spec §15.2 reason. lat/lon are the raw i24 values; key is the 4-byte prefix in hex; course is the raw byte (v*360/256 degrees). A track history frame (subtype 10) decodes to 'entries', each {age, lat, lon[, alt]}.",
  "callsign": [
   [
    "VK4ABC",
@@ -412,6 +412,175 @@
     "msg": 0,
     "comment": "Mobile"
    }
+  },
+  {
+   "id": "hst-001",
+   "spec": "§5.8",
+   "about": "track history: three missed positions with altitude, oldest first",
+   "hex": "50 0A 30 B1 29 F6 53 5D 8E 02 F9 52 3D 2F 62 01 03 2C 01 35 EF D8 14 D1 6C 2D 00 F0 00 F5 E8 D8 C4 D5 6C 2E 00 B4 00 B5 E2 D8 74 DA 6C 2F 00",
+   "decode": {
+    "version": 1,
+    "g": 0,
+    "k": 1,
+    "gating": 0,
+    "retry": 0,
+    "subtype": 10,
+    "src": "VK4ABC-12",
+    "key": "02F9523D",
+    "sym": "/b",
+    "amb": 0,
+    "msg": 0,
+    "seq": 48,
+    "entries": [
+     {
+      "age": 300,
+      "lat": -2560203,
+      "lon": 7131412,
+      "alt": 45
+     },
+     {
+      "age": 240,
+      "lat": -2561803,
+      "lon": 7132612,
+      "alt": 46
+     },
+     {
+      "age": 180,
+      "lat": -2563403,
+      "lon": 7133812,
+      "alt": 47
+     }
+    ]
+   }
+  },
+  {
+   "id": "hst-002",
+   "spec": "§5.8",
+   "about": "track history: one entry, no altitude, messaging-capable, no K",
+   "hex": "40 0A 31 00 00 12 9F 5D 8E 2F 3E 10 01 5F 00 35 EF D8 14 D1 6C",
+   "decode": {
+    "version": 1,
+    "g": 0,
+    "k": 0,
+    "gating": 0,
+    "retry": 0,
+    "subtype": 10,
+    "src": "VK4ABC",
+    "key": null,
+    "sym": "/>",
+    "amb": 0,
+    "msg": 1,
+    "seq": 49,
+    "entries": [
+     {
+      "age": 95,
+      "lat": -2560203,
+      "lon": 7131412
+     }
+    ]
+   }
+  },
+  {
+   "id": "hst-003",
+   "spec": "§5.8",
+   "about": "track history: the largest frame, 8 entries with altitude and K (N = 97)",
+   "hex": "50 0A 32 B1 29 F6 53 5D 8E 02 F9 52 3D 2F 62 01 08 FE 06 35 EF D8 14 D1 6C 28 00 36 06 15 EC D8 34 D4 6C 29 00 6E 05 F5 E8 D8 54 D7 6C 2A 00 A6 04 D5 E5 D8 74 DA 6C 2B 00 DE 03 B5 E2 D8 94 DD 6C 2C 00 16 03 95 DF D8 B4 E0 6C 2D 00 4E 02 75 DC D8 D4 E3 6C 2E 00 86 01 55 D9 D8 F4 E6 6C 2F 00",
+   "decode": {
+    "version": 1,
+    "g": 0,
+    "k": 1,
+    "gating": 0,
+    "retry": 0,
+    "subtype": 10,
+    "src": "VK4ABC-12",
+    "key": "02F9523D",
+    "sym": "/b",
+    "amb": 0,
+    "msg": 0,
+    "seq": 50,
+    "entries": [
+     {
+      "age": 1790,
+      "lat": -2560203,
+      "lon": 7131412,
+      "alt": 40
+     },
+     {
+      "age": 1590,
+      "lat": -2561003,
+      "lon": 7132212,
+      "alt": 41
+     },
+     {
+      "age": 1390,
+      "lat": -2561803,
+      "lon": 7133012,
+      "alt": 42
+     },
+     {
+      "age": 1190,
+      "lat": -2562603,
+      "lon": 7133812,
+      "alt": 43
+     },
+     {
+      "age": 990,
+      "lat": -2563403,
+      "lon": 7134612,
+      "alt": 44
+     },
+     {
+      "age": 790,
+      "lat": -2564203,
+      "lon": 7135412,
+      "alt": 45
+     },
+     {
+      "age": 590,
+      "lat": -2565003,
+      "lon": 7136212,
+      "alt": 46
+     },
+     {
+      "age": 390,
+      "lat": -2565803,
+      "lon": 7137012,
+      "alt": 47
+     }
+    ]
+   }
+  },
+  {
+   "id": "hst-004",
+   "spec": "§5.8",
+   "about": "track history with ambiguity 2",
+   "hex": "50 0A 33 B1 29 F6 53 5D 8E 02 F9 52 3D 2F 62 04 02 C8 00 35 EF D8 14 D1 6C 64 00 F5 E8 D8 C4 D5 6C",
+   "decode": {
+    "version": 1,
+    "g": 0,
+    "k": 1,
+    "gating": 0,
+    "retry": 0,
+    "subtype": 10,
+    "src": "VK4ABC-12",
+    "key": "02F9523D",
+    "sym": "/b",
+    "amb": 2,
+    "msg": 0,
+    "seq": 51,
+    "entries": [
+     {
+      "age": 200,
+      "lat": -2560203,
+      "lon": 7131412
+     },
+     {
+      "age": 100,
+      "lat": -2561803,
+      "lon": 7132612
+     }
+    ]
+   }
   }
  ],
  "bad": [
@@ -467,8 +636,8 @@
   {
    "id": "bad-007",
    "spec": "§9.4",
-   "about": "reserved subtype 0x0A",
-   "hex": "40 0A 33 00 00 12 9F 5D 8E 08 4E 65 74 20 63 6F 6E 74 72 6F 6C 20 74 6F 6E 69 67 68 74",
+   "about": "reserved subtype 0x0B",
+   "hex": "40 0B 33 00 00 12 9F 5D 8E 08 4E 65 74 20 63 6F 6E 74 72 6F 6C 20 74 6F 6E 69 67 68 74",
    "drop": "unknown subtype"
   },
   {
@@ -544,9 +713,16 @@
   {
    "id": "bad-018",
    "spec": "§7.2",
-   "about": "telemetry mask bit 5 (reserved)",
-   "hex": "40 03 2A 04 9B C4 93 5D 8E 00 BF 9C 22 00 C8 63 80",
+   "about": "telemetry mask bit 6 (reserved)",
+   "hex": "40 03 2A 04 9B C4 93 5D 8E 00 DF 9C 22 00 C8 63 80",
    "drop": "unknown flag"
+  },
+  {
+   "id": "bad-018h",
+   "spec": "§7.4",
+   "about": "telemetry H with all five analogs present: no slot for the hop count",
+   "hex": "40 03 2A 04 9B C4 93 5D 8E 00 BF 9C 22 00 C8 63 80",
+   "drop": "bad field"
   },
   {
    "id": "bad-019",
@@ -572,9 +748,58 @@
   {
    "id": "bad-022",
    "spec": "§8.4",
-   "about": "status code bit 4 (reserved)",
-   "hex": "40 09 33 00 00 12 9F 5D 8E 18 4E 65 74 20 63 6F 6E 74 72 6F 6C 20 74 6F 6E 69 67 68 74",
+   "about": "status code bit 5 (reserved)",
+   "hex": "40 09 33 00 00 12 9F 5D 8E 28 4E 65 74 20 63 6F 6E 74 72 6F 6C 20 74 6F 6E 69 67 68 74",
    "drop": "unknown flag"
+  },
+  {
+   "id": "bad-hst-01",
+   "spec": "§5.8",
+   "about": "track history with count 0",
+   "hex": "50 0A 30 B1 29 F6 53 5D 8E 02 F9 52 3D 2F 62 01 00",
+   "drop": "bad field"
+  },
+  {
+   "id": "bad-hst-02",
+   "spec": "§5.8",
+   "about": "track history with count 9",
+   "hex": "50 0A 30 B1 29 F6 53 5D 8E 02 F9 52 3D 2F 62 01 09 2C 01 35 EF D8 14 D1 6C 2D 00 F0 00 F5 E8 D8 C4 D5 6C 2E 00 B4 00 B5 E2 D8 74 DA 6C 2F 00",
+   "drop": "bad field"
+  },
+  {
+   "id": "bad-hst-03",
+   "spec": "§5.8",
+   "about": "track history cut off inside the last entry",
+   "hex": "50 0A 30 B1 29 F6 53 5D 8E 02 F9 52 3D 2F 62 01 03 2C 01 35 EF D8 14 D1 6C 2D 00 F0 00 F5 E8 D8 C4 D5 6C 2E 00 B4 00 B5 E2 D8 74 DA 6C 2F",
+   "drop": "short frame"
+  },
+  {
+   "id": "bad-hst-04",
+   "spec": "§5.8",
+   "about": "track history with a byte after the last entry",
+   "hex": "50 0A 30 B1 29 F6 53 5D 8E 02 F9 52 3D 2F 62 01 03 2C 01 35 EF D8 14 D1 6C 2D 00 F0 00 F5 E8 D8 C4 D5 6C 2E 00 B4 00 B5 E2 D8 74 DA 6C 2F 00 00",
+   "drop": "bad field"
+  },
+  {
+   "id": "bad-hst-05",
+   "spec": "§5.8",
+   "about": "track history entries not oldest first (ages 300, 240, 240)",
+   "hex": "50 0A 30 B1 29 F6 53 5D 8E 02 F9 52 3D 2F 62 01 03 2C 01 35 EF D8 14 D1 6C 2D 00 F0 00 F5 E8 D8 C4 D5 6C 2E 00 F0 00 B5 E2 D8 74 DA 6C 2F 00",
+   "drop": "bad field"
+  },
+  {
+   "id": "bad-hst-06",
+   "spec": "§5.8",
+   "about": "track history with a reserved hflags bit (bit 5) set",
+   "hex": "50 0A 30 B1 29 F6 53 5D 8E 02 F9 52 3D 2F 62 21 03 2C 01 35 EF D8 14 D1 6C 2D 00 F0 00 F5 E8 D8 C4 D5 6C 2E 00 B4 00 B5 E2 D8 74 DA 6C 2F 00",
+   "drop": "unknown flag"
+  },
+  {
+   "id": "bad-hst-07",
+   "spec": "§5.8",
+   "about": "track history with ambiguity 5",
+   "hex": "50 0A 30 B1 29 F6 53 5D 8E 02 F9 52 3D 2F 62 0B 03 2C 01 35 EF D8 14 D1 6C 2D 00 F0 00 F5 E8 D8 C4 D5 6C 2E 00 B4 00 B5 E2 D8 74 DA 6C 2F 00",
+   "drop": "bad field"
   }
  ]
 }

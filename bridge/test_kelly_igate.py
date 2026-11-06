@@ -97,6 +97,20 @@ check("jump: other stations are separate", jg.problem("VK4ZB-7", -26.40, 152.956
 jg.problem("VK4XXX-12", -26.40, 152.9568, 1240)
 check("jump: a move that the next fix agrees with wins (no stuck station)", jg.problem("VK4XXX-12", -26.4005, 152.9568, 1300) is None)
 check("jump: a long gap (over an hour) isn't a jump", jg.problem("VK4XXX-12", -27.45, 152.95, 1300 + 3700) is None)
+# slow stations by symbol (2026-11-05: a push bike /b showed 48-66 km/h jumps; 400 km/h from 2 km never catches those)
+jb = ki.JumpGuard()
+check("bike: first fix accepted", jb.problem("VK4XXX-12", -27.45656, 153.03974, 1000, "/b") is None)
+check("bike: 280 m in 60 s (17 km/h) accepted", jb.problem("VK4XXX-12", -27.45656, 153.04258, 1060, "/b") is None)
+why = jb.problem("VK4XXX-12", -27.45435, 153.04571, 1081, "/b")
+check("bike: 380 m in 21 s (66 km/h) refused", why is not None and "limit 60" in why, why)
+check("bike: the next fix that agrees with it wins", jb.problem("VK4XXX-12", -27.45360, 153.04635, 1140, "/b") is None)
+check("bike: GPS jitter under 150 m is never a jump", jb.problem("VK4XXX-12", -27.45460, 153.04635, 1142, "/b") is None)
+check("bike: the symbol is remembered (a status position carries none)",
+      jb.problem("VK4XXX-12", -27.44460, 153.04635, 1150) is not None)
+jc = ki.JumpGuard()
+jc.problem("VK4XXX-9", -27.45656, 153.03974, 1000, "/>")
+check("car: the same 66 km/h move accepted", jc.problem("VK4XXX-9", -27.45435, 153.04271, 1021, "/>") is None)
+check("limits: bicycle 60, person 25, a car none", (jc.limit("X", "/b"), jc.limit("Y", "/["), jc.limit("Z", "/>")) == (60.0, 25.0, None))
 import meshprs as _mp
 _f = {"subtype": _mp.POS, "lat": round(-27.4543 * 2 ** 23 / 90), "lon": round(152.9568 * 2 ** 23 / 180), "sym": "/b", "amb": 0}
 check("jump: MeshPRS units -> degrees match what meshprs renders",
@@ -278,23 +292,41 @@ async def privacy():
     ig2.configure({**CFG, "dry": True, "privacy": True, "home": list(home)})
     r3 = await ig2.send([{**POS, "lat": home[0], "lon": home[1]}])
     check("privacy: the same spot after a bridge restart (saved)", spot in r3[0].get("packet", ""), r3)
-    check("privacy: the home position itself is never saved", str(home[0])[:7] not in open(path).read(), open(path).read())
+    saved = json.loads(open(path).read())
+    check("privacy: the home position itself is never saved (only the centre, 150 m away)",
+          set(saved) <= {"bearing", "dist", "centre"} and ki.km_between(*home, *saved["centre"]) * 1000 > 70, saved)
     seq2 = iter([0.5, 0.0])                 # due south, 75 m
     ig2.privacy.rand = lambda: next(seq2)
     ig2.privacy.new()
     r4 = await ig2.send([{**POS, "lat": home[0], "lon": home[1]}])
     c2 = ki.offset(home[0], home[1], 180, 75)
     check("privacy: New spot moves the zone (now 75 m south)", ki.position(*c2, "/>") in r4[0]["packet"], r4)
-    ig2.configure({**CFG, "dry": True, "privacy": True})
-    r5 = await ig2.send([{**POS, "lat": far[0], "lon": far[1]}, {**POS, "src": "VK4ZB-7", "name": "VK4ZB Car", "lat": home[0], "lon": home[1]}])
-    check("privacy: no home position known -> own positions held (even far away), others still go",
-          r5[0] == {"ok": False, "reason": "privacy: no home position"} and r5[1]["ok"], r5)
+    check("privacy: the zone centre is saved (the public spot, not home)", ki.position(*c2, "/>")[:8] and
+          json.loads(open(path).read()).get("centre") == [round(c2[0], 6), round(c2[1], 6)], open(path).read())
+    ig2.configure({**CFG, "dry": True, "privacy": True})       # a restart that lost the page's home (keeper, 2026-11-04)
+    r5 = await ig2.send([{**POS, "lat": home[0], "lon": home[1]}, {**POS, "lat": far[0], "lon": far[1]}])
+    check("privacy: no home from the page -> the saved centre still places own stations (spot / exact)",
+          ki.position(*c2, "/>") in r5[0].get("packet", "") and ki.position(*far, "/>") in r5[1].get("packet", ""), r5)
+    ig3 = ki.Igate()
+    ig3.configure({**CFG, "dry": True, "privacy": True})
+    r5b = await ig3.send([{**POS, "lat": home[0], "lon": home[1]}])
+    check("privacy: a restarted bridge with no home also uses the saved centre", ki.position(*c2, "/>") in r5b[0].get("packet", ""), r5b)
+    os.remove(path)
+    ig4 = ki.Igate()
+    ig4.configure({**CFG, "dry": True, "privacy": True})
+    r5c = await ig4.send([{**POS, "lat": far[0], "lon": far[1]}, {**POS, "src": "VK4ZB-7", "name": "VK4ZB Car", "lat": home[0], "lon": home[1]}])
+    check("privacy: no home and no saved zone -> own positions held (even far away), others still go",
+          r5c[0] == {"ok": False, "reason": "privacy: no home position"} and r5c[1]["ok"], r5c)
+    ig2.privacy.rand = lambda: 0.5
+    ig2.privacy.new()                                          # New spot forgets the old centre until a home arrives
+    check("privacy: New spot drops the saved centre", ig2.privacy.spot is None and "centre" not in open(path).read(), open(path).read())
     ig2.configure({**CFG, "dry": True, "privacy": False, "home": list(home)})
     r6 = await ig2.send([{**POS, "lat": home[0], "lon": home[1]}])
     check("privacy: switch off -> the real position", "2727.27S/15259.26E" in r6[0]["packet"], r6)
     st = ig2.status()["privacy"]
     check("privacy: status shows on / base / home known / zone, never the home position",
-          st == {"on": False, "base": "VK4XXX", "zoneM": 250.0, "home": True, "bearing": 180.0, "dist": 75.0}, st)
+          {k: v for k, v in st.items() if k not in ("bearing", "dist")} ==
+          {"on": False, "base": "VK4XXX", "zoneM": 250.0, "home": True, "saved": False}, st)   # saved: dropped by New spot
     # MeshPRS: an own Position frame in the zone -> the spot with no course / speed; out of the zone -> as sent
     import meshprs as mp
     vec = json.loads((MPRS_VEC / "gateway.json").read_text(encoding="utf-8"))
@@ -326,12 +358,12 @@ async def mprs():
     check("passcode: the page's is ignored, the bridge computes its own", ig.cfg["pass"] == str(ki.passcode(vec["config"]["igate"])), ig.cfg["pass"])
     now = int(time.time() * 1000)
     for v in vec["vectors"]:
-        if "out" not in v or v["id"] in ("gw-065", "gw-040", "gw-041", "gw-042", "gw-043"):
-            continue                                  # objects take receive time; gw-065 is a test-server frame
+        if "out" not in v or v["id"] in ("gw-065", "gw-040", "gw-041", "gw-042", "gw-043") or isinstance(v["out"], list):
+            continue                                  # objects and track histories take receive time (hist() below); gw-065 is a test-server frame
         rec = vec["config"]["records"][0]
         src = v["out"].split(">")[0]
         ig.mprs_seen.clear()                          # each vector stands alone (they share seqs)
-        r = (await ig.send([{"mprs": v["hex"], "rxAt": now, "name": src.split("-")[0] + " node", "record": {"sender": rec["sender"], "id": rec["id"]}}]))[0]
+        r = (await ig.send([{"mprs": v["hex"], "rxAt": now, "name": src.split("-")[0] + " node", **({"hops": v["config"]["hops"]} if "hops" in v.get("config", {}) else {}), "record": {"sender": rec["sender"], "id": rec["id"]}}]))[0]
         if ki.ham_call(src):
             check(f"mprs {v['id']}: the bridge renders the same line", r.get("packet") == v["out"], r)
             r = (await ig.send([{"mprs": v["hex"], "rxAt": now, "name": "Club rpt " + src.split("-")[0], "record": {"sender": rec["sender"], "id": rec["id"]}}]))[0]
@@ -366,6 +398,123 @@ async def mprs():
     check("mprs: an object's receive time must be now", r == {"ok": False, "reason": "invalid"}, r)
 
 
+async def bike_speed():
+    """The jump guard for a push bike (2026-11-05): a retry is checked as ~45 s old, so the fix after it isn't a jump."""
+    import meshprs as mp
+    vec = json.loads((MPRS_VEC / "gateway.json").read_text(encoding="utf-8"))
+    ig = ki.Igate()
+    ig.configure({**CFG, "call": vec["config"]["igate"], "dry": True})
+    now = int(time.time() * 1000)
+    base = dict(version=1, g=0, k=1, gating=0, subtype=0, src="VK4ABC-12", key="02F9523D", sym="/b", alt=45, comment="")
+    pos = lambda seq, lat, lon, retry=0: mp.encode(dict(base, seq=seq, retry=retry, lat=mp.deg_to_raw(lat, 90),
+                                                        lon=mp.deg_to_raw(lon, 180))).hex()
+    send = lambda h, at: ig.send([{"mprs": h, "rxAt": at, "name": "VK4ABC node"}])
+    r1 = (await send(pos(1, -27.45656, 153.03974, 1), now))[0]
+    r2 = (await send(pos(2, -27.45435, 153.04271), now + 21000))[0]
+    check("bike: a retry, then a fix 380 m on 21 s later (the 16:10 ride case) both go", r1.get("ok") and r2.get("ok"), (r1, r2))
+    r3 = (await send(pos(3, -27.44435, 153.04271), now + 41000))[0]
+    check("bike: 1.1 km in 20 s (200 km/h) is held", r3.get("reason") == "impossible position", r3)
+
+
+async def hist():
+    """A MeshPRS track history (spec §5.8, decision 0030): one APRS-IS line per entry, stamped receive time - age; the
+    privacy zone per entry; the jump guard neither consulted with nor updated by entries; one RxLog record per entry."""
+    import meshprs as mp
+    vec = json.loads((MPRS_VEC / "gateway.json").read_text(encoding="utf-8"))
+    v1 = next(v for v in vec["vectors"] if v["id"] == "gw-hst-001")
+    blob = bytes.fromhex(v1["hex"].replace(" ", ""))
+    f = mp.decode(blob)
+    ig = ki.Igate()
+    ig.configure({**CFG, "call": vec["config"]["igate"], "dry": True})
+    now = int(time.time() * 1000)
+    want = mp.check(blob, {**vec["config"], "rxAt": now})
+    x = {"mprs": v1["hex"], "rxAt": now, "name": "VK4ABC Buddy"}
+    r = (await ig.send([x]))[0]
+    check("hist: one line per entry, oldest first, stamped receive time - age (= meshprs.check)", r.get("ok") and r.get("packets") == want, (r, want))
+    check("hist: the lines are '/DDHHMMz' timestamped positions", all(":/" in p and p.split(":/")[1][6] == "z" for p in r.get("packets", [])), r)
+    check("hist: the jump guard is not updated by entries", f["src"] not in ig.jumps.good, ig.jumps.good)
+    again = (await ig.send([x]))[0]
+    check("hist: the same frame again (or its retry) is a duplicate", again == {"ok": False, "reason": "duplicate"}, again)
+    # a live position far away, then a history whose entries are 'impossible' from it: still gated (entries are older and
+    # never compared with the live fix), and the live fix stays the station's last good one
+    ig.jumps.good[f["src"]] = (-19.0, 146.0, time.time())      # Townsville, just now
+    blob2 = mp.encode(dict(f, seq=f["seq"] + 1))
+    r = (await ig.send([{"mprs": blob2.hex(), "rxAt": now, "name": "VK4ABC Buddy"}]))[0]
+    check("hist: entries are not refused by the live fix's jump guard", r.get("ok") and len(r.get("packets", [])) == 3, r)
+    check("hist: ...and do not replace the live fix", ig.jumps.good[f["src"]][:2] == (-19.0, 146.0), ig.jumps.good[f["src"]])
+    # one entry impossible from the one before it: that entry is held, the rest go
+    ents = [dict(e) for e in f["entries"]]
+    ents[1]["lat"] = mp.deg_to_raw(-19.0, 90)
+    r = (await ig.send([{"mprs": mp.encode(dict(f, seq=f["seq"] + 2, entries=ents)).hex(), "rxAt": now, "name": "VK4ABC Buddy"}]))[0]
+    check("hist: an entry that jumps from the one before is held, the others go", r.get("ok") and len(r["packets"]) == 2 and len(r["held"]) == 1
+          and "jump" in r["held"][0], r)
+    # every entry stale -> refused as a frame
+    stale = next(v for v in vec["vectors"] if v["id"] == "gw-hst-006")
+    r = (await ig.send([{"mprs": stale["hex"], "rxAt": now, "name": "VK4ABC Buddy"}]))[0]
+    check("hist: no entry under 30 min old -> refused", r == {"ok": False, "reason": "invalid"}, r)
+    # one stale entry among good ones: it is held, the rest go
+    v4 = next(v for v in vec["vectors"] if v["id"] == "gw-hst-004")
+    r = (await ig.send([{"mprs": v4["hex"], "rxAt": now, "name": "VK4ABC Buddy"}]))[0]
+    check("hist: a stale entry is held, the others go", r.get("ok") and len(r["packets"]) == 2 and r["held"] == ["1801 s old: stale"], r)
+    # HAM ONLY, as for a live frame
+    r = (await ig.send([{"mprs": mp.encode(dict(f, seq=f["seq"] + 3)).hex(), "rxAt": now, "name": "Club rpt VK4ABC"}]))[0]
+    check("hist: refused when the node's name does not carry the callsign", r == {"ok": False, "reason": "invalid"}, r)
+    # the privacy zone, per entry: the owner's own tracker, entries 1-2 inside the zone, entry 3 outside
+    home = (-27.468 + 0.0002, 153.0235)
+    seq = iter([0.0, 0.0])
+    igp = ki.Igate()
+    igp.privacy.rand = lambda: next(seq)
+    igp.configure({**CFG, "call": "VK4ABC-10", "dry": True, "privacy": True, "home": list(home)})
+    c = igp.privacy.centre(home)
+    spot = ki.position(c[0], c[1], "/b").replace("/b", "")
+    ents = [dict(e) for e in f["entries"]]
+    ents[0]["lat"], ents[0]["lon"] = mp.deg_to_raw(home[0], 90), mp.deg_to_raw(home[1], 180)
+    ents[1]["lat"], ents[1]["lon"] = mp.deg_to_raw(c[0], 90), mp.deg_to_raw(c[1], 180)
+    far = ki.offset(*home, 90, 2000)
+    ents[2]["lat"], ents[2]["lon"] = mp.deg_to_raw(far[0], 90), mp.deg_to_raw(far[1], 180)
+    xp = {"mprs": mp.encode(dict(f, seq=f["seq"] + 4, entries=ents)).hex(), "rxAt": now, "name": "VK4ABC Buddy"}
+    r = (await igp.send([xp]))[0]
+    pk = r.get("packets", [])
+    check("hist privacy: entries inside the zone go out as the zone's spot", len(pk) == 3 and all(spot[:8] in p for p in pk[:2]), (pk, spot))
+    check("hist privacy: an entry outside the zone is exact", len(pk) == 3 and spot[:8] not in pk[2] and mp.fmt_lat(ents[2]["lat"]) in pk[2], pk)
+    igp2 = ki.Igate()
+    igp2.privacy = ki.PrivacyZone(os.path.join(tempfile.mkdtemp(), "none.json"))
+    igp2.configure({**CFG, "call": "VK4ABC-10", "dry": True, "privacy": True})
+    r = (await igp2.send([xp]))[0]
+    check("hist privacy: no home and no saved zone -> held", r == {"ok": False, "reason": "privacy: no home position"}, r)
+    # the received-packet log: one record per entry, its own time, the exact position, the frame's seq
+    recs = [q for q in igp.rx.query() if q.get("k") == "hist" and q.get("seq") == (f["seq"] + 4) % 256]
+    check("hist rx log: one record per entry, k = hist, t = receive time - age, exact positions",
+          len(recs) == 3 and [round(now / 1000 - q["t"]) for q in recs] == [e["age"] for e in ents]
+          and abs(recs[0]["lat"] - home[0]) < 1e-4 and all(q["r"] == "dry" for q in recs) and recs[0]["rx"] == now / 1000, recs)
+    rr = ki.rx_records(xp, {"ok": False, "reason": "privacy: no home position"})
+    check("hist rx records: a frame refused as a whole -> every entry carries that outcome", [q["r"] for q in rr] == ["held"] * 3, rr)
+    k = ki.rx_kml(recs + [{"t": now / 1000 + 5, "src": "VK4ABC-12", "lat": -27.47, "lon": 153.03, "r": "sent", "seq": (f["seq"] + 5) % 256}], "t")
+    check("hist rx kml: entries marked, and the next frame counts no seq gap", k.count("from track history") == 3 and "missed before this" not in k, k)
+    # 2026-11-06: entries behind the live track (a spike back on the map) or already sent live (the retry got through but
+    # the tracker heard no echo) stay in the rx log only; entries newer than every live fix sent still go
+    igl = ki.Igate()
+    igl.configure({**CFG, "call": vec["config"]["igate"], "dry": True})
+    ents = sorted(f["entries"], key=lambda e: -e["age"])             # oldest first
+    t_mid = now / 1000 - (ents[0]["age"] + ents[1]["age"]) / 2       # a live fix between entries 0 and 1
+    igl._sent_live(f["src"], t_mid, (ents[2]["lat"], ents[2]["lon"]))   # ...and entry 2's exact fix went out live too
+    xl = {"mprs": mp.encode(dict(f, seq=f["seq"] + 6, entries=ents)).hex(), "rxAt": now, "name": "VK4ABC Buddy"}
+    r = (await igl.send([xl]))[0]
+    rs = [e.get("reason") if not e.get("ok") else "sent" for e in r.get("entries", [])]
+    check("hist late: an entry older than a live fix sent is log-only, a newer one goes, one sent live is a duplicate",
+          rs == ["late", "sent", "duplicate"] and len(r.get("packets", [])) == 1, r)
+    rr = ki.rx_records(xl, r)
+    check("hist late: the rx log keeps every entry with its outcome", [q["r"] for q in rr] == ["late", "dry", "duplicate"], rr)
+    # a gated live MeshPRS position is remembered by its exact units
+    pv = next(v for v in vec["vectors"] if v["id"] == "gw-001")       # a plain live Position
+    igm = ki.Igate()
+    igm.configure({**CFG, "call": vec["config"]["igate"], "dry": True})
+    pf = mp.decode(bytes.fromhex(pv["hex"].replace(" ", "")))
+    r = (await igm.send([{"mprs": pv["hex"], "rxAt": now, "name": f"{pf['src'].split('-')[0]} Buddy"}]))[0]
+    check("hist late: a live MeshPRS position sent is remembered (exact units, fix time)",
+          r.get("ok") and (pf["lat"], pf["lon"]) in igm.live_pos.get(pf["src"], (0, {}))[1], (r, igm.live_pos))
+
+
 async def fallback():
     """aunz.aprs2.net first; after a failed connection the next try goes to rotate.aprs2.net (spec §11)."""
     with socket.socket() as so:
@@ -383,6 +532,8 @@ asyncio.run(live())
 asyncio.run(unverified())
 asyncio.run(dry())
 asyncio.run(mprs())
+asyncio.run(hist())
+asyncio.run(bike_speed())
 asyncio.run(privacy())
 asyncio.run(fallback())
 
@@ -409,6 +560,28 @@ r = ki.rx_record({"src": "VK4XXX-12", "lat": 1, "lon": 2}, {"ok": False, "reason
 check("rx record: internet down -> offline + why", r["r"] == "offline" and r["why"] == "APRS-IS waiting", r)
 r = ki.rx_record({"src": "VK4XXX-12", "body": "T#001,1,2,3,4,5,00000000"}, {"ok": True, "packet": "x"})
 check("rx record: telemetry sent, no position", r["k"] == "tlm" and r["r"] == "sent" and "lat" not in r, r)
+gw1 = next(v for v in json.loads((MPRS_VEC / "gateway.json").read_text(encoding="utf-8"))["vectors"] if v.get("id") == "gw-001")
+r = ki.rx_record({"mprs": gw1["hex"].replace(" ", ""), "rxAt": 1.8e12}, {"ok": True, "packet": "x"})
+check("rx record: a MeshPRS frame keeps its sequence number (loss per ride = seq gaps)",
+      r["k"] == "pos" and r["seq"] == 42 and "retry" not in r, r)
+r = ki.rx_record({"mprs": gw1["hex"].replace(" ", ""), "rxAt": 1.8e12, "hops": 3, "path": ["BC40", "9b80", "fbae"],
+                  "via": ["Timelineal", None, "VK4XXX Rpt\n"]}, {"ok": True, "packet": "x"})
+check("rx record: a MeshPRS frame keeps its route (hops, path first repeater first, names)",
+      r["hops"] == 3 and r["path"] == ["bc40", "9b80", "fbae"] and r["via"] == ["Timelineal", None, "VK4XXX Rpt"], r)
+r = ki.rx_record({"mprs": gw1["hex"].replace(" ", ""), "rxAt": 1.8e12, "hops": 99, "path": ["zz"], "via": ["x"]}, {"ok": True})
+check("rx record: a bad hop count / path is left out", "hops" not in r and "path" not in r and "via" not in r, r)
+r = ki.rx_record({"mprs": gw1["hex"].replace(" ", ""), "rxAt": 1.8e12, "hops": 0}, {"ok": True})
+check("rx record: heard direct = hops 0, no path", r["hops"] == 0 and "path" not in r, r)
+k = ki.rx_kml([{"t": 1.8e9, "src": "VK4XXX-12", "lat": -27.4, "lon": 153.0, "r": "sent", "hops": 2, "path": ["bc40", "fbae"], "via": [None, "VK4XXX Rpt"]},
+               {"t": 1.8e9 + 60, "src": "VK4XXX-12", "lat": -27.5, "lon": 153.1, "r": "sent", "hops": 0},
+               {"t": 1.8e9 + 120, "src": "VK4XXX-12", "lat": -27.6, "lon": 153.2, "r": "sent", "hops": 4}], "t")
+check("rx kml: each fix shows its route",
+      "2 hops: ? [bc40] &gt; VK4XXX Rpt [fbae]" in k and "heard direct" in k and "4 hops" in k, k)
+k = ki.rx_kml([{"t": 1.8e9, "src": "VK4XXX-12", "lat": -27.4, "lon": 153.0, "r": "sent", "seq": 254},
+               {"t": 1.8e9 + 30, "src": "VK4XXX-12", "k": "tlm", "r": "sent", "seq": 255},
+               {"t": 1.8e9 + 200, "src": "VK4XXX-12", "lat": -27.5, "lon": 153.1, "r": "sent", "seq": 3}], "t")
+check("rx kml: seq shown, gaps counted across all frames and the 255 -> 0 wrap",
+      "seq 254" in k and "seq 3 (3 missed before this)" in k and "seq 254 (" not in k, k)
 k = ki.rx_kml([{"t": 1.8e9, "src": "VK4XXX-12", "lat": -27.4, "lon": 153.0, "r": "held"}, {"t": 1.8e9 + 60, "src": "VK4XXX-12", "lat": -27.5, "lon": 153.1, "r": "sent", "spd": 20, "crs": 90}, {"t": 1.8e9, "src": "VK4XX-9", "k": "tlm", "r": "sent"}], "VK4XXX-12 <test>")
 check("rx kml: one folder, a track, a placemark per fix, title escaped",
       k.count("<Folder>") == 1 and k.count("<LineString>") == 1 and k.count("<Point>") == 2 and "&lt;test&gt;" in k and "<test>" not in k, k[:200])

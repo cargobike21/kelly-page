@@ -23,7 +23,7 @@
   else root.KellyMPRS = factory(root.MeshPRS);
 })(typeof self !== 'undefined' ? self : this, function (M) {
   'use strict';
-  const SUB = { 0: 'Position', 1: 'Message', 2: 'Ack', 3: 'Telemetry', 4: 'Weather', 5: 'Object / Item', 6: 'Bulletin', 7: 'Query', 8: 'Neighbour report', 9: 'Emergency / Status' };
+  const SUB = { 0: 'Position', 1: 'Message', 2: 'Ack', 3: 'Telemetry', 4: 'Weather', 5: 'Object / Item', 6: 'Bulletin', 7: 'Query', 8: 'Neighbour report', 9: 'Emergency / Status', 10: 'Track history' };
   const GATING = ['may be gated', 'do not gate (NOGATE)', 'test only', 'reserved (= do not gate)'];
   const QUERIES = ['?APRS?', '?IGATE?', '?WX?', '?PING?', 'station position', 'station status'];
   // what each drop reason means, for people -- the reasons are the spec's (§15.2) and Kelly's own
@@ -51,7 +51,7 @@
     interval: 'This station was gated less than its interval ago (5 s).',
     'queue full': 'The iGate queue is full.', rate: 'The global rate limit (one line per second, burst 10).',
     expired: 'Not sent within 15 s of hearing it, so APRS-IS could no longer merge it with other gateways\' copies.',
-    'no fix': 'No GPS fix.', 'out of range': 'The position is outside the earth.', '0,0': 'Exactly 0,0: no real fix.', stale: 'The position is too old.',
+    'no fix': 'No GPS fix.', 'out of range': 'The position is outside the earth.', '0,0': 'Exactly 0,0: no real fix.', stale: 'The position is too old (a track history entry more than 30 min old, or every entry of one).',
   };
 
   // ---------------------------------------------------------------- symbols (hessu/aprs-symbols: 16 x 6 per sheet, code - 0x21)
@@ -65,7 +65,10 @@
   // ---------------------------------------------------------------- the TNC2 line the spec renders (§10.3, the igate's own call)
   function tnc2(f, igate, rxAt) {
     if (!M) return { why: 'MeshPRS codec not loaded' };
-    try { return { line: `${f.src}>${M.TOCALL},qAO,${igate || 'N0CALL'}:${M.render(f, { rxAt: rxAt || Date.now() })}` }; }
+    try {
+      const info = M.render(f, { rxAt: rxAt || Date.now() });   // a track history renders one line per entry (spec §5.8)
+      return { line: [].concat(info).map(i => `${f.src}>${M.TOCALL},qAO,${igate || 'N0CALL'}:${i}`).join('\n') };
+    }
     catch (e) { return { why: (e && e.reason) || String(e && e.message || e) }; }
   }
 
@@ -124,6 +127,17 @@
     } else if (f.subtype === 9) {
       add('code', 'Status code', r(1), 1, String(f.code), 'flags', 'bits 0-3 the status (7 = EMERGENCY), bit 7 a position follows.');
       if (f.lat !== undefined) { add('lat', 'Latitude', r(3), 3, `${latDeg(f.lat).toFixed(5)}°`, 'pos', ''); add('lon', 'Longitude', r(3), 3, `${lonDeg(f.lon).toFixed(5)}°`, 'pos', ''); }
+    } else if (f.subtype === 10) {
+      add('sym', 'Symbol', r(2), 2, f.sym, 'sym', 'APRS symbol table (or overlay), then code -- one for every entry.');
+      add('hf', 'History flags', r(1), 1, [blob[o - 1] & 1 ? 'ALT' : '', f.amb ? `ambiguity ${f.amb}` : '', f.msg ? 'MSG' : ''].filter(Boolean).join(' · ') || 'none', 'flags',
+        'bit 0 each entry carries an altitude, bits 1-3 ambiguity, bit 4 can receive messages, bits 5-7 reserved.');
+      add('cnt', 'Entries', r(1), 1, String(f.entries.length), 'flags', '1-8 positions the sender missed (no repeater echo, retry included), oldest first.');
+      f.entries.forEach((e, i) => {
+        add(`age${i}`, `#${i + 1} age`, r(2), 2, `${e.age} s ago`, 'time', 'Seconds before this frame was sent (the sender\'s own uptime clock). Gateways stamp it receive time - age, to the minute; over 1800 s is not gated.');
+        add(`lat${i}`, `#${i + 1} latitude`, r(3), 3, `${latDeg(e.lat).toFixed(5)}°`, 'pos', 'As the position frame.');
+        add(`lon${i}`, `#${i + 1} longitude`, r(3), 3, `${lonDeg(e.lon).toFixed(5)}°`, 'pos', 'As the position frame.');
+        if (e.alt !== undefined) add(`alt${i}`, `#${i + 1} altitude`, r(2), 2, `${e.alt} m`, 'pos', 'i16 little-endian, metres.');
+      });
     }
     if (o < blob.length) add('text', f.subtype === 0 || f.subtype === 5 ? 'Comment' : 'Text', o, blob.length - o, JSON.stringify(String.fromCharCode(...blob.subarray(o))), 'text', 'Printable ASCII to the end of the frame.');
     return { fields: out, f, err };
@@ -171,6 +185,18 @@
       s.heading = b.course != null ? b.course : a && distKm(a, b) > 0.02 ? Math.round(bearing(a, b)) : s.heading ?? null;
       s.lat = p.lat; s.lon = p.lon;
     }
+    // a track history's entries (spec §5.8) slot into the track at receive time - age; the current position, heading and
+    // beacon interval stay the live ones
+    function backfill(s, f, at) {
+      const t = s.track;
+      for (const e of f.entries) {
+        if (e.age < 1 || e.age > 1800 || (e.lat === 0 && e.lon === 0)) continue;
+        const pt = { lat: latDeg(e.lat), lon: lonDeg(e.lon), at: at - e.age * 1000, course: null, speed: null, alt: e.alt ?? null, hist: true };
+        let i = t.length; while (i > 0 && t[i - 1].at > pt.at) i--;
+        t.splice(i, 0, pt);
+      }
+      if (t.length > HIST) t.splice(0, t.length - HIST);
+    }
     function frame(ev) {
       const at = ev.at || Date.now(), blob = Uint8Array.from(ev.blob || []), hex = M ? M.hex(blob) : '';
       let f = null, err = '';
@@ -200,6 +226,7 @@
         if (f.subtype === 9) s.status = { code: f.code, text: f.text, at };
         if (f.subtype === 5) s.live = !!f.live;
         const p = posOf(f); if (p && !rec.dup) point(s, p, at, f);
+        if (f.subtype === 10 && !rec.dup) backfill(s, f, at);
       }
       packets.unshift(rec); if (packets.length > PKTS) packets.length = PKTS;
       return rec;

@@ -1,13 +1,13 @@
 {
   "_": "Mesh Buddy firmware shipped with Kelly Page (js/meshbuddy.js flashes it). Built from tools/mesh-buddy (P25X repo) on MeshCore companion-v1.18.0 (MIT, LICENSE-MeshCore.txt) for the RAK4631 (nRF52840, Adafruit nRF52 bootloader, serial DFU). No callsign or password is built in.",
   "name": "Mesh Buddy",
-  "version": "1.2",
+  "version": "1.7",
   "board": "RAK4631",
   "meshcore": "companion-v1.18.0",
-  "built": "2026-11-01",
-  "bin": "mesh-buddy-1.2.bin",
-  "dat": "mesh-buddy-1.2.dat",
-  "size": 450460,
-  "sha256": "6ebbc58bc8492e812f7b1897962b8d0a1e7260d6ff058bac71ba1ba87c97e2c4",
-  "datSha256": "c5419ff724c67a27a56434f130a39795dfbc7e1f18ac8040e863fe9cfc4610f7"
+  "built": "2026-11-06",
+  "bin": "mesh-buddy-1.7.bin",
+  "dat": "mesh-buddy-1.7.dat",
+  "size": 459248,
+  "sha256": "014bb7e2abb67dc46be4502955542c7986dd591e5c0567ec5627a8e65321bd22",
+  "datSha256": "93b2c924a1e6db370b771815c216b603a8a82b2b6270bc7f3204279a028f3b9f"
 }
